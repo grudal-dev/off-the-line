@@ -1,0 +1,216 @@
+"""Détection automatique des « périples » : des activités qui s'enchaînent.
+
+Un périple, c'est un voyage en plusieurs étapes (itinérance à vélo, trek,
+traversée à ski…). On le reconnaît à trois signes :
+
+1. **Enchaînement dans le temps** : l'étape suivante démarre peu après la fin
+   de la précédente (une nuit, éventuellement une journée de repos).
+2. **Continuité dans l'espace** : elle démarre là où la précédente s'est arrêtée.
+3. **Progression** : on ne repart pas sans cesse du même endroit. C'est ce qui
+   distingue un périple d'une série de sorties en boucle depuis chez soi, où
+   les points 1 et 2 sont aussi vrais (on finit chez soi, on repart de chez soi).
+
+L'algorithme relie chaque activité à sa meilleure suivante selon ces règles,
+suit les chaînes ainsi formées, puis écarte les faux positifs :
+boucles autour de la maison au début ou à la fin, allers-retours
+domicile-travail, chaînes qui ne vont nulle part ou tiennent en une journée.
+Tout est calculé à la volée, sans rien stocker : c'est rapide
+(tri + parcours linéaire) et toujours à jour après une synchronisation.
+"""
+
+from dataclasses import dataclass, field
+from datetime import timedelta
+
+from . import geo, polyline, sports
+
+MAX_GAP = timedelta(hours=42)      # une nuit, ou une journée de repos entre deux étapes
+OVERLAP = timedelta(minutes=10)    # tolérance sur les horloges des appareils
+JOIN_KM = 5.0                      # l'étape suivante part à moins de 5 km de l'arrivée
+SAME_PLACE_KM = 2.0                # en dessous, deux points sont « le même endroit »
+MIN_SPREAD_KM = 10.0               # un périple doit emmener quelque part
+MIN_DAYS = 2
+
+
+@dataclass(eq=False)
+class Leg:
+    activity: object
+    start: tuple
+    end: tuple
+    start_at: object
+    end_at: object
+
+    @property
+    def is_loop(self):
+        return geo.distance_km(self.start, self.end) < SAME_PLACE_KM
+
+    @property
+    def day(self):
+        return (self.activity.start_date_local or self.activity.start_date).date()
+
+
+@dataclass
+class Journey:
+    legs: list
+    nights: list = field(default_factory=list)  # index des étapes suivies d'une nuit
+
+    @property
+    def activities(self):
+        return [leg.activity for leg in self.legs]
+
+    @property
+    def id(self):
+        return self.legs[0].activity.strava_id
+
+    @property
+    def first_day(self):
+        return self.legs[0].day
+
+    @property
+    def last_day(self):
+        return self.legs[-1].day
+
+    @property
+    def days(self):
+        return (self.last_day - self.first_day).days + 1
+
+    @property
+    def distance_km(self):
+        return round(sum(a.distance for a in self.activities) / 1000, 1)
+
+    @property
+    def elevation(self):
+        return round(sum(a.total_elevation_gain for a in self.activities))
+
+    @property
+    def moving_time(self):
+        return sum(a.moving_time for a in self.activities)
+
+    @property
+    def moving_display(self):
+        h, rem = divmod(self.moving_time, 3600)
+        return f"{h} h {rem // 60:02d}"
+
+    @property
+    def family(self):
+        families = {sports.family(a.sport_type) for a in self.activities}
+        return families.pop() if len(families) == 1 else "mixed"
+
+    @property
+    def title(self):
+        how = {"ride": "à vélo", "run": "à pied", "walk": "à pied", "snow": "à ski",
+               "water": "sur l'eau"}.get(self.family, "en itinérance")
+        return f"{self.days} jours {how}"
+
+    @property
+    def color(self):
+        return sports.FAMILIES[self.family][1] if self.family in sports.FAMILIES else "#fc4c02"
+
+
+def _endpoints(activity):
+    """Points de départ et d'arrivée, depuis les champs Strava ou à défaut le tracé."""
+    raw = activity.raw or {}
+    start = raw.get("start_latlng") or ([activity.start_lat, activity.start_lng]
+                                        if activity.start_lat is not None else None)
+    end = raw.get("end_latlng")
+    if (not start or not end) and activity.summary_polyline:
+        coords = polyline.decode(activity.summary_polyline)
+        if coords:
+            start, end = start or coords[0], end or coords[-1]
+    if not start or not end or len(start) != 2 or len(end) != 2:
+        return None
+    return tuple(start), tuple(end)
+
+
+def _legs(activities):
+    legs = []
+    for a in activities:
+        raw = a.raw or {}
+        if raw.get("commute") or raw.get("trainer") or a.sport_type.startswith("Virtual"):
+            continue
+        points = _endpoints(a)
+        if not points:
+            continue
+        end_at = a.start_date + timedelta(seconds=a.elapsed_time or a.moving_time)
+        legs.append(Leg(a, points[0], points[1], a.start_date, end_at))
+    legs.sort(key=lambda leg: leg.start_at)
+    return legs
+
+
+def _link(legs):
+    """Associe à chaque étape sa suivante (au plus une), en un passage chronologique."""
+    succ, has_pred = {}, set()
+    for i, a in enumerate(legs):
+        for b in legs[i + 1:]:
+            gap = b.start_at - a.end_at
+            if gap > MAX_GAP:
+                break  # triées par départ : les suivantes sont encore plus loin
+            if gap < -OVERLAP or b in has_pred:
+                continue
+            if geo.distance_km(a.end, b.start) > JOIN_KM:
+                continue
+            # Progression : on repart d'ailleurs que du départ précédent,
+            # sauf en cours de route (boucle depuis un gîte entre deux étapes).
+            moved = geo.distance_km(a.start, b.start) >= SAME_PLACE_KM
+            if moved or a in has_pred:
+                succ[a] = b
+                has_pred.add(b)
+                break
+    return succ, has_pred
+
+
+def _places(points):
+    """Regroupe des points proches en « lieux » distincts."""
+    places = []
+    for p in points:
+        if not any(geo.distance_km(p, q) < SAME_PLACE_KM for q in places):
+            places.append(p)
+    return places
+
+
+def _is_journey(chain):
+    if len(chain) < 2:
+        return False
+    if (chain[-1].day - chain[0].day).days + 1 < MIN_DAYS:
+        return False
+    origin = chain[0].start
+    if max(geo.distance_km(origin, leg.end) for leg in chain) < MIN_SPREAD_KM:
+        return False
+    # Allers-retours entre deux lieux (trajets domicile-travail non marqués comme tels)
+    moves = [leg for leg in chain if not leg.is_loop]
+    places = _places([p for leg in moves for p in (leg.start, leg.end)])
+    if len(places) <= 2 and len(moves) >= 3:
+        return False
+    return True
+
+
+def detect(activities):
+    """Renvoie les périples trouvés parmi `activities`, du plus récent au plus ancien."""
+    legs = _legs(activities)
+    succ, has_pred = _link(legs)
+    journeys = []
+    for head in legs:
+        if head in has_pred:
+            continue
+        chain = [head]
+        while chain[-1] in succ:
+            chain.append(succ[chain[-1]])
+        # Les boucles en début ou fin de chaîne sont des sorties autour de chez soi
+        # (ou du dernier gîte) qui se sont accrochées au voyage : on les retire.
+        while chain and chain[0].is_loop:
+            chain.pop(0)
+        while chain and chain[-1].is_loop:
+            chain.pop()
+        if _is_journey(chain):
+            nights = [i for i in range(len(chain) - 1) if chain[i + 1].day != chain[i].day]
+            journeys.append(Journey(chain, nights))
+    journeys.sort(key=lambda j: j.legs[0].start_at, reverse=True)
+    return journeys
+
+
+def for_account(account):
+    qs = account.activities.exclude(summary_polyline="").only(
+        "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
+        "moving_time", "elapsed_time", "total_elevation_gain", "summary_polyline",
+        "start_lat", "start_lng", "raw",
+    )
+    return detect(qs)

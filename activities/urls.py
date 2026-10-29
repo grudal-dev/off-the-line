@@ -14,4 +14,6 @@ urlpatterns = [
     path("activites/synchroniser/", views.activity_sync, name="sync"),
     path("activites/<int:strava_id>/", views.activity_detail, name="detail"),
     path("carte/", views.all_routes_map, name="map"),
+    path("periples/", views.journey_list, name="journeys"),
+    path("periples/<int:journey_id>/", views.journey_detail, name="journey"),
 ]

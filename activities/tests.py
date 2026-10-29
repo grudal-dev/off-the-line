@@ -279,3 +279,105 @@ class ActivityPagesTests(LoggedInTestCase):
         self.assertRedirects(response, reverse("activities:home"))
         self.assertFalse(StravaAccount.objects.exists())
         self.assertFalse(Activity.objects.exists())
+
+
+def leg(id_, day, hour, start, end, hours=4, sport="Ride", **raw):
+    """Activité non enregistrée, suffisante pour la détection des périples."""
+    from datetime import datetime, timezone as tz
+    begin = datetime(2026, 8, day, hour, tzinfo=tz.utc)
+    return Activity(
+        strava_id=id_, name=f"Étape {id_}", sport_type=sport, start_date=begin, start_date_local=begin,
+        distance=80000, moving_time=hours * 3600, elapsed_time=hours * 3600, total_elevation_gain=900,
+        start_lat=start[0], start_lng=start[1],
+        raw={"start_latlng": list(start), "end_latlng": list(end), **raw},
+    )
+
+
+ANNECY, FAVERGES, ALBERTVILLE, MOUTIERS, BOURG = (45.899, 6.129), (45.748, 6.293), (45.676, 6.392), (45.485, 6.531), (45.618, 6.770)
+
+
+class JourneyDetectionTests(TestCase):
+    def detect(self, activities):
+        from .journeys import detect
+        return detect(activities)
+
+    def test_successive_point_to_point_stages_form_a_journey(self):
+        found = self.detect([
+            leg(1, 10, 8, ANNECY, FAVERGES),
+            leg(2, 11, 9, FAVERGES, ALBERTVILLE),
+            leg(3, 12, 8, ALBERTVILLE, MOUTIERS),
+        ])
+        self.assertEqual(len(found), 1)
+        self.assertEqual([a.strava_id for a in found[0].activities], [1, 2, 3])
+        self.assertEqual(found[0].days, 3)
+        self.assertEqual(found[0].nights, [0, 1])
+        self.assertEqual(found[0].title, "3 jours à vélo")
+
+    def test_daily_loops_from_home_are_not_a_journey(self):
+        self.assertEqual(self.detect([leg(i, 10 + i, 8, ANNECY, ANNECY) for i in range(5)]), [])
+
+    def test_loops_around_home_before_and_after_are_trimmed(self):
+        found = self.detect([
+            leg(1, 9, 8, ANNECY, ANNECY),
+            leg(2, 10, 8, ANNECY, FAVERGES),
+            leg(3, 11, 8, FAVERGES, ALBERTVILLE),
+            leg(4, 12, 8, ALBERTVILLE, ANNECY),
+            leg(5, 13, 8, ANNECY, ANNECY),
+            leg(6, 14, 8, ANNECY, ANNECY),
+        ])
+        self.assertEqual([a.strava_id for a in found[0].activities], [2, 3, 4])
+
+    def test_day_loop_from_a_hut_stays_in_the_journey(self):
+        found = self.detect([
+            leg(1, 10, 8, ANNECY, MOUTIERS),
+            leg(2, 11, 8, MOUTIERS, MOUTIERS),
+            leg(3, 12, 8, MOUTIERS, BOURG),
+        ])
+        self.assertEqual([a.strava_id for a in found[0].activities], [1, 2, 3])
+
+    def test_too_long_gap_or_far_restart_breaks_the_chain(self):
+        self.assertEqual(self.detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 13, 8, FAVERGES, ALBERTVILLE)]), [])
+        self.assertEqual(self.detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, MOUTIERS, BOURG)]), [])
+
+    def test_home_work_commutes_are_ignored(self):
+        work = (45.92, 6.25)  # à ~10 km
+        commutes = []
+        for d in range(5):
+            commutes += [leg(2 * d, 10 + d, 7, ANNECY, work, hours=1), leg(2 * d + 1, 10 + d, 17, work, ANNECY, hours=1)]
+        self.assertEqual(self.detect(commutes), [])
+        flagged = [leg(1, 10, 7, ANNECY, work, commute=True), leg(2, 11, 17, work, ANNECY, commute=True)]
+        self.assertEqual(self.detect(flagged), [])
+
+    def test_two_rides_same_day_are_not_a_journey(self):
+        self.assertEqual(self.detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 10, 14, FAVERGES, ALBERTVILLE)]), [])
+
+    def test_rest_day_is_allowed(self):
+        found = self.detect([leg(1, 10, 8, ANNECY, FAVERGES, hours=6), leg(2, 12, 8, FAVERGES, ALBERTVILLE)])
+        self.assertEqual(len(found), 1)
+
+
+class JourneyPagesTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.save()
+
+    def test_list_and_detail(self):
+        response = self.client.get(reverse("activities:journeys"))
+        self.assertContains(response, "2 jours à vélo")
+        self.assertContains(response, reverse("activities:journey", args=[1]))
+        detail = self.client.get(reverse("activities:journey", args=[1]))
+        self.assertContains(detail, 'id="stages-data"')
+        self.assertContains(detail, "Nuit 1")
+        self.assertEqual(self.client.get(reverse("activities:journey", args=[2])).status_code, 404)
+
+    def test_map_highlights_journeys(self):
+        response = self.client.get(reverse("activities:map"))
+        self.assertEqual(response.context["journeys"][0]["stages"], [1, 2])
+        self.assertContains(response, 'id="journey-toggle"')
+
+    def test_empty_list_explains_rules(self):
+        Activity.objects.all().delete()
+        self.assertContains(self.client.get(reverse("activities:journeys")), "Aucun périple")

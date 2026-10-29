@@ -5,11 +5,13 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import formats
 from django.views.decorators.http import require_POST
 
-from . import geo, polyline, sports, strava
+from . import geo, journeys, polyline, sports, strava
 from .models import Activity, StravaAccount
 from .sync import sync_activities, sync_photos
 
@@ -206,5 +208,73 @@ def all_routes_map(request):
         for key, (label, color) in sports.FAMILIES.items() if key in counts
     ]
     total_km = round(sum(r["km"] for r in routes))
+    trips = [
+        {"id": j.id, "title": j.title, "url": reverse("activities:journey", args=[j.id]),
+         "dates": _date_range(j), "stages": [a.strava_id for a in j.activities],
+         "colors": _stage_colors(len(j.legs))}
+        for j in journeys.for_account(account)
+    ]
     return render(request, "activities/map.html",
-                  {"routes": routes, "families": families, "total_km": total_km})
+                  {"routes": routes, "families": families, "total_km": total_km, "journeys": trips})
+
+
+def _date_range(journey):
+    first, last = journey.first_day, journey.last_day
+    if first.year != last.year:
+        return f"du {formats.date_format(first, 'j F Y')} au {formats.date_format(last, 'j F Y')}"
+    if first.month != last.month:
+        return f"du {formats.date_format(first, 'j F')} au {formats.date_format(last, 'j F Y')}"
+    return f"du {first.day} au {formats.date_format(last, 'j F Y')}"
+
+
+def _stage_colors(n):
+    """Dégradé orange → violet : la couleur raconte la progression du voyage."""
+    a, b = (252, 76, 2), (106, 27, 154)
+    if n == 1:
+        return ["#fc4c02"]
+    return ["#%02x%02x%02x" % tuple(round(a[k] + (b[k] - a[k]) * i / (n - 1)) for k in range(3)) for i in range(n)]
+
+
+@login_required
+def journey_list(request):
+    """Périples : activités enchaînées sur plusieurs jours, détectées automatiquement."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    items = []
+    for j in journeys.for_account(account):
+        coords = [polyline.decode(a.summary_polyline) for a in j.activities]
+        flat = [p for c in coords for p in c]
+        # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
+        items.append({"journey": j, "dates": _date_range(j), "thumb": [
+            {"d": geo.svg_path(c, frame=flat), "color": col}
+            for c, col in zip(coords, _stage_colors(len(coords)))
+        ]})
+    return render(request, "activities/journeys.html", {"items": items})
+
+
+@login_required
+def journey_detail(request, journey_id):
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    journey = next((j for j in journeys.for_account(account) if j.id == journey_id), None)
+    if journey is None:
+        raise Http404("Périple introuvable")
+    colors = _stage_colors(len(journey.legs))
+    stages = []
+    for i, (leg, color) in enumerate(zip(journey.legs, colors)):
+        a = leg.activity
+        stages.append({
+            "n": i + 1, "id": a.strava_id, "name": a.name, "color": color,
+            "sport": sports.label(a.sport_type),
+            "date": formats.date_format(a.start_date_local or a.start_date, "l j F"),
+            "km": a.distance_km, "elevation": round(a.total_elevation_gain),
+            "duration": a.duration_display, "night_after": i in journey.nights,
+            "coords": polyline.decode(a.summary_polyline),
+        })
+    nights = sum(1 for s in stages if s["night_after"])
+    return render(request, "activities/journey.html", {
+        "journey": journey, "dates": _date_range(journey), "stages": stages, "nights": nights,
+        "stages_json": [{k: s[k] for k in ("n", "id", "name", "color", "coords", "night_after")} for s in stages],
+    })

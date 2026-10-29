@@ -21,6 +21,14 @@
             {% endfor %}
           </ul>
         {% endif %}
+        {% if journeys %}
+          <div class="journey-toggle">
+            <button type="button" class="chip" id="journey-toggle" aria-pressed="true">
+              <span class="dot" style="--c: #6a1b9a"></span>Périples en évidence <span class="muted">{{ journeys|length }}</span>
+            </button>
+            <a href="{% url 'activities:journeys' %}">Voir les périples</a>
+          </div>
+        {% endif %}
       </div>
       <ul class="route-list" id="route-list">
         {% for r in routes %}
@@ -45,6 +53,7 @@
     </div>
   </div>
   {{ routes|json_script:"routes-data" }}
+  {{ journeys|json_script:"journeys-data" }}
   {% else %}
   <div style="padding: 3rem 1rem;">
     <div class="empty-state" style="margin: 0 auto; max-width: 40rem;">
@@ -102,11 +111,50 @@
     byId.set(r.id, line);
   }
 
+  // Périples : tracés par-dessus tout le reste, épais, avec un liseré,
+  // dans un dégradé orange → violet qui suit l'ordre des étapes.
+  const trips = JSON.parse(document.getElementById("journeys-data").textContent);
+  const tripRenderer = L.canvas({ padding: 0.5, tolerance: 4 });
+  const tripLayer = L.featureGroup();
+  const casings = [];
+  for (const t of trips) {
+    const tip = `<strong>${escapeHtml(t.title)}</strong><span>${t.dates}, ${t.stages.length} étapes</span>`;
+    t.stages.forEach((id, i) => {
+      const r = byId.get(id) && byId.get(id).route;
+      if (!r) return;
+      casings.push(L.polyline(r.coords, { renderer: tripRenderer, color: "#fff", weight: 9, opacity: 0.95, interactive: false }).addTo(tripLayer));
+    });
+    t.stages.forEach((id, i) => {
+      const r = byId.get(id) && byId.get(id).route;
+      if (!r) return;
+      L.polyline(r.coords, { renderer: tripRenderer, color: t.colors[i], weight: 4.5, lineCap: "round" })
+        .bindTooltip(tip, { sticky: true, className: "route-tip" })
+        .on("click", () => { window.location = t.url; })
+        .addTo(tripLayer);
+    });
+    const first = byId.get(t.stages[0]);
+    if (first) {
+      L.marker(first.route.coords[0], {
+        icon: L.divIcon({ className: "", html: `<a class="journey-label" href="${t.url}">${escapeHtml(t.title)}</a>`, iconSize: null, iconAnchor: [0, 30] }),
+        zIndexOffset: 1000,
+      }).addTo(tripLayer);
+    }
+  }
+  if (trips.length) tripLayer.addTo(map);
+  const tripToggle = document.getElementById("journey-toggle");
+  if (tripToggle) tripToggle.addEventListener("click", () => {
+    const on = tripToggle.getAttribute("aria-pressed") !== "true";
+    tripToggle.setAttribute("aria-pressed", on);
+    on ? tripLayer.addTo(map) : tripLayer.remove();
+  });
+
   mountBasemaps(map, def => {
     theme = def.theme;
     renderer.options.blend = STYLE[theme].blend;
     box.dataset.theme = theme;
     for (const line of byId.values()) line.setStyle(lineStyle());
+    const casing = theme === "dark" || theme === "photo" ? "#1c2629" : "#ffffff";
+    casings.forEach(c => c.setStyle({ color: casing }));
   });
 
   function highlight(id, on) {

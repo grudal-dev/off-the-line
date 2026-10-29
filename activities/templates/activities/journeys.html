@@ -1,0 +1,39 @@
+{% extends "activities/base.html" %}
+{% block title %}Périples · Off the line{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>Périples</h1>
+      <p class="muted">Tes activités enchaînées sur plusieurs jours, d'un point à un autre, regroupées automatiquement.</p>
+    </div>
+  </div>
+
+  {% if items %}
+    <ol class="journey-list">
+      {% for item in items %}
+        {% with j=item.journey %}
+        <li class="journey-card">
+          <svg class="journey-thumb" viewBox="0 0 100 100" aria-hidden="true">
+            {% for t in item.thumb %}<path d="{{ t.d }}" style="stroke: {{ t.color }}"/>{% endfor %}
+          </svg>
+          <div class="journey-text">
+            <h2><a href="{% url 'activities:journey' j.id %}">{{ j.title }}</a></h2>
+            <p class="muted">{{ item.dates|capfirst }}</p>
+            <dl class="journey-figures">
+              <div><dt>Étapes</dt><dd>{{ j.legs|length }}</dd></div>
+              <div><dt>Distance</dt><dd>{{ j.distance_km|floatformat:"0g" }} km</dd></div>
+              <div><dt>Dénivelé +</dt><dd>{{ j.elevation|floatformat:"0g" }} m</dd></div>
+              <div><dt>En mouvement</dt><dd>{{ j.moving_display }}</dd></div>
+            </dl>
+          </div>
+        </li>
+        {% endwith %}
+      {% endfor %}
+    </ol>
+  {% else %}
+    <div class="empty-state">
+      <p>Aucun périple repéré pour l'instant.</p>
+      <p class="muted">Un périple, ce sont au moins deux activités sur des jours différents, où chacune repart à moins de 5 km de l'arrivée de la précédente, moins de 42 heures plus tard, et qui t'emmènent à plus de 10 km de ton point de départ. Les boucles depuis chez toi et les trajets domicile-travail ne comptent pas.</p>
+    </div>
+  {% endif %}
+{% endblock %}

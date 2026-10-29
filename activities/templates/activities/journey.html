@@ -1,0 +1,124 @@
+{% extends "activities/base.html" %}
+{% block title %}{{ journey.title|capfirst }} · Off the line{% endblock %}
+{% block head %}{% include "activities/leaflet_head.html" %}{% endblock %}
+{% block main_class %}full{% endblock %}
+{% block content %}
+<div class="atlas">
+  <aside class="atlas-panel">
+    <div class="atlas-head">
+      <a class="back" href="{% url 'activities:journeys' %}">Tous les périples</a>
+      <h1>{{ journey.title|capfirst }}</h1>
+      <p class="muted" style="margin: 0 0 1rem">{{ dates|capfirst }}</p>
+      <div class="totals">
+        <p><strong>{{ journey.distance_km|floatformat:"0g" }}</strong>kilomètres</p>
+        <p><strong>{{ journey.elevation|floatformat:"0g" }}</strong>m de dénivelé</p>
+        <p><strong>{{ nights }}</strong>nuit{{ nights|pluralize }}</p>
+      </div>
+      <button type="button" class="btn ghost" id="replay">Rejouer le parcours</button>
+    </div>
+    <ol class="stage-list" id="stage-list">
+      {% for s in stages %}
+        <li>
+          <a class="stage" href="{% url 'activities:detail' s.id %}" data-stage="{{ s.n }}">
+            <span class="stage-n" style="--c: {{ s.color }}">{{ s.n }}</span>
+            <span>
+              <strong>{{ s.name }}</strong>
+              <span>{{ s.date|capfirst }}, {{ s.sport|lower }}</span>
+            </span>
+            <span class="stage-figs">{{ s.km|floatformat:1 }} km<small>{{ s.elevation }} m D+</small></span>
+          </a>
+          {% if s.night_after %}<p class="night">Nuit {{ forloop.counter }}</p>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  </aside>
+  <div class="atlas-map" id="atlas-map">
+    <div id="map" role="img" aria-label="Carte du périple, étape par étape"></div>
+  </div>
+</div>
+{{ stages_json|json_script:"stages-data" }}
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const stages = JSON.parse(document.getElementById("stages-data").textContent);
+  const list = document.getElementById("stage-list");
+  const box = document.getElementById("atlas-map");
+  const moon = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>';
+  const flag = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 21V4h11l-2 4 2 4H8v9z" fill="currentColor"/></svg>';
+  // Rendu SVG : chaque étape est un <path> qu'on peut « dessiner » progressivement
+  const map = L.map("map", { renderer: L.svg({ padding: 0.5 }), zoomSnap: 0.25, zoomControl: false });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+
+  let casingColor = "#fff";
+  const casings = [], lines = [];
+  for (const s of stages) {
+    casings.push(L.polyline(s.coords, { color: casingColor, weight: 9, opacity: 0.95, interactive: false }).addTo(map));
+  }
+  for (const s of stages) {
+    const line = L.polyline(s.coords, { color: s.color, weight: 5, lineCap: "round" }).addTo(map);
+    line.bindTooltip(`Étape ${s.n} : ${escapeHtml(s.name)}`, { sticky: true, className: "route-tip" });
+    line.on("mouseover", () => focus(s.n, true));
+    line.on("mouseout", () => focus(s.n, false));
+    line.on("click", () => { window.location = `/activites/${s.id}/`; });
+    lines.push(line);
+  }
+
+  // Repères : numéro au départ de chaque étape, nuits, arrivée
+  // La nuit est posée en haut à droite de la pastille de l'étape suivante, au même endroit
+  const pin = (latlng, html, cls, title, anchor = [13, 13]) => L.marker(latlng, {
+    icon: L.divIcon({ className: "", html: `<span class="pin ${cls}" title="${title}">${html}</span>`, iconSize: [26, 26], iconAnchor: anchor }),
+    keyboard: false,
+  }).addTo(map);
+  stages.forEach((s, i) => {
+    pin(s.coords[0], s.n, "pin-stage", `Départ de l'étape ${s.n}`).setZIndexOffset(100 + i);
+    if (s.night_after) pin(s.coords[s.coords.length - 1], moon, "pin-night", "Nuit", [-4, 26]).setZIndexOffset(300);
+  });
+  const last = stages[stages.length - 1];
+  pin(last.coords[last.coords.length - 1], flag, "pin-finish", "Arrivée").setZIndexOffset(500);
+
+  mountBasemaps(map, def => {
+    casingColor = def.theme === "dark" || def.theme === "photo" ? "#1c2629" : "#ffffff";
+    box.dataset.theme = def.theme;
+    casings.forEach(c => c.setStyle({ color: casingColor }));
+  });
+  map.fitBounds(L.featureGroup(lines).getBounds(), { padding: [40, 40] });
+
+  function focus(n, on) {
+    const line = lines[n - 1];
+    line.setStyle({ weight: on ? 8 : 5 });
+    if (on) line.bringToFront();
+    list.querySelector(`[data-stage="${n}"]`).classList.toggle("is-active", on);
+  }
+  list.addEventListener("mouseover", e => { const a = e.target.closest("[data-stage]"); if (a) focus(+a.dataset.stage, true); });
+  list.addEventListener("mouseout", e => { const a = e.target.closest("[data-stage]"); if (a) focus(+a.dataset.stage, false); });
+  list.addEventListener("focusin", e => {
+    const a = e.target.closest("[data-stage]");
+    if (a) map.flyToBounds(lines[a.dataset.stage - 1].getBounds(), { padding: [60, 60], duration: 0.6 });
+  });
+
+  // Le moment fort de la page : les étapes se tracent l'une après l'autre
+  function replay() {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const per = Math.min(1.6, 6 / stages.length);
+    [casings, lines].forEach(group => group.forEach((layer, i) => {
+      const el = layer.getElement();
+      const len = el.getTotalLength();
+      el.style.transition = "none";
+      el.style.strokeDasharray = `${len} ${len}`;
+      el.style.strokeDashoffset = len;
+      el.getBoundingClientRect();
+      el.style.transition = `stroke-dashoffset ${per}s ${0.3 + i * per}s cubic-bezier(.45,0,.35,1)`;
+      el.style.strokeDashoffset = 0;
+      el.addEventListener("transitionend", () => { el.style.strokeDasharray = ""; }, { once: true });
+    }));
+  }
+  document.getElementById("replay").addEventListener("click", replay);
+  map.whenReady(() => setTimeout(replay, 50));
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+})();
+</script>
+{% endblock %}
