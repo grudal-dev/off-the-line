@@ -23,6 +23,12 @@ Ouvre ensuite http://localhost:8000.
 2. « Authorization Callback Domain » : `localhost`
 3. Copie le Client ID et le Client Secret dans `.env`
 
+## Fond de carte
+
+La carte globale utilise le fond sombre CARTO, qui exige désormais une clé gratuite :
+demande-la sur https://carto.com/basemaps/apikey puis renseigne `CARTO_API_KEY` dans `.env`.
+Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
+
 ## Structure
 
 - `config/` : réglages du projet Django

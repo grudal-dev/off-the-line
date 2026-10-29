@@ -23,9 +23,7 @@
 <script>
   const routes = JSON.parse(document.getElementById("routes-data").textContent);
   const map = L.map("map", { preferCanvas: true });
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
-  }).addTo(map);
+  L.tileLayer(BASEMAP.url, BASEMAP.options).addTo(map);
   const group = L.featureGroup().addTo(map);
   for (const r of routes) {
     const line = L.polyline(r.coords, { color: "#fc4c02", weight: 2, opacity: 0.45 });

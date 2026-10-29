@@ -35,6 +35,9 @@ STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 STRAVA_REDIRECT_URI = os.environ.get("STRAVA_REDIRECT_URI", "http://localhost:8000/strava/callback/")
 
+# Fond de carte CARTO (clé gratuite : https://carto.com/basemaps/apikey)
+CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")
+
 
 # Application definition
 
@@ -70,6 +73,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "activities.context_processors.basemap",
             ],
         },
     },
