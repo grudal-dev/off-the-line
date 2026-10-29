@@ -179,44 +179,55 @@ def _ratio(width, height):
     return round(width / height, 4) if width and height else DEFAULT_RATIO
 
 
-def stage_photos(activity, stage_note, uploads):
-    """Photos d'une étape pour le livre, et la liste complète pour l'éditeur.
+def photo_pool(journeys, uploads):
+    """Toutes les photos utilisables dans un livre, par clé : celles de Strava (s:<id>)
+    des étapes du livre et celles ajoutées par l'utilisateur (u:<id>).
 
-    Renvoie (sélection ordonnée, toutes les photos disponibles avec leur état).
-    Sans personnalisation : toutes les photos Strava puis les photos ajoutées.
+    Une photo peut être placée sur n'importe quelle étape, même plusieurs fois.
     """
-    available = {}
-    for p in activity.photos.all():
-        available[f"s:{p.pk}"] = {"key": f"s:{p.pk}", "url": p.url, "caption": p.caption, "source": "strava",
-                                  "ratio": _ratio(p.width, p.height)}
+    pool = {}
+    for j in journeys:
+        for i, a in enumerate(j.activities):
+            for p in a.photos.all():
+                pool[f"s:{p.pk}"] = {"key": f"s:{p.pk}", "url": p.url, "caption": p.caption, "source": "strava",
+                                     "ratio": _ratio(p.width, p.height), "activity": a.strava_id}
     for u in uploads:
-        available[u.key] = {"key": u.key, "url": u.image.url, "caption": u.caption, "source": "upload",
-                            "ratio": _ratio(u.width, u.height)}
-    if stage_note is not None and stage_note.photos is not None:
-        chosen = []
-        for entry in stage_note.photos:
-            photo = available.get(entry.get("key"))
-            if photo:
-                chosen.append({**photo, "caption": entry.get("caption", photo["caption"])})
+        pool[u.key] = {"key": u.key, "url": u.image.url, "caption": u.caption, "source": "upload",
+                       "ratio": _ratio(u.width, u.height), "activity": u.activity_id}
+    return pool
+
+
+def stage_selection(activity_id, note, pool):
+    """Photos placées sur une étape, dans l'ordre, avec leur légende sur cette étape.
+
+    Sans personnalisation : les photos Strava de l'activité puis celles ajoutées
+    directement sur cette étape.
+    """
+    if note is not None and note.photos is not None:
+        entries = note.photos
     else:
-        chosen = list(available.values())
-    picked = {p["key"] for p in chosen}
-    everything = chosen + [{**p, "excluded": True} for k, p in available.items() if k not in picked]
-    return chosen, everything
+        entries = [{"key": k, "caption": p["caption"]} for k, p in pool.items() if p["activity"] == activity_id]
+    chosen = []
+    for entry in entries:
+        photo = pool.get(entry.get("key"))
+        if photo:
+            chosen.append({**photo, "caption": entry.get("caption", photo["caption"]), "index": len(chosen)})
+    return chosen
 
 
-def build(journey, colors, date_range, book_obj=None, stage_notes=None, uploads=None):
+def build(journey, colors, date_range, book_obj=None, stage_notes=None, pool=None):
     """Contenu d'un périple pour le livre : synthèse, puis une page par étape.
 
-    `stage_notes` ({activity_id: BookStage}) et `uploads` ({activity_id: [BookPhoto]})
+    `stage_notes` ({activity_id: BookStage}) et `pool` (voir photo_pool)
     appliquent la personnalisation du livre.
     """
-    stage_notes, uploads = stage_notes or {}, uploads or {}
+    stage_notes = stage_notes or {}
+    pool = pool if pool is not None else photo_pool([journey], [])
     stages, combined, offset = [], [], 0.0
     for i, (leg, color) in enumerate(zip(journey.legs, colors)):
         a = leg.activity
         note = stage_notes.get(a.strava_id)
-        photos, all_photos = stage_photos(a, note, uploads.get(a.strava_id, []))
+        photos = stage_selection(a.strava_id, note, pool)
         lead, photo_pages, photo_box_h = paginate_photos(photos)
         if a.profile:
             combined += [[offset + km, alt] for km, alt in a.profile]
@@ -234,7 +245,7 @@ def build(journey, colors, date_range, book_obj=None, stage_notes=None, uploads=
             "strava_description": a.description,
             "coords": polyline.decode(a.summary_polyline), "profile": profile_svg(a.profile),
             "lead_photos": lead, "photo_pages": photo_pages, "photo_box_h": photo_box_h,
-            "all_photos": all_photos,
+            "photo_keys": [{"key": p["key"], "caption": p["caption"]} for p in photos],
             "night_after": i in journey.nights,
             "transfer_after": journey.transfer_after(i),
         })

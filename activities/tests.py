@@ -481,8 +481,8 @@ class BookTests(LoggedInTestCase):
         self.assertContains(book_page, "Annecy → Faverges")
         self.assertContains(book_page, "https://img.example.com/x.jpg")
         self.assertContains(book_page, 'id="map-s2"')
-        self.assertNotContains(book_page, 'id="photo-editor"')
-        self.assertContains(self.client.get(response["Location"], {"edition": "1"}), 'id="photo-editor"')
+        self.assertNotContains(book_page, 'id="tray"')
+        self.assertContains(self.client.get(response["Location"], {"edition": "1"}), 'id="tray"')
 
         # Régénérer ne refait pas d'appels Strava
         calls = get.call_count
@@ -563,6 +563,40 @@ class BookEditingTests(LoggedInTestCase):
 
         self.post(field="upload.delete", upload=upload.pk)
         self.assertFalse(self.book.uploads.exists())
+
+    def test_copy_a_photo_from_another_stage_and_reject_unknown_keys(self):
+        self.post(field="stage.photos", activity=2, value=[
+            {"key": f"s:{self.p1.pk}", "caption": "Copiée"}, {"key": "s:999999", "caption": "?"}])
+        from .models import BookStage
+        self.assertEqual(BookStage.objects.get(activity_id=2).photos, [{"key": f"s:{self.p1.pk}", "caption": "Copiée"}])
+        html = self.page()
+        self.assertEqual(html.count('src="https://img.example.com/a.jpg"'), 2)  # étape 1 (défaut) + étape 2
+        self.assertIn("Copiée", html)
+
+    def test_remove_all_photos_of_a_stage_keeps_them_in_the_pool(self):
+        self.post(field="stage.photos", activity=1, value=[])
+        html = self.client.get(reverse("activities:book_detail", args=[self.book.pk]), {"edition": "1"}).content.decode()
+        self.assertNotIn('src="https://img.example.com/a.jpg"', html)
+        self.assertIn('"https://img.example.com/a.jpg"', html)  # toujours dans le bac (JSON)
+        self.assertIn("Glisse des photos ici", html)
+
+    def test_upload_to_tray_then_delete_removes_it_everywhere(self):
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = BytesIO()
+        Image.new("RGB", (800, 600), "blue").save(buf, "JPEG")
+        r = self.client.post(reverse("activities:book_upload", args=[self.book.pk]),
+                             {"photos": [SimpleUploadedFile("a.jpg", buf.getvalue(), "image/jpeg")]})
+        key = r.json()["keys"][0]
+        upload = self.book.uploads.get()
+        self.assertIsNone(upload.activity_id)
+        self.assertNotIn(upload.image.url, self.page())  # dans le bac, pas encore sur une page
+        self.post(field="stage.photos", activity=2, value=[{"key": key, "caption": ""}])
+        self.assertIn(upload.image.url, self.page())
+        self.post(field="upload.delete", upload=upload.pk)
+        from .models import BookStage
+        self.assertEqual(BookStage.objects.get(activity_id=2).photos, [])
 
     def test_options_hide_sections(self):
         self.assertIn("Carnet de route", self.page())

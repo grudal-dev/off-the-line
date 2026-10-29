@@ -1,1 +1,1 @@
-<figure data-ratio="{{ p.ratio|stringformat:"s" }}"{% if p.caption %} data-caption{% endif %}><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>
+<figure data-key="{{ p.key }}" data-index="{{ p.index }}" data-ratio="{{ p.ratio|stringformat:"s" }}"{% if p.caption %} data-caption{% endif %}><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>

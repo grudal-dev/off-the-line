@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="{% static 'activities/book.css' %}">
   {% include "activities/leaflet_head.html" %}
 </head>
-<body class="book">
+<body class="book{% if edit %} editing{% endif %}">
   <div class="book-toolbar" role="toolbar" aria-label="Livre">
     <a href="{% url 'activities:book' %}">Mes livres</a>
     {% if edit %}
@@ -32,8 +32,8 @@
     <span class="sep"></span>
     <strong>Couverture</strong>
     <label><input type="radio" name="cover" value="map" {% if book.cover == "map" %}checked{% endif %}> Carte</label>
-    <label><input type="radio" name="cover" value="photo" {% if book.cover == "photo" %}checked{% endif %} {% if not all_photos %}disabled{% endif %}> Photo</label>
-    {% if not all_photos %}<span class="muted">(ajoute des photos à une étape pour l'utiliser)</span>{% endif %}
+    <label><input type="radio" name="cover" value="photo" {% if book.cover == "photo" %}checked{% endif %} {% if not has_photos %}disabled{% endif %}> Photo</label>
+    {% if not has_photos %}<span class="muted">(ajoute des photos pour l'utiliser)</span>{% endif %}
   </div>
   {% endif %}
 
@@ -120,8 +120,7 @@
 
   {% for s in c.stages %}
   <!-- Étape -->
-  <section class="page stage-page{% if not s.lead_photos %} no-photos{% endif %}" id="etape-{{ s.id }}" style="--c: {{ s.color }}">
-    {% if edit %}<button type="button" class="edit-photos" data-activity="{{ s.id }}">Photos de l'étape ({{ s.all_photos|length }})</button>{% endif %}
+  <section class="page stage-page{% if not s.lead_photos %} no-photos{% endif %}" id="etape-{{ s.id }}" data-stage="{{ s.id }}" data-stage-n="{{ s.n }}" style="--c: {{ s.color }}">
     <header class="stage-head">
       <span class="stage-num">{{ s.n }}</span>
       <div>
@@ -150,12 +149,14 @@
       <div class="photo-box" style="flex-basis: {{ s.photo_box_h|stringformat:"s" }}mm">
         {% for p in s.lead_photos %}{% include "activities/book_photo.html" %}{% endfor %}
       </div>
+    {% elif edit %}
+      <div class="photo-drop">Glisse des photos ici (depuis le bac ou ton ordinateur), ou colle-les avec Ctrl+V.</div>
     {% endif %}
     {% if s.transfer_after %}<p class="night-note">Puis {{ s.transfer_after.mode_label|lower }}{% if s.transfer_after.route %} : {{ s.transfer_after.route }}{% endif %}</p>
     {% elif s.night_after %}<p class="night-note">Nuit {{ s.n }}, puis étape {{ s.n|add:1 }}</p>{% endif %}
   </section>
   {% for chunk in s.photo_pages %}
-  <section class="page photo-page" style="--c: {{ s.color }}">
+  <section class="page photo-page" data-stage="{{ s.id }}" data-stage-n="{{ s.n }}" data-photos-of="{{ s.id }}" style="--c: {{ s.color }}">
     <p class="kicker">Étape {{ s.n }}, {{ s.label }} : photos</p>
     <div class="photo-box photo-box-page" data-valign="center">
       {% for p in chunk %}{% include "activities/book_photo.html" %}{% endfor %}
@@ -178,20 +179,34 @@
   {% endif %}
 
   {% if edit %}
-  <dialog class="photo-editor" id="photo-editor" aria-labelledby="pe-title">
-    <form method="dialog" class="pe-head">
-      <h2 id="pe-title">Photos de l'étape</h2>
-      <button class="link-button" value="cancel">Fermer</button>
-    </form>
-    <p class="muted">Coche les photos à garder, change leur ordre et leurs légendes. Les premières vont sur la page de l'étape (autant que la place le permet), les suivantes sur des pages de photos. Les photos ne sont jamais recadrées : la page s'adapte à leur format.</p>
-    <ol class="pe-list" id="pe-list"></ol>
-    <div class="pe-foot">
-      <label class="btn ghost pe-upload">Ajouter des photos<input type="file" id="pe-files" accept="image/*" multiple hidden></label>
-      <span id="pe-status" class="muted" aria-live="polite"></span>
-      <button type="button" class="btn" id="pe-save">Enregistrer</button>
+  <aside class="tray" id="tray" aria-labelledby="tray-title">
+    <div class="tray-head">
+      <h2 id="tray-title">Photos</h2>
+      <p class="tray-target" id="tray-target" aria-live="polite">Clique sur une page d'étape pour la choisir.</p>
+      <div class="tray-filter" role="group" aria-label="Photos affichées">
+        <button type="button" data-filter="free" aria-pressed="true">À placer</button>
+        <button type="button" data-filter="all" aria-pressed="false">Toutes</button>
+      </div>
     </div>
-  </dialog>
-  {{ editor|json_script:"editor-data" }}
+    <ul class="tray-grid" id="tray-grid"></ul>
+    <label class="tray-drop" id="tray-drop">
+      <input type="file" id="tray-files" accept="image/*" multiple hidden>
+      <strong>Ajouter des photos</strong>
+      <span>Clique, glisse des fichiers ici, ou colle une image (Ctrl+V).</span>
+    </label>
+    <details class="tray-help">
+      <summary>Comment faire</summary>
+      <ul>
+        <li>Pour <strong>retirer</strong> une photo d'une page : ✕ sur la photo, ou glisse-la dans ce bac.</li>
+        <li>Pour <strong>placer</strong> une photo : glisse-la du bac vers une page, ou choisis l'étape puis « + ».</li>
+        <li>Pour la <strong>déplacer</strong> vers une autre étape : glisse-la d'une page à l'autre. Avec Alt (⌥), elle est copiée.</li>
+        <li>Pour <strong>changer l'ordre</strong> : glisse-la sur une autre photo de la même étape, ou utilise ‹ ›.</li>
+      </ul>
+    </details>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  {{ pool|json_script:"pool-data" }}
+  {{ stages_info|json_script:"stages-data" }}
   {% endif %}
 
   <script>
@@ -241,9 +256,11 @@
       });
       box.classList.add("is-laid-out");
     }
-    const boxes = [...document.querySelectorAll(".photo-box")];
     window.photosPending = 0;
-    for (const box of boxes) {
+    window.layoutPhotos = function (root) {
+      for (const box of root.querySelectorAll(".photo-box")) setup(box);
+    };
+    function setup(box) {
       for (const img of box.querySelectorAll("img")) {
         const fig = img.closest("figure");
         const done = () => {
@@ -254,7 +271,8 @@
       }
       layout(box);
     }
-    window.addEventListener("resize", () => boxes.forEach(layout));
+    window.layoutPhotos(document);
+    window.addEventListener("resize", () => document.querySelectorAll(".photo-box").forEach(layout));
   })();
   </script>
   {{ maps|json_script:"maps-data" }}
@@ -329,6 +347,7 @@
       map.fitBounds(group.getBounds(), { padding: m.id === "cover" ? [60, 60] : [28, 28] });
       if (m.id === "cover") map.panBy([0, 70], { animate: false });  // laisse la place au titre
       instances.push({ map, tiles: null });
+      (window.bookMaps = window.bookMaps || {})[m.id] = { map, bounds: group.getBounds() };
     }
 
     // Les cartes doivent être chargées avant d'imprimer, sinon le PDF a des trous
@@ -361,7 +380,10 @@
   <script>
   (() => {
     // Textes modifiables directement sur la page
-    for (const el of document.querySelectorAll("[data-edit]")) {
+    function bindTexts(root) {
+    for (const el of root.querySelectorAll("[data-edit]")) {
+      if (el.dataset.bound) continue;
+      el.dataset.bound = "1";
       try { el.contentEditable = "plaintext-only"; } catch (e) { el.contentEditable = "true"; }
       if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
       el.spellcheck = true;
@@ -378,6 +400,7 @@
         if (!value) el.innerText = "";  // affiche le texte d'aide
       });
     }
+    }
 
     // Mise en page : sections affichées et couverture
     document.querySelectorAll("[data-option]").forEach(box => box.addEventListener("change", async () => {
@@ -387,97 +410,312 @@
       if (await saveBook({ field: "cover", value: r.value })) location.reload();
     }));
 
-    // Éditeur de photos d'une étape
-    const editor = JSON.parse(document.getElementById("editor-data").textContent);
-    const dialog = document.getElementById("photo-editor");
-    const list = document.getElementById("pe-list");
-    const status = document.getElementById("pe-status");
-    let current = null, photos = [];
+    bindTexts(document);
+    window.bindTexts = bindTexts;
 
-    function open(activityId) {
-      current = activityId;
-      photos = editor[activityId].photos.map(p => ({ ...p, keep: !p.excluded }));
-      document.getElementById("pe-title").textContent = `Photos : ${editor[activityId].label}`;
-      status.textContent = "";
-      render();
-      dialog.showModal();
+    // ---------- Photos : manipulation directe sur les pages ----------
+    const MIME = "application/x-otl-photo";
+    let pool = {}, stages = {};
+    function loadData(root) {
+      pool = Object.fromEntries(JSON.parse(root.getElementById("pool-data").textContent).map(p => [p.key, p]));
+      stages = Object.fromEntries(JSON.parse(root.getElementById("stages-data").textContent).map(s => [String(s.id), s]));
     }
-    function render() {
-      if (!photos.length) {
-        list.innerHTML = `<li class="pe-empty">Aucune photo pour cette étape. Ajoute les tiennes avec le bouton ci-dessous.</li>`;
+    loadData(document);
+
+    const toast = document.getElementById("toast");
+    let toastTimer;
+    function say(text) {
+      toast.textContent = text; toast.hidden = false;
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
+    }
+
+    // Étape active : celle sur laquelle on a cliqué (cible du « + », de l'import et du collage)
+    let activeStage = null;
+    function setActive(id) {
+      activeStage = id;
+      document.querySelectorAll(".page.is-target").forEach(p => p.classList.remove("is-target"));
+      if (id) document.querySelectorAll(`.page[data-stage="${id}"]`).forEach(p => p.classList.add("is-target"));
+      const st = stages[id];
+      document.getElementById("tray-target").textContent = st
+        ? `Étape ${st.n} : ${st.label}` : "Clique sur une page d'étape pour la choisir.";
+      renderTray();
+    }
+    document.addEventListener("click", e => {
+      const page = e.target.closest(".page[data-stage]");
+      if (page) setActive(page.dataset.stage);
+    });
+
+    // Bac : toutes les photos du livre ; « À placer » = utilisées nulle part
+    let filter = "free";
+    function usage() {
+      const used = {};
+      for (const st of Object.values(stages)) for (const p of st.photos) (used[p.key] = used[p.key] || []).push(st.n);
+      return used;
+    }
+    function renderTray() {
+      const used = usage();
+      const items = Object.values(pool).filter(p => filter === "all" || !used[p.key]);
+      const grid = document.getElementById("tray-grid");
+      if (!items.length) {
+        grid.innerHTML = `<li class="tray-empty">${filter === "free" ? "Toutes les photos sont placées. Retire une photo d'une page pour la retrouver ici." : "Aucune photo pour l'instant."}</li>`;
         return;
       }
-      list.innerHTML = photos.map((p, i) => `
-        <li class="pe-item${p.keep ? "" : " is-off"}" data-i="${i}">
-          <img src="${p.url}" alt="">
-          <div class="pe-fields">
-            <label class="pe-keep"><input type="checkbox" ${p.keep ? "checked" : ""} data-act="keep"> Dans le livre</label>
-            <input type="text" class="field" value="${escapeAttr(p.caption || "")}" placeholder="Légende" maxlength="300" data-act="caption">
-            <span class="pe-source">${p.source === "upload" ? "Ajoutée par toi" : "Strava"}</span>
-          </div>
-          <div class="pe-actions">
-            <button type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Monter">↑</button>
-            <button type="button" data-act="down" ${i === photos.length - 1 ? "disabled" : ""} aria-label="Descendre">↓</button>
-            <button type="button" data-act="cover">Couverture</button>
-            ${p.source === "upload" ? `<button type="button" data-act="delete">Supprimer</button>` : ""}
-          </div>
+      grid.innerHTML = items.map(p => `
+        <li class="tray-item" draggable="true" data-key="${p.key}">
+          <img src="${p.url}" alt="" loading="lazy" draggable="false">
+          <span class="tray-badge">${used[p.key] ? "Étape " + [...new Set(used[p.key])].join(", ") : "Non placée"}</span>
+          <span class="tray-actions">
+            ${activeStage ? `<button type="button" data-act="add" title="Ajouter à l'étape ${stages[activeStage].n}">+ Étape ${stages[activeStage].n}</button>` : ""}
+            ${p.source === "upload" ? `<button type="button" data-act="delete" title="Supprimer définitivement">Supprimer</button>` : ""}
+          </span>
         </li>`).join("");
     }
-    list.addEventListener("input", e => {
-      const li = e.target.closest("[data-i]");
-      if (li && e.target.dataset.act === "caption") photos[li.dataset.i].caption = e.target.value;
-    });
-    list.addEventListener("change", e => {
-      const li = e.target.closest("[data-i]");
-      if (li && e.target.dataset.act === "keep") { photos[li.dataset.i].keep = e.target.checked; li.classList.toggle("is-off", !e.target.checked); }
-    });
-    list.addEventListener("click", async e => {
+    document.querySelectorAll("[data-filter]").forEach(b => b.addEventListener("click", () => {
+      filter = b.dataset.filter;
+      document.querySelectorAll("[data-filter]").forEach(x => x.setAttribute("aria-pressed", x === b));
+      renderTray();
+    }));
+    document.getElementById("tray-grid").addEventListener("click", async e => {
       const btn = e.target.closest("button[data-act]");
       if (!btn) return;
-      const i = Number(btn.closest("[data-i]").dataset.i);
-      const act = btn.dataset.act;
-      if (act === "up" || act === "down") {
-        const j = act === "up" ? i - 1 : i + 1;
-        [photos[i], photos[j]] = [photos[j], photos[i]];
-        render();
-      } else if (act === "cover") {
-        if (await saveBook({ field: "cover", value: "photo", photo: photos[i].key })) status.textContent = "Photo choisie pour la couverture.";
-      } else if (act === "delete") {
-        if (!confirm("Supprimer définitivement cette photo ?")) return;
-        if (await saveBook({ field: "upload.delete", upload: photos[i].key.slice(2) })) { photos.splice(i, 1); render(); editor[current].photos = photos; }
+      const key = btn.closest("[data-key]").dataset.key;
+      if (btn.dataset.act === "add") {
+        await setPhotos(activeStage, [...stages[activeStage].photos, { key, caption: pool[key].caption || "" }]);
+        say(`Photo ajoutée à l'étape ${stages[activeStage].n}.`);
+      } else if (btn.dataset.act === "delete") {
+        if (!confirm("Supprimer définitivement cette photo (de toutes les étapes) ?")) return;
+        const touched = Object.values(stages).filter(st => st.photos.some(p => p.key === key)).map(st => String(st.id));
+        if (await saveBook({ field: "upload.delete", upload: key.slice(2) })) { await refresh(touched); say("Photo supprimée."); }
       }
     });
-    document.getElementById("pe-save").addEventListener("click", async () => {
-      const value = photos.filter(p => p.keep).map(p => ({ key: p.key, caption: p.caption || "" }));
-      if (await saveBook({ field: "stage.photos", activity: current, value })) { dialog.close(); reloadAt(current); }
+
+    // Modifier la sélection d'une étape, puis ne rafraîchir que ses pages
+    async function setPhotos(stageId, list, alsoRefresh = []) {
+      stages[stageId].photos = list;
+      if (await saveBook({ field: "stage.photos", activity: stageId, value: list })) {
+        await refresh([String(stageId), ...alsoRefresh.map(String)]);
+      }
+    }
+
+    // Outils sur chaque photo placée
+    function bindPhotos(root) {
+      root.querySelectorAll(".page[data-stage] figure[data-key]").forEach(fig => {
+        if (fig.querySelector(".ph-tools")) return;
+        const stageId = fig.closest(".page").dataset.stage;
+        const index = Number(fig.dataset.index);
+        const count = stages[stageId].photos.length;
+        const tools = document.createElement("div");
+        tools.className = "ph-tools";
+        tools.innerHTML = `
+          <button type="button" data-act="left" title="Avant" ${index === 0 ? "disabled" : ""}>‹</button>
+          <button type="button" data-act="right" title="Après" ${index === count - 1 ? "disabled" : ""}>›</button>
+          <button type="button" data-act="caption" title="Légende">Légende</button>
+          <button type="button" data-act="cover" title="Mettre en couverture">Couverture</button>
+          <button type="button" data-act="remove" class="ph-remove" title="Retirer de la page" aria-label="Retirer">✕</button>`;
+        fig.appendChild(tools);
+        fig.draggable = true;
+        fig.querySelector("img").draggable = false;
+        fig.addEventListener("dragstart", e => {
+          e.dataTransfer.setData(MIME, JSON.stringify({ key: fig.dataset.key, from: stageId, index }));
+          e.dataTransfer.effectAllowed = "copyMove";
+          document.body.classList.add("dragging-photo");
+        });
+        fig.addEventListener("dragend", () => document.body.classList.remove("dragging-photo"));
+        tools.addEventListener("click", async e => {
+          const act = e.target.closest("button")?.dataset.act;
+          if (!act) return;
+          e.stopPropagation();
+          const list = [...stages[stageId].photos];
+          if (act === "remove") {
+            list.splice(index, 1);
+            await setPhotos(stageId, list);
+            say("Photo retirée : elle reste disponible dans le bac.");
+          } else if (act === "left" || act === "right") {
+            const j = act === "left" ? index - 1 : index + 1;
+            [list[index], list[j]] = [list[j], list[index]];
+            await setPhotos(stageId, list);
+          } else if (act === "cover") {
+            if (await saveBook({ field: "cover", value: "photo", photo: fig.dataset.key })) say("Photo choisie pour la couverture.");
+          } else if (act === "caption") {
+            editCaption(fig, stageId, index);
+          }
+        });
+        const cap = fig.querySelector("figcaption");
+        if (cap) cap.addEventListener("click", e => { e.stopPropagation(); editCaption(fig, stageId, index); });
+      });
+    }
+
+    function editCaption(fig, stageId, index) {
+      let cap = fig.querySelector("figcaption");
+      if (!cap) { cap = document.createElement("figcaption"); cap.className = "ph-new-caption"; fig.appendChild(cap); }
+      cap.contentEditable = "true";
+      cap.dataset.placeholder = "Légende";
+      cap.focus();
+      document.getSelection().selectAllChildren(cap);
+      const before = cap.innerText.trim();
+      const finish = async (save) => {
+        cap.contentEditable = "false";
+        const value = cap.innerText.trim();
+        if (!save || value === before) { if (!before) cap.remove(); else cap.innerText = before; return; }
+        const list = [...stages[stageId].photos];
+        list[index] = { ...list[index], caption: value };
+        await setPhotos(stageId, list);
+      };
+      cap.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); cap.blur(); }
+        if (e.key === "Escape") { e.preventDefault(); cap.dataset.cancel = "1"; cap.blur(); }
+      });
+      cap.addEventListener("blur", () => finish(!cap.dataset.cancel), { once: true });
+    }
+
+    // Glisser-déposer : du bac vers une page, d'une page à l'autre, de l'ordinateur, ou vers le bac
+    document.getElementById("tray-grid").addEventListener("dragstart", e => {
+      const item = e.target.closest("[data-key]");
+      if (!item) return;
+      e.dataTransfer.setData(MIME, JSON.stringify({ key: item.dataset.key, from: null }));
+      e.dataTransfer.effectAllowed = "copy";
     });
-    document.getElementById("pe-files").addEventListener("change", async e => {
-      const files = [...e.target.files];
+    const accepts = e => [...e.dataTransfer.types].some(t => t === MIME || t === "Files");
+    document.addEventListener("dragover", e => {
+      const page = e.target.closest(".page[data-stage]");
+      const tray = e.target.closest("#tray");
+      if (!(page || tray) || !accepts(e)) return;
+      e.preventDefault();
+      // L'effet doit être permis par la source : le bac et les fichiers ne proposent que la copie
+      const allowed = e.dataTransfer.effectAllowed;
+      e.dataTransfer.dropEffect = allowed === "copy" || allowed === "none" || e.altKey || !page ? "copy" : "move";
+      document.querySelectorAll(".drop-target").forEach(x => x !== (page || tray) && x.classList.remove("drop-target"));
+      (page || tray).classList.add("drop-target");
+    });
+    document.addEventListener("dragleave", e => {
+      if (!e.relatedTarget || !e.relatedTarget.closest?.(".drop-target")) {
+        document.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+      }
+    });
+    document.addEventListener("drop", async e => {
+      const page = e.target.closest(".page[data-stage]");
+      const tray = e.target.closest("#tray");
+      document.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+      if (!(page || tray) || !accepts(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer.files.length) {
+        await upload([...e.dataTransfer.files], page ? page.dataset.stage : null);
+        return;
+      }
+      const data = JSON.parse(e.dataTransfer.getData(MIME) || "null");
+      if (!data) return;
+      if (tray) {  // retour au bac : on retire la photo de son étape
+        if (data.from) {
+          const list = [...stages[data.from].photos];
+          list.splice(data.index, 1);
+          await setPhotos(data.from, list);
+          say("Photo retirée : elle est de retour dans le bac.");
+        }
+        return;
+      }
+      const to = page.dataset.stage;
+      const target = list => {  // déposée sur une photo : elle prend sa place, sinon à la fin
+        const fig = e.target.closest("figure[data-key]");
+        return fig && fig.closest(".page").dataset.stage === to ? Number(fig.dataset.index) : list.length;
+      };
+      const entry = { key: data.key, caption: pool[data.key]?.caption || "" };
+      if (data.from === to) {
+        const list = [...stages[to].photos];
+        const [moved] = list.splice(data.index, 1);
+        list.splice(Math.min(target(list), list.length), 0, moved);
+        await setPhotos(to, list);
+      } else if (data.from && !e.altKey) {
+        const source = [...stages[data.from].photos];
+        const [moved] = source.splice(data.index, 1);
+        stages[data.from].photos = source;
+        if (!(await saveBook({ field: "stage.photos", activity: data.from, value: source }))) return;
+        const list = [...stages[to].photos];
+        list.splice(target(list), 0, moved);
+        await setPhotos(to, list, [data.from]);
+        say(`Photo déplacée vers l'étape ${stages[to].n}.`);
+      } else {
+        const list = [...stages[to].photos];
+        list.splice(target(list), 0, entry);
+        await setPhotos(to, list);
+        say(`Photo ${data.from ? "copiée" : "ajoutée"} sur l'étape ${stages[to].n}.`);
+      }
+    });
+
+    // Import : bouton/zone du bac, dépôt de fichiers, collage
+    document.getElementById("tray-files").addEventListener("change", e => {
+      upload([...e.target.files], activeStage);
+      e.target.value = "";
+    });
+    document.addEventListener("paste", e => {
+      if (e.target.closest?.("[contenteditable=true], [contenteditable=plaintext-only], input, textarea")) return;
+      const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
       if (!files.length) return;
-      // On enregistre d'abord l'ordre et les légendes en cours, pour ne rien perdre au rechargement
-      const value = photos.filter(p => p.keep).map(p => ({ key: p.key, caption: p.caption || "" }));
-      if (photos.length) await saveBook({ field: "stage.photos", activity: current, value });
-      status.textContent = `Envoi de ${files.length} photo${files.length > 1 ? "s" : ""}…`;
+      e.preventDefault();
+      upload(files, activeStage);
+    });
+    async function upload(files, stageId) {
+      files = files.filter(f => f.type.startsWith("image/") || /\.(jpe?g|png|webp|heic|gif|tiff?)$/i.test(f.name));
+      if (!files.length) { say("Ce ne sont pas des images."); return; }
+      say(`Envoi de ${files.length} photo${files.length > 1 ? "s" : ""}…`);
       const form = new FormData();
-      form.append("activity", current);
-      files.forEach(f => form.append("photos", f));
+      if (stageId) form.append("activity", stageId);
+      files.forEach((f, i) => form.append("photos", f, f.name || `photo-${i + 1}.png`));
       try {
         const r = await fetch(BOOK.upload, { method: "POST", headers: { "X-CSRFToken": BOOK.csrf }, body: form });
         const data = await r.json();
         if (!data.ok) throw new Error(data.error);
-        if (data.rejected.length) alert(`Fichiers ignorés (pas des images) : ${data.rejected.join(", ")}`);
-        reloadAt(current, true);
+        if (stageId) {
+          // Sélection personnalisée ou non : on s'assure que les nouvelles photos sont sur l'étape
+          const list = [...stages[stageId].photos, ...data.keys.filter(k => !stages[stageId].photos.some(p => p.key === k)).map(k => ({ key: k, caption: "" }))];
+          await saveBook({ field: "stage.photos", activity: stageId, value: list });
+          await refresh([stageId]);
+        } else {
+          await refresh([]);
+        }
+        say(`${data.added} photo${data.added > 1 ? "s ajoutées" : " ajoutée"}${stageId ? ` sur l'étape ${stages[stageId].n}` : " au bac"}.`
+            + (data.rejected.length ? ` Ignoré : ${data.rejected.join(", ")}.` : ""));
       } catch (err) {
-        status.textContent = `Échec de l'envoi (${err.message})`;
+        say(`Échec de l'envoi (${err.message}).`);
       }
-    });
-    document.querySelectorAll(".edit-photos").forEach(b => b.addEventListener("click", () => open(b.dataset.activity)));
+    }
 
+    // Rafraîchissement partiel : on recharge le HTML et on remplace seulement les
+    // pages des étapes concernées, en gardant leur carte (déjà chargée) intacte.
+    async function refresh(ids) {
+      const html = await (await fetch(location.href, { headers: { "X-Requested-With": "fetch" } })).text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      loadData(doc);
+      for (const id of new Set(ids)) {
+        const oldPage = document.querySelector(`.stage-page[data-stage="${id}"]`);
+        const fresh = doc.querySelector(`.stage-page[data-stage="${id}"]`);
+        if (!oldPage || !fresh) continue;
+        const newPage = document.importNode(fresh, true);
+        const mapEl = oldPage.querySelector(".book-map");
+        newPage.querySelector(".book-map").replaceWith(mapEl);
+        oldPage.replaceWith(newPage);
+        document.querySelectorAll(`.photo-page[data-photos-of="${id}"]`).forEach(p => p.remove());
+        let after = newPage;
+        for (const pp of doc.querySelectorAll(`.photo-page[data-photos-of="${id}"]`)) {
+          const node = document.importNode(pp, true);
+          after.after(node);
+          after = node;
+        }
+        const m = window.bookMaps["s" + id];
+        if (m) { m.map.invalidateSize(); m.map.fitBounds(m.bounds, { padding: [28, 28] }); }
+        [newPage, ...document.querySelectorAll(`.photo-page[data-photos-of="${id}"]`)].forEach(node => {
+          window.layoutPhotos(node);
+          bindPhotos(node);
+          window.bindTexts(node);
+        });
+      }
+      if (activeStage) setActive(activeStage); else renderTray();
+    }
+
+    bindPhotos(document);
+    renderTray();
     let reopen = "";
     try { reopen = sessionStorage.getItem("otl-reopen") || ""; sessionStorage.removeItem("otl-reopen"); } catch (e) {}
-    if (reopen && editor[reopen]) open(reopen);
-
-    function escapeAttr(s) { return s.replace(/[&"<>]/g, c => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" }[c])); }
+    if (reopen && stages[reopen]) setActive(reopen);
   })();
   </script>
   {% endif %}

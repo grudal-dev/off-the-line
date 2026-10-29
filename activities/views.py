@@ -358,10 +358,8 @@ def book_detail(request, book_id):
         messages.error(request, "Les périples de ce livre n'existent plus (activités supprimées ?).")
         return redirect("activities:book")
     stage_notes = {s.activity_id: s for s in book_obj.stages.all()}
-    uploads = {}
-    for u in book_obj.uploads.all():
-        uploads.setdefault(u.activity_id, []).append(u)
-    chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j), book_obj, stage_notes, uploads)
+    pool = book.photo_pool(chosen, book_obj.uploads.all())
+    chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j), book_obj, stage_notes, pool)
                 for j in chosen]
 
     first, last = chosen[0].first_day, chosen[-1].last_day
@@ -371,10 +369,9 @@ def book_detail(request, book_id):
         "km": round(sum(j.distance_km for j in chosen)), "elevation": sum(j.elevation for j in chosen),
         "days": sum(j.days for j in chosen), "stages": sum(len(j.legs) for j in chosen),
     }
-    all_photos = [p for c in chapters for s in c["stages"] for p in s["all_photos"]]
-    cover_photo = next((p for p in all_photos if p["key"] == book_obj.cover_photo), None)
-    if book_obj.cover == Book.COVER_PHOTO and cover_photo is None and all_photos:
-        cover_photo = all_photos[0]
+    cover_photo = pool.get(book_obj.cover_photo)
+    if book_obj.cover == Book.COVER_PHOTO and cover_photo is None and pool:
+        cover_photo = next(iter(pool.values()))
 
     maps = [{"id": f"j{c['journey'].id}", "stages": [{"coords": s["coords"], "color": s["color"]} for s in c["stages"]],
              "transfers": [[t["from"], t["to"]] for t in c["journey"].transfer_list]}
@@ -382,17 +379,16 @@ def book_detail(request, book_id):
     maps += [{"id": f"s{s['id']}", "stages": [{"coords": s["coords"], "color": s["color"]}]}
              for c in chapters for s in c["stages"]]
     maps.append({"id": "cover", "stages": [st for m in maps[:len(chapters)] for st in m["stages"]]})
-    editor = {
-        s["id"]: {"label": s["label"], "default_label": s["default_label"], "photos": s["all_photos"]}
-        for c in chapters for s in c["stages"]
-    }
+    # Pour l'édition : toutes les photos du livre, et la sélection de chaque étape
+    stages_info = [{"id": s["id"], "n": s["n"], "label": s["label"], "chapter": ci, "photos": s["photo_keys"]}
+                   for ci, c in enumerate(chapters) for s in c["stages"]]
     return render(request, "activities/book.html", {
         "book": book_obj, "title": book_obj.title or "Mes périples", "chapters": chapters, "totals": totals,
         "maps": maps, "period": period, "cover_photo": cover_photo,
         "subtitle": book_obj.subtitle or f"{period[:1].upper()}{period[1:]}"
                     + (f", {account.firstname} {account.lastname}".rstrip() if account.firstname else ""),
         "opt": {k: book_obj.option(k) for k in Book.DEFAULT_OPTIONS},
-        "editor": editor, "all_photos": all_photos,
+        "pool": list(pool.values()), "stages_info": stages_info, "has_photos": bool(pool),
         "edit": request.GET.get("edition") == "1",
     })
 
@@ -403,6 +399,10 @@ def _json_body(request):
         return json.loads(request.body or b"{}")
     except ValueError:
         return {}
+
+
+def _book_photo_keys(account, book_obj):
+    return set(book.photo_pool(_book_journeys(account, book_obj), book_obj.uploads.all()))
 
 
 def _book_activity_ids(account, book_obj):
@@ -444,8 +444,9 @@ def book_update(request, book_id):
         else:
             if not isinstance(value, list):
                 return JsonResponse({"ok": False, "error": "Liste de photos attendue"}, status=400)
-            stage.photos = [{"key": str(p.get("key", ""))[:30], "caption": str(p.get("caption", ""))[:300]}
-                            for p in value if isinstance(p, dict)]
+            allowed = _book_photo_keys(account, book_obj)
+            stage.photos = [{"key": str(p.get("key")), "caption": str(p.get("caption", ""))[:300]}
+                            for p in value if isinstance(p, dict) and p.get("key") in allowed]
         stage.save()
     elif field == "cover":
         if value in (Book.COVER_MAP, Book.COVER_PHOTO):
@@ -463,6 +464,11 @@ def book_update(request, book_id):
         book_obj.save()
     elif field == "upload.delete":
         upload = get_object_or_404(BookPhoto, pk=int(data.get("upload", 0)), book=book_obj)
+        for stage in book_obj.stages.exclude(photos=None):
+            kept = [p for p in stage.photos if p.get("key") != upload.key]
+            if len(kept) != len(stage.photos):
+                stage.photos = kept
+                stage.save(update_fields=["photos"])
         upload.image.delete(save=False)
         upload.delete()
     else:
@@ -485,11 +491,9 @@ def book_upload(request, book_id):
     from PIL import Image, ImageOps, UnidentifiedImageError
 
     book_obj, account = _book_or_404(request, book_id)
-    try:
-        activity_id = int(request.POST.get("activity", 0))
-    except ValueError:
-        activity_id = 0
-    if activity_id not in _book_activity_ids(account, book_obj):
+    raw = request.POST.get("activity", "")
+    activity_id = int(raw) if raw.isdigit() else None  # sans étape : la photo va dans le bac
+    if activity_id is not None and activity_id not in _book_activity_ids(account, book_obj):
         return JsonResponse({"ok": False, "error": "Étape inconnue"}, status=400)
     added, rejected = [], []
     for f in request.FILES.getlist("photos")[:30]:
@@ -505,12 +509,12 @@ def book_upload(request, book_id):
         upload = BookPhoto(book=book_obj, activity_id=activity_id)
         upload.image.save(f"{secrets.token_hex(8)}.jpg", ContentFile(out.getvalue()), save=True)
         added.append(upload.key)
-    stage = BookStage.objects.filter(book=book_obj, activity_id=activity_id).first()
+    stage = BookStage.objects.filter(book=book_obj, activity_id=activity_id).first() if activity_id else None
     if stage and stage.photos is not None:  # sélection personnalisée : on y ajoute les nouvelles photos
         stage.photos += [{"key": k, "caption": ""} for k in added]
         stage.save()
     Book.objects.filter(pk=book_obj.pk).update(updated_at=timezone.now())
-    return JsonResponse({"ok": True, "added": len(added), "rejected": rejected})
+    return JsonResponse({"ok": True, "added": len(added), "keys": added, "rejected": rejected})
 
 
 @require_POST

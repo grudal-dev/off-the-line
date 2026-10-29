@@ -67,9 +67,12 @@ A4 : le bouton « Enregistrer en PDF » ouvre l'impression du navigateur (choisi
 format PDF »).
 
 Les livres sont enregistrés (« Mes livres ») et personnalisables avec « Personnaliser » : titres et
-textes modifiables directement sur la page, choix, ordre et légendes des photos de chaque étape,
-ajout de photos personnelles, couverture carte ou photo, sections affichées (sommaire, carnet de
-route, profils, dos). Les photos ne sont jamais recadrées : leur nombre par page et leur
+textes modifiables directement sur la page, couverture carte ou photo, sections affichées
+(sommaire, carnet de route, profils, dos). Les photos se manipulent directement sur les pages :
+✕ pour retirer (la photo retourne dans le bac), ‹ › pour l'ordre, légende en place ; un bac à
+droite contient toutes les photos du livre (Strava et ajoutées). On glisse une photo du bac vers
+une page, d'une page à une autre (Alt : copie), ou de l'ordinateur vers une page ; Ctrl+V colle
+une image sur l'étape sélectionnée. Une même photo peut servir sur plusieurs étapes. Les photos ne sont jamais recadrées : leur nombre par page et leur
 disposition dépendent de leurs proportions (`book.best_layout`). Les cartes du livre sont
 uniquement en imagerie satellite (Esri World Imagery, attribution imprimée).
 

@@ -189,7 +189,7 @@ class BookPhoto(models.Model):
     """Photo ajoutée par l'utilisateur à une étape d'un livre."""
 
     book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="uploads")
-    activity_id = models.BigIntegerField()
+    activity_id = models.BigIntegerField(null=True, blank=True, help_text="étape d'origine, vide si ajoutée au bac")
     image = models.ImageField(upload_to=book_photo_path, width_field="width", height_field="height")
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
