@@ -1,8 +1,10 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="{% static 'activities/icon.svg' %}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{% static 'activities/apple-touch-icon.png' %}">
   <title>{% block title %}Off the line{% endblock %}</title>
   <style>
     :root { --orange: #fc4c02; --ink: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; }
