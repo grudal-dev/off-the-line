@@ -10,6 +10,14 @@ traversée à ski…). On le reconnaît à trois signes :
    distingue un périple d'une série de sorties en boucle depuis chez soi, où
    les points 1 et 2 sont aussi vrais (on finit chez soi, on repart de chez soi).
 
+Certains voyages sont discontinus : on prend un train, un ferry, un bus entre
+deux étapes. L'étape suivante repart alors loin de l'arrivée précédente. Un tel
+« transfert » est accepté si le saut est physiquement plausible (vitesse
+moyenne compatible avec un transport), s'il ne part ni n'arrive à un endroit
+d'où l'on part souvent (chez soi : sinon chaque week-end en voiture deviendrait
+un périple), s'il relie des étapes d'un point à un autre, et si le périple
+compte au moins autant d'enchaînements « à pied/vélo » que de transferts.
+
 L'algorithme relie chaque activité à sa meilleure suivante selon ces règles,
 suit les chaînes ainsi formées, puis écarte les faux positifs :
 boucles autour de la maison au début ou à la fin, allers-retours
@@ -29,6 +37,13 @@ JOIN_KM = 5.0                      # l'étape suivante part à moins de 5 km de 
 SAME_PLACE_KM = 2.0                # en dessous, deux points sont « le même endroit »
 MIN_SPREAD_KM = 10.0               # un périple doit emmener quelque part
 MIN_DAYS = 2
+TRANSFER_MAX_KM = 2000.0         # au-delà, ce n'est plus le même voyage
+TRANSFER_MAX_SPEED = 900.0       # km/h, avion compris
+HOME_MIN_STARTS = 5              # un lieu d'où partent 5 activités ou plus est « chez soi »
+
+TRANSPORT_MODES = {
+    "train": "Train", "ferry": "Ferry", "bus": "Bus", "car": "Voiture", "plane": "Avion", "other": "Transfert",
+}
 
 
 @dataclass(eq=False)
@@ -63,10 +78,27 @@ class Leg:
 class Journey:
     legs: list
     nights: list = field(default_factory=list)  # index des étapes suivies d'une nuit
+    transfers: list = field(default_factory=list)  # index des étapes suivies d'un transfert
+    transfer_modes: dict = field(default_factory=dict)  # {index: "train"…} choisis par l'utilisateur
     start_name: str = None
     end_name: str = None
     custom_title: str = ""
     story: str = ""
+
+    def transfer_after(self, i):
+        """Le transfert qui suit l'étape i (ou None) : distance à vol d'oiseau, mode, lieux."""
+        if i not in self.transfers:
+            return None
+        a, b = self.legs[i], self.legs[i + 1]
+        mode = self.transfer_modes.get(i, "other")
+        route = f"{a.end_name} → {b.start_name}" if a.end_name and b.start_name else None
+        return {"index": i, "km": round(geo.distance_km(a.end, b.start)), "mode": mode,
+                "mode_label": TRANSPORT_MODES.get(mode, "Transfert"), "route": route,
+                "from": list(a.end), "to": list(b.start)}
+
+    @property
+    def transfer_list(self):
+        return [self.transfer_after(i) for i in self.transfers]
 
     @property
     def place_name(self):
@@ -168,26 +200,71 @@ def _legs(activities):
     return legs
 
 
+def _home_places(legs):
+    """Lieux d'où partent beaucoup d'activités : chez soi, le travail, le club…"""
+    places = []  # [point, nombre de départs]
+    for leg in legs:
+        for entry in places:
+            if geo.distance_km(entry[0], leg.start) < SAME_PLACE_KM:
+                entry[1] += 1
+                break
+        else:
+            places.append([leg.start, 1])
+    return [p for p, n in places if n >= HOME_MIN_STARTS]
+
+
 def _link(legs):
-    """Associe à chaque étape sa suivante (au plus une), en un passage chronologique."""
-    succ, has_pred = {}, set()
+    """Associe à chaque étape sa suivante (au plus une), en un passage chronologique.
+
+    Renvoie (suivantes, étapes ayant une précédente, étapes suivies d'un transfert).
+    Un enchaînement continu est toujours préféré à un transfert.
+    """
+    homes = _home_places(legs)
+
+    def at_home(point):
+        return any(geo.distance_km(point, h) < SAME_PLACE_KM for h in homes)
+
+    succ, has_pred, transfer = {}, set(), set()
     for i, a in enumerate(legs):
+        jump = None
         for b in legs[i + 1:]:
             gap = b.start_at - a.end_at
             if gap > MAX_GAP:
                 break  # triées par départ : les suivantes sont encore plus loin
             if gap < -OVERLAP or b in has_pred:
                 continue
-            if geo.distance_km(a.end, b.start) > JOIN_KM:
+            distance = geo.distance_km(a.end, b.start)
+            if distance <= JOIN_KM:
+                # Progression : on repart d'ailleurs que du départ précédent,
+                # sauf en cours de route (boucle depuis un gîte entre deux étapes).
+                moved = geo.distance_km(a.start, b.start) >= SAME_PLACE_KM
+                if moved or a in has_pred:
+                    jump = None
+                    succ[a] = b
+                    break
                 continue
-            # Progression : on repart d'ailleurs que du départ précédent,
-            # sauf en cours de route (boucle depuis un gîte entre deux étapes).
-            moved = geo.distance_km(a.start, b.start) >= SAME_PLACE_KM
-            if moved or a in has_pred:
-                succ[a] = b
-                has_pred.add(b)
-                break
-    return succ, has_pred
+            if jump is None and _plausible_transfer(a, b, distance, gap, a in has_pred, at_home):
+                jump = b
+        if a in succ:
+            has_pred.add(succ[a])
+        elif jump is not None:
+            succ[a] = jump
+            has_pred.add(jump)
+            transfer.add(a)
+    return succ, has_pred, transfer
+
+
+def _plausible_transfer(a, b, distance, gap, a_in_chain, at_home):
+    if distance > TRANSFER_MAX_KM:
+        return False
+    hours = max(gap.total_seconds() / 3600, 0.5)
+    if distance / hours > TRANSFER_MAX_SPEED:
+        return False
+    if at_home(a.end) or at_home(b.start):
+        return False
+    if b.is_loop:
+        return False
+    return not a.is_loop or a_in_chain
 
 
 def _places(points):
@@ -199,9 +276,12 @@ def _places(points):
     return places
 
 
-def _is_journey(chain):
+def _is_journey(chain, transfer):
     if len(chain) < 2:
         return False
+    jumps = sum(1 for leg in chain[:-1] if leg in transfer)
+    if jumps > (len(chain) - 1) - jumps:
+        return False  # plus de transferts que d'enchaînements : une suite de sorties en déplacement
     if (chain[-1].day - chain[0].day).days + 1 < MIN_DAYS:
         return False
     origin = chain[0].start
@@ -218,7 +298,7 @@ def _is_journey(chain):
 def detect(activities):
     """Renvoie les périples trouvés parmi `activities`, du plus récent au plus ancien."""
     legs = _legs(activities)
-    succ, has_pred = _link(legs)
+    succ, has_pred, transfer = _link(legs)
     journeys = []
     for head in legs:
         if head in has_pred:
@@ -232,9 +312,10 @@ def detect(activities):
             chain.pop(0)
         while chain and chain[-1].is_loop:
             chain.pop()
-        if _is_journey(chain):
+        if _is_journey(chain, transfer):
             nights = [i for i in range(len(chain) - 1) if chain[i + 1].day != chain[i].day]
-            journeys.append(Journey(chain, nights))
+            jumps = [i for i in range(len(chain) - 1) if chain[i] in transfer]
+            journeys.append(Journey(chain, nights, jumps))
     journeys.sort(key=lambda j: j.legs[0].start_at, reverse=True)
     return journeys
 
@@ -250,6 +331,8 @@ def for_account(account, budget=None):
         note = notes.get(j.id)
         if note:
             j.custom_title, j.story = note.title, note.story
+            j.transfer_modes = {int(k): v for k, v in (note.transfers or {}).items()
+                                if str(k).isdigit() and v in TRANSPORT_MODES}
     return places.name_journeys(found, budget)
 
 

@@ -213,7 +213,7 @@ def all_routes_map(request):
     trips = [
         {"id": j.id, "title": j.name, "url": reverse("activities:journey", args=[j.id]),
          "dates": _date_range(j), "stages": [a.strava_id for a in j.activities],
-         "colors": _stage_colors(len(j.legs))}
+         "colors": _stage_colors(len(j.legs)), "transfers": j.transfers}
         for j in journeys.for_account(account)
     ]
     return render(request, "activities/map.html",
@@ -261,6 +261,14 @@ def journey_detail(request, journey_id):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
+    if request.method == "POST" and "transfer_index" in request.POST:
+        found = _find_journey(account, journey_id)
+        index, mode = request.POST.get("transfer_index", ""), request.POST.get("mode", "")
+        if index.isdigit() and int(index) in found.transfers and mode in journeys.TRANSPORT_MODES:
+            note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
+            note.transfers = {**note.transfers, index: mode}
+            note.save()
+        return redirect("activities:journey", journey_id=journey_id)
     if request.method == "POST":
         _find_journey(account, journey_id)  # 404 si ce n'est pas un périple de l'utilisateur
         JourneyNote.objects.update_or_create(
@@ -281,13 +289,16 @@ def journey_detail(request, journey_id):
             "date": formats.date_format(a.start_date_local or a.start_date, "l j F"),
             "km": a.distance_km, "elevation": round(a.total_elevation_gain),
             "duration": a.duration_display, "night_after": i in journey.nights,
+            "transfer_after": journey.transfer_after(i),
             "coords": polyline.decode(a.summary_polyline),
         })
     nights = sum(1 for s in stages if s["night_after"])
     return render(request, "activities/journey.html", {
         "journey": journey, "dates": _date_range(journey), "stages": stages, "nights": nights,
-        "stages_json": [{k: s[k] for k in ("n", "id", "name", "label", "color", "coords", "night_after")}
+        "stages_json": [{k: s[k] for k in ("n", "id", "name", "label", "color", "coords", "night_after",
+                                            "transfer_after")}
                         for s in stages],
+        "transport_modes": journeys.TRANSPORT_MODES,
     })
 
 
@@ -365,7 +376,8 @@ def book_detail(request, book_id):
     if book_obj.cover == Book.COVER_PHOTO and cover_photo is None and all_photos:
         cover_photo = all_photos[0]
 
-    maps = [{"id": f"j{c['journey'].id}", "stages": [{"coords": s["coords"], "color": s["color"]} for s in c["stages"]]}
+    maps = [{"id": f"j{c['journey'].id}", "stages": [{"coords": s["coords"], "color": s["color"]} for s in c["stages"]],
+             "transfers": [[t["from"], t["to"]] for t in c["journey"].transfer_list]}
             for c in chapters]
     maps += [{"id": f"s{s['id']}", "stages": [{"coords": s["coords"], "color": s["color"]}]}
              for c in chapters for s in c["stages"]]

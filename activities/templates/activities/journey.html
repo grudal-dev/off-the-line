@@ -43,7 +43,18 @@
             </span>
             <span class="stage-figs">{{ s.km|floatformat:1 }} km<small>{{ s.elevation }} m D+</small></span>
           </a>
-          {% if s.night_after %}<p class="night">Nuit {{ forloop.counter }}</p>{% endif %}
+          {% if s.transfer_after %}{% with t=s.transfer_after %}
+            <form class="transfer" method="post">{% csrf_token %}
+              <input type="hidden" name="transfer_index" value="{{ t.index }}">
+              <label><span class="sr-only">Mode de transport</span>
+                <select name="mode" onchange="this.form.submit()">
+                  {% for key, label in transport_modes.items %}<option value="{{ key }}" {% if key == t.mode %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+              </label>
+              <span>{{ t.km }} km{% if t.route %}, {{ t.route }}{% endif %}{% if s.night_after %}, nuit {{ forloop.counter }}{% endif %}</span>
+              <noscript><button type="submit">OK</button></noscript>
+            </form>
+          {% endwith %}{% elif s.night_after %}<p class="night">Nuit {{ forloop.counter }}</p>{% endif %}
         </li>
       {% endfor %}
     </ol>
@@ -89,6 +100,13 @@
   stages.forEach((s, i) => {
     pin(s.coords[0], s.n, "pin-stage", `Départ de l'étape ${s.n}`).setZIndexOffset(100 + i);
     if (s.night_after) pin(s.coords[s.coords.length - 1], moon, "pin-night", "Nuit", [-4, 26]).setZIndexOffset(300);
+    if (s.transfer_after) {
+      // Transfert : trait en pointillés à vol d'oiseau, avec le mode de transport au milieu
+      const t = s.transfer_after;
+      L.polyline([t.from, t.to], { color: "#1c2629", weight: 3, dashArray: "2 8", lineCap: "round", interactive: false }).addTo(map);
+      const mid = [(t.from[0] + t.to[0]) / 2, (t.from[1] + t.to[1]) / 2];
+      L.marker(mid, { icon: L.divIcon({ className: "", html: `<span class="transfer-tag">${t.mode_label}, ${t.km} km</span>`, iconSize: null, iconAnchor: [0, 10] }), keyboard: false }).addTo(map);
+    }
   });
   const last = stages[stages.length - 1];
   pin(last.coords[last.coords.length - 1], flag, "pin-finish", "Arrivée").setZIndexOffset(500);

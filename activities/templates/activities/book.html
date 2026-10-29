@@ -110,7 +110,8 @@
             <td class="num">{{ s.elevation|floatformat:"0g" }} m</td>
             <td class="num">{{ s.duration }}</td>
           </tr>
-          {% if s.night_after %}<tr class="night-row"><td></td><td colspan="5">Nuit {{ forloop.counter }}</td></tr>{% endif %}
+          {% if s.transfer_after %}<tr class="night-row transfer-row"><td></td><td colspan="5">{{ s.transfer_after.mode_label }}{% if s.transfer_after.route %} : {{ s.transfer_after.route }}{% endif %}, {{ s.transfer_after.km }} km à vol d'oiseau{% if s.night_after %}, nuit {{ forloop.counter }}{% endif %}</td></tr>
+          {% elif s.night_after %}<tr class="night-row"><td></td><td colspan="5">Nuit {{ forloop.counter }}</td></tr>{% endif %}
         {% endfor %}
       </tbody>
     </table>
@@ -150,7 +151,8 @@
         {% for p in s.lead_photos %}{% include "activities/book_photo.html" %}{% endfor %}
       </div>
     {% endif %}
-    {% if s.night_after %}<p class="night-note">Nuit {{ s.n }}, puis étape {{ s.n|add:1 }}</p>{% endif %}
+    {% if s.transfer_after %}<p class="night-note">Puis {{ s.transfer_after.mode_label|lower }}{% if s.transfer_after.route %} : {{ s.transfer_after.route }}{% endif %}</p>
+    {% elif s.night_after %}<p class="night-note">Nuit {{ s.n }}, puis étape {{ s.n|add:1 }}</p>{% endif %}
   </section>
   {% for chunk in s.photo_pages %}
   <section class="page photo-page" style="--c: {{ s.color }}">
@@ -316,6 +318,9 @@
           L.marker(s.coords[0], { icon: L.divIcon({ className: "", html: `<span class="pin pin-stage">${i + 1}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(group);
         }
       });
+      for (const [from, to] of (m.transfers || [])) {
+        L.polyline([from, to], { color: "#ffffff", weight: 3, dashArray: "2 8", lineCap: "round" }).addTo(group);
+      }
       if (m.stages.length === 1) {
         const c = m.stages[0].coords;
         L.circleMarker(c[0], { radius: 6, color: "#1c2629", weight: 3, fillColor: "#fff", fillOpacity: 1 }).addTo(group);

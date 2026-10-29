@@ -183,3 +183,5 @@ body.book {
   [contenteditable] { outline: none !important; background: none !important; }
   [contenteditable]:empty { display: none; }
 }
+
+.transfer-row td { border-bottom-style: dashed; color: var(--ink); }

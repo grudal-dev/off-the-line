@@ -132,6 +132,7 @@ class JourneyNote(models.Model):
     journey_id = models.BigIntegerField()
     title = models.CharField(max_length=200, blank=True)
     story = models.TextField(blank=True)
+    transfers = models.JSONField(default=dict, blank=True, help_text='{"index d\'étape": "train"…}')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

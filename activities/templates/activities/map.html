@@ -12,6 +12,13 @@
           <p><strong id="total-count">{{ routes|length }}</strong>parcours</p>
           <p><strong id="total-km">{{ total_km|floatformat:"0g" }}</strong>kilomètres</p>
         </div>
+        <div class="view-switch" role="group" aria-label="Affichage des tracés">
+          <button type="button" data-mode="density" aria-pressed="true">Densité</button>
+          <button type="button" data-mode="sports" aria-pressed="false">Couleurs par sport</button>
+        </div>
+        <div class="density-legend" id="density-legend" aria-hidden="true">
+          <span>1 passage</span><span class="ramp" id="density-ramp"></span><span>souvent</span>
+        </div>
         {% if families|length > 1 %}
           <ul class="chips" aria-label="Sports affichés">
             {% for f in families %}
@@ -23,7 +30,7 @@
         {% endif %}
         {% if journeys %}
           <div class="journey-toggle">
-            <button type="button" class="chip" id="journey-toggle" aria-pressed="true">
+            <button type="button" class="chip" id="journey-toggle" aria-pressed="false">
               <span class="dot" style="--c: #6a1b9a"></span>Périples en évidence <span class="muted">{{ journeys|length }}</span>
             </button>
             <a href="{% url 'activities:journeys' %}">Voir les périples</a>
@@ -70,35 +77,87 @@
   const box = document.getElementById("atlas-map");
   const list = document.getElementById("route-list");
 
-  // Rendu canvas qui additionne les tracés qui se superposent :
-  // les chemins les plus empruntés ressortent plus clairs, comme une heatmap.
-  const BlendCanvas = L.Canvas.extend({
+  // Deux affichages :
+  // - Densité : chaque tracé ajoute un peu d'intensité là où il passe ; l'image est
+  //   ensuite recolorée selon cette intensité (1 passage → couleur légère, chemins
+  //   très empruntés → couleur intense). Les rues souvent parcourues ressortent.
+  // - Couleurs par sport : un tracé = la couleur de son sport.
+  const PALETTES = {
+    bright: [[0, "rgba(232,89,12,0)"], [0.06, "rgba(240,96,20,.65)"], [0.3, "#fc6a1e"], [0.6, "#ffb347"], [1, "#fffbe8"]],
+    deep: [[0, "rgba(252,76,2,0)"], [0.06, "rgba(252,76,2,.75)"], [0.35, "#e11d48"], [0.65, "#9d174d"], [1, "#3b0764"]],
+  };
+  function palette(stops) {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 1;
+    const g = c.getContext("2d").createLinearGradient(0, 0, 256, 0);
+    stops.forEach(([at, col]) => g.addColorStop(at, col));
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 1);
+    return { data: ctx.getImageData(0, 0, 256, 1).data, css: `linear-gradient(90deg, ${stops.slice(1).map(([a, c]) => `${c} ${a * 100}%`).join(", ")})` };
+  }
+  const RAMPS = { bright: palette(PALETTES.bright), deep: palette(PALETTES.deep) };
+
+  const TracksCanvas = L.Canvas.extend({
+    // Toujours redessiner tout le canevas : la recoloration porte sur l'image entière
+    _extendRedrawBounds() {},
     _draw() {
-      this._ctx.globalCompositeOperation = this.options.blend;
+      this._ctx.globalCompositeOperation = this.options.density ? "lighter" : this.options.blend;
       L.Canvas.prototype._draw.call(this);
+      if (this.options.density) this._colorize();
+    },
+    _colorize() {
+      const { width, height } = this._container;
+      if (!width || !height) return;
+      const img = this._ctx.getImageData(0, 0, width, height);
+      const px = img.data, pal = this.options.ramp.data;
+      for (let i = 3; i < px.length; i += 4) {
+        const a = px[i];
+        if (!a) continue;
+        const k = a * 4;
+        px[i - 3] = pal[k]; px[i - 2] = pal[k + 1]; px[i - 1] = pal[k + 2]; px[i] = pal[k + 3];
+      }
+      this._ctx.putImageData(img, 0, 0);
     },
   });
-  const renderer = new BlendCanvas({ padding: 0.5, tolerance: 6, blend: "lighter" });
+  const renderer = new TracksCanvas({ padding: 0.3, tolerance: 6, density: true, blend: "source-over", ramp: RAMPS.bright });
+  const overlay = L.canvas({ padding: 0.3 });  // mise en évidence au survol, au-dessus de tout
   const map = L.map("map", { renderer, zoomSnap: 0.25, zoomControl: false });
   L.control.zoom({ position: "bottomright" }).addTo(map);
 
-  // Style des tracés selon le type de fond : additif sur fond sombre,
-  // plus épais et opaque sur les cartes colorées pour rester lisible.
-  const STYLE = {
-    dark: { weight: 2, opacity: 0.4, blend: "lighter", hl: "#ffffff" },
-    light: { weight: 2.5, opacity: 0.55, blend: "multiply", hl: "#1c2629" },
-    color: { weight: 3, opacity: 0.75, blend: "source-over", hl: "#1c2629" },
-    photo: { weight: 3, opacity: 0.85, blend: "source-over", hl: "#ffffff" },
+  // Densité : lignes fines et très transparentes qui s'additionnent.
+  // Sports : plus épais, et « multiply » sur fond clair pour voir quand même les superpositions.
+  const SPORTS = {
+    dark: { weight: 2, opacity: 0.45, blend: "lighter" },
+    light: { weight: 2.5, opacity: 0.5, blend: "multiply" },
+    color: { weight: 2.5, opacity: 0.55, blend: "multiply" },
+    photo: { weight: 2.5, opacity: 0.6, blend: "screen" },
   };
+  const HL = { dark: "#ffffff", photo: "#ffffff", light: "#1c2629", color: "#1c2629" };
   let theme = "color";
-  const lineStyle = () => ({ weight: STYLE[theme].weight, opacity: STYLE[theme].opacity });
+  let mode = "density";
+  try { mode = localStorage.getItem("otl-map-mode") || "density"; } catch (e) {}
+
+  function lineStyle(route) {
+    if (mode === "density") return { color: "#ffffff", weight: 2.5, opacity: 0.22 };
+    return { color: route.color, weight: SPORTS[theme].weight, opacity: SPORTS[theme].opacity };
+  }
+  function restyle() {
+    renderer.options.density = mode === "density";
+    renderer.options.blend = SPORTS[theme].blend;
+    renderer.options.ramp = theme === "dark" || theme === "photo" ? RAMPS.bright : RAMPS.deep;
+    document.getElementById("density-ramp").style.background = renderer.options.ramp.css;
+    document.getElementById("density-legend").hidden = mode !== "density";
+    for (const line of byId.values()) Object.assign(line.options, lineStyle(line.route));
+    if (renderer._map && renderer._ctx) renderer._redraw();
+    document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
+  }
 
   const group = L.featureGroup().addTo(map);
   const byId = new Map();
-  let active = null;
+  let active = null, glow = null;
 
   for (const r of routes) {
-    const line = L.polyline(r.coords, { color: r.color, ...lineStyle() });
+    const line = L.polyline(r.coords, lineStyle(r));
     line.route = r;
     line.bindTooltip(
       `<strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.sport)}, ${r.date}, ${r.km.toFixed(1).replace(".", ",")} km</span>`,
@@ -111,36 +170,36 @@
     byId.set(r.id, line);
   }
 
-  // Périples : tracés par-dessus tout le reste, épais, avec un liseré,
-  // dans un dégradé orange → violet qui suit l'ordre des étapes.
+  // Périples : liseré et dégradé orange → violet ; les transferts (train, ferry…)
+  // en pointillés. Masqués par défaut pour laisser voir la densité.
   const trips = JSON.parse(document.getElementById("journeys-data").textContent);
-  const tripRenderer = L.canvas({ padding: 0.5, tolerance: 4 });
+  const tripRenderer = L.canvas({ padding: 0.3, tolerance: 4 });
   const tripLayer = L.featureGroup();
   const casings = [];
   for (const t of trips) {
     const tip = `<strong>${escapeHtml(t.title)}</strong><span>${t.dates}, ${t.stages.length} étapes</span>`;
-    t.stages.forEach((id, i) => {
-      const r = byId.get(id) && byId.get(id).route;
-      if (!r) return;
-      casings.push(L.polyline(r.coords, { renderer: tripRenderer, color: "#fff", weight: 9, opacity: 0.95, interactive: false }).addTo(tripLayer));
-    });
-    t.stages.forEach((id, i) => {
-      const r = byId.get(id) && byId.get(id).route;
-      if (!r) return;
-      L.polyline(r.coords, { renderer: tripRenderer, color: t.colors[i], weight: 4.5, lineCap: "round" })
+    const coords = t.stages.map(id => byId.get(id) && byId.get(id).route.coords);
+    coords.forEach(c => c && casings.push(L.polyline(c, { renderer: tripRenderer, color: "#fff", weight: 9, opacity: 0.95, interactive: false }).addTo(tripLayer)));
+    coords.forEach((c, i) => {
+      if (!c) return;
+      L.polyline(c, { renderer: tripRenderer, color: t.colors[i], weight: 4.5, lineCap: "round" })
         .bindTooltip(tip, { sticky: true, className: "route-tip" })
         .on("click", () => { window.location = t.url; })
         .addTo(tripLayer);
     });
-    const first = byId.get(t.stages[0]);
-    if (first) {
-      L.marker(first.route.coords[0], {
+    (t.transfers || []).forEach(i => {
+      if (!coords[i] || !coords[i + 1]) return;
+      L.polyline([coords[i][coords[i].length - 1], coords[i + 1][0]], {
+        renderer: tripRenderer, color: "#1c2629", weight: 2.5, dashArray: "2 7", lineCap: "round", interactive: false,
+      }).addTo(tripLayer);
+    });
+    if (coords[0]) {
+      L.marker(coords[0][0], {
         icon: L.divIcon({ className: "", html: `<a class="journey-label" href="${t.url}">${escapeHtml(t.title)}</a>`, iconSize: null, iconAnchor: [0, 30] }),
         zIndexOffset: 1000,
       }).addTo(tripLayer);
     }
   }
-  if (trips.length) tripLayer.addTo(map);
   const tripToggle = document.getElementById("journey-toggle");
   if (tripToggle) tripToggle.addEventListener("click", () => {
     const on = tripToggle.getAttribute("aria-pressed") !== "true";
@@ -148,29 +207,30 @@
     on ? tripLayer.addTo(map) : tripLayer.remove();
   });
 
+  document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
+    mode = b.dataset.mode;
+    try { localStorage.setItem("otl-map-mode", mode); } catch (e) {}
+    restyle();
+  }));
+
   mountBasemaps(map, def => {
     theme = def.theme;
-    renderer.options.blend = STYLE[theme].blend;
     box.dataset.theme = theme;
-    for (const line of byId.values()) line.setStyle(lineStyle());
     const casing = theme === "dark" || theme === "photo" ? "#1c2629" : "#ffffff";
     casings.forEach(c => c.setStyle({ color: casing }));
+    restyle();
   });
 
   function highlight(id, on) {
     const line = byId.get(id);
     const item = list.querySelector(`[data-route="${id}"]`);
-    if (on) {
-      if (active && active !== id) highlight(active, false);
-      active = id;
-      line.setStyle({ color: STYLE[theme].hl, weight: 4, opacity: 1 });
-      line.bringToFront();
-      item.classList.add("is-active");
-    } else {
-      line.setStyle({ color: line.route.color, ...lineStyle() });
-      item.classList.remove("is-active");
-      if (active === id) active = null;
-    }
+    if (glow) { glow.remove(); glow = null; }
+    if (active) list.querySelector(`[data-route="${active}"]`)?.classList.remove("is-active");
+    active = null;
+    if (!on) return;
+    active = id;
+    glow = L.polyline(line.route.coords, { renderer: overlay, color: HL[theme], weight: 4, opacity: 1, interactive: false }).addTo(map);
+    item.classList.add("is-active");
   }
 
   // Survol de la liste : met le parcours en évidence sur la carte
@@ -201,6 +261,7 @@
     list.querySelectorAll("li[data-family]").forEach(li => { li.hidden = hidden.has(li.dataset.family); });
     document.getElementById("total-count").textContent = count;
     document.getElementById("total-km").textContent = Math.round(km).toLocaleString("fr-FR");
+    if (renderer._map && renderer._ctx) renderer._redraw();
     if (count) map.flyToBounds(group.getBounds(), { padding: [30, 30], duration: 0.6 });
   }));
 

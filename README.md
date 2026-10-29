@@ -23,6 +23,11 @@ Ouvre ensuite http://localhost:8000.
 2. « Authorization Callback Domain » : `localhost`
 3. Copie le Client ID et le Client Secret dans `.env`
 
+## Carte
+
+Deux affichages : « Densité » (les tracés s'additionnent et sont recolorés selon le nombre de
+passages : les rues souvent empruntées ressortent) et « Couleurs par sport ».
+
 ## Fond de carte
 
 La carte globale utilise le fond sombre CARTO, qui exige désormais une clé gratuite :
@@ -39,6 +44,13 @@ L'onglet « Périples » regroupe automatiquement les activités enchaînées su
 le départ précédent (sinon ce sont des boucles depuis chez soi). Les chaînes qui ne
 s'éloignent pas d'au moins 10 km, tiennent en une journée ou font des allers-retours entre
 deux lieux (domicile-travail) sont écartées. Les seuils sont des constantes en haut du module.
+
+Les voyages discontinus (train, ferry, bus…) sont reconnus : quand l'étape suivante repart loin de
+l'arrivée précédente, le saut est accepté comme « transfert » s'il est plausible (vitesse moyenne
+≤ 900 km/h, moins de 2 000 km), qu'il ne part ni n'arrive à un lieu d'où partent souvent les
+activités (chez soi), qu'il relie des étapes d'un point à un autre, et que le périple compte au
+moins autant d'enchaînements continus que de transferts. Le mode de transport se choisit sur la
+page du périple ; les transferts sont tracés en pointillés et repris dans le livre.
 
 Les périples sont nommés d'après les communes de départ et d'arrivée (« Annecy → Chamonix-Mont-Blanc »,
 « Boucle depuis Annecy »), via le géocodage inverse de la Géoplateforme IGN, ou de Nominatim

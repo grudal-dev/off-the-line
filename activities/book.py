@@ -236,6 +236,7 @@ def build(journey, colors, date_range, book_obj=None, stage_notes=None, uploads=
             "lead_photos": lead, "photo_pages": photo_pages, "photo_box_h": photo_box_h,
             "all_photos": all_photos,
             "night_after": i in journey.nights,
+            "transfer_after": journey.transfer_after(i),
         })
     return {
         "journey": journey, "dates": date_range, "stages": stages,

@@ -625,3 +625,84 @@ class PhotoLayoutTests(TestCase):
         sync_photos(acc)
         photo = ActivityPhoto.objects.get()
         self.assertEqual((photo.width, photo.height), (768, 1024))
+
+
+NICE, MENTON, SANREMO = (43.70, 7.27), (43.775, 7.50), (43.815, 7.775)
+
+
+class TransferDetectionTests(TestCase):
+    def detect(self, activities):
+        from .journeys import detect
+        return detect(activities)
+
+    def test_train_in_the_middle_of_a_trip(self):
+        found = self.detect([
+            leg(1, 10, 8, ANNECY, FAVERGES),
+            leg(2, 11, 8, FAVERGES, ALBERTVILLE),
+            leg(3, 12, 14, NICE, MENTON),        # train Albertville → Nice dans la nuit
+            leg(4, 13, 8, MENTON, SANREMO),
+        ])
+        self.assertEqual(len(found), 1)
+        j = found[0]
+        self.assertEqual([a.strava_id for a in j.activities], [1, 2, 3, 4])
+        self.assertEqual(j.transfers, [1])
+        self.assertGreater(j.transfer_after(1)["km"], 150)
+        self.assertIsNone(j.transfer_after(0))
+
+    def test_continuous_link_is_preferred_to_a_transfer(self):
+        found = self.detect([
+            leg(1, 10, 8, ANNECY, FAVERGES),
+            leg(2, 11, 7, NICE, MENTON),          # plus tôt, mais loin
+            leg(3, 11, 9, FAVERGES, ALBERTVILLE),  # repart de l'arrivée : c'est la suite
+        ])
+        self.assertEqual([a.strava_id for a in found[0].activities], [1, 3])
+        self.assertEqual(found[0].transfers, [])
+
+    def test_rides_from_two_places_are_not_a_trip(self):
+        # Une sortie un jour, une autre ailleurs le lendemain : 1 transfert, 0 enchaînement
+        self.assertEqual(self.detect([leg(1, 10, 8, FAVERGES, ALBERTVILLE), leg(2, 11, 8, NICE, MENTON)]), [])
+
+    def test_no_transfer_from_or_to_home(self):
+        home_loops = [leg(100 + i, 1 + i, 8, ANNECY, ANNECY) for i in range(6)]  # Annecy = chez soi
+        found = self.detect(home_loops + [
+            leg(1, 10, 8, NICE, MENTON),
+            leg(2, 11, 8, MENTON, SANREMO),
+            leg(3, 12, 9, ANNECY, FAVERGES),  # rentré à la maison : la sortie suivante en repart
+        ])
+        self.assertEqual([a.strava_id for a in found[0].activities], [1, 2])
+
+    def test_impossible_speed_is_not_a_transfer(self):
+        far = (40.0, -3.7)  # Madrid, une heure après : impossible
+        found = self.detect([
+            leg(1, 10, 8, ANNECY, FAVERGES, hours=2), leg(2, 10, 11, far, (40.1, -3.6)),
+            leg(3, 11, 8, FAVERGES, ALBERTVILLE),
+        ])
+        self.assertEqual([a.strava_id for a in found[0].activities], [1, 3])
+
+
+class TransferPagesTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE),
+                  leg(3, 12, 14, NICE, MENTON), leg(4, 13, 8, MENTON, SANREMO)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.save()
+
+    def test_choose_transport_mode(self):
+        url = reverse("activities:journey", args=[1])
+        self.assertContains(self.client.get(url), 'name="transfer_index" value="1"')
+        self.client.post(url, {"transfer_index": "1", "mode": "train"})
+        page = self.client.get(url)
+        self.assertContains(page, '<option value="train" selected>', html=False)
+        self.client.post(url, {"transfer_index": "0", "mode": "train"})  # pas un transfert : ignoré
+        from .models import JourneyNote
+        self.assertEqual(JourneyNote.objects.get().transfers, {"1": "train"})
+
+    def test_book_mentions_the_transfer(self):
+        from .models import Book, JourneyNote
+        JourneyNote.objects.create(account=self.account, journey_id=1, transfers={"1": "ferry"})
+        b = Book.objects.create(account=self.account, journey_ids=[1])
+        page = self.client.get(reverse("activities:book_detail", args=[b.pk]))
+        self.assertContains(page, "Ferry")
+        self.assertContains(page, "vol d'oiseau")
