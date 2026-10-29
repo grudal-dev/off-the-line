@@ -19,12 +19,33 @@
     .user { display: flex; align-items: center; gap: .75rem; }
     .user img { width: 32px; height: 32px; border-radius: 50%; }
     .user form { margin: 0; }
+    nav.main { display: flex; gap: 1.25rem; }
+    nav.main a { color: var(--muted); text-decoration: none; font-weight: 500; }
+    nav.main a:hover { color: var(--ink); }
+    .messages li.success { background: #e3f5e1; }
+    .messages li.info { background: #e8f0fe; }
+    table.data { width: 100%; border-collapse: collapse; background: #fff; }
+    table.data th, table.data td { padding: .6rem; text-align: left; border-bottom: 1px solid var(--line); }
+    table.data a { color: var(--ink); }
+    .toolbar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+    .toolbar form { margin: 0; }
+    select { padding: .5rem; border-radius: 6px; border: 1px solid var(--line); font: inherit; }
+    .map { height: 520px; border-radius: 8px; border: 1px solid var(--line); }
+    .stats { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1rem 0 1.5rem; }
+    .stats div { display: flex; flex-direction: column; }
+    .stats strong { font-size: 1.4rem; }
+    .stats span { color: var(--muted); font-size: .9rem; }
   </style>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header>
     <a class="brand" href="{% url 'activities:home' %}">Off the line</a>
     {% if user.is_authenticated and user.strava %}
+      <nav class="main">
+        <a href="{% url 'activities:list' %}">Activités</a>
+        <a href="{% url 'activities:map' %}">Carte</a>
+      </nav>
       <div class="user">
         {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% endif %}
         <span>{{ user.strava.firstname }}</span>
@@ -40,5 +61,6 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

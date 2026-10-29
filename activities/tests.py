@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import StravaAccount
+from .models import Activity, StravaAccount
 
 TOKEN_RESPONSE = {
     "access_token": "acc-123",
@@ -60,9 +60,14 @@ class StravaOAuthTests(TestCase):
         self.assertRedirects(response, reverse("activities:home"))
         self.assertFalse(StravaAccount.objects.exists())
 
+    @mock.patch("activities.strava.requests.get")
     @mock.patch("activities.strava.requests.post")
-    def test_callback_creates_user_and_logs_in(self, post):
+    def test_callback_creates_user_logs_in_and_imports(self, post, get):
         post.return_value = fake_response(json_data=TOKEN_RESPONSE)
+        get.return_value = fake_response(json_data=[{
+            "id": 7, "name": "Première sortie", "sport_type": "Run", "distance": 5000,
+            "start_date": "2026-10-01T08:00:00Z", "map": {"summary_polyline": ""},
+        }])
         state = self._start_login()
         response = self.client.get(
             reverse("activities:strava_callback"),
@@ -73,52 +78,144 @@ class StravaOAuthTests(TestCase):
         self.assertEqual(account.access_token, "acc-123")
         self.assertEqual(account.user.username, "strava_42")
         self.assertEqual(int(self.client.session["_auth_user_id"]), account.user.pk)
+        self.assertTrue(Activity.objects.filter(strava_id=7, account=account).exists())
 
 
-class ActivityListTests(TestCase):
+# "_p~iF~ps|U_ulLnnqC_mqNvxq`@" = exemple officiel Google : 3 points
+SAMPLE_POLYLINE = "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+
+
+def strava_activity(id_, name="Sortie", start="2026-10-28T17:30:00Z", polyline=SAMPLE_POLYLINE, sport="Run"):
+    return {
+        "id": id_, "name": name, "type": sport, "sport_type": sport,
+        "distance": 10234.5, "moving_time": 3000, "elapsed_time": 3100,
+        "total_elevation_gain": 87.2, "average_speed": 3.4,
+        "start_date": start, "start_date_local": start,
+        "start_latlng": [38.5, -120.2], "map": {"summary_polyline": polyline},
+    }
+
+
+class PolylineTests(TestCase):
+    def test_decode_google_example(self):
+        from .polyline import decode
+        self.assertEqual(decode(SAMPLE_POLYLINE), [[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]])
+
+    def test_decode_empty(self):
+        from .polyline import decode
+        self.assertEqual(decode(""), [])
+
+
+class LoggedInTestCase(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(username="strava_42")
         self.account = StravaAccount.objects.create(
             user=self.user, athlete_id=42, firstname="Lucas",
-            access_token="old", refresh_token="ref-old",
-            expires_at=timezone.now() - timedelta(minutes=1),  # expiré
+            access_token="tok", refresh_token="ref",
+            expires_at=timezone.now() + timedelta(hours=1),
         )
         self.client.force_login(self.user)
 
+
+class TokenRefreshTests(LoggedInTestCase):
     @mock.patch("activities.strava.requests.get")
     @mock.patch("activities.strava.requests.post")
-    def test_list_refreshes_token_then_fetches(self, post, get):
+    def test_expired_token_is_refreshed_before_call(self, post, get):
+        from . import strava
+        self.account.expires_at = timezone.now() - timedelta(minutes=1)
+        self.account.save()
         post.return_value = fake_response(json_data={
             "access_token": "new", "refresh_token": "ref-new",
             "expires_at": int((timezone.now() + timedelta(hours=6)).timestamp()),
         })
-        get.return_value = fake_response(json_data=[{
-            "name": "Sortie du soir", "type": "Run", "sport_type": "Run",
-            "distance": 10234.5, "moving_time": 3000, "total_elevation_gain": 87.2,
-            "start_date_local": "2026-10-28T18:30:00Z",
-        }])
-        response = self.client.get(reverse("activities:list"))
-        self.assertContains(response, "Sortie du soir")
-        self.assertContains(response, "10,23 km")
+        get.return_value = fake_response(json_data=[])
+        strava.api_get(self.account, "/athlete/activities")
         self.account.refresh_from_db()
         self.assertEqual(self.account.access_token, "new")
         self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer new")
 
+
+class SyncTests(LoggedInTestCase):
     @mock.patch("activities.strava.requests.get")
-    def test_list_shows_rate_limit_error(self, get):
-        self.account.expires_at = timezone.now() + timedelta(hours=1)
-        self.account.save()
+    def test_sync_creates_activities_and_is_idempotent(self, get):
+        from .sync import sync_activities
+        get.return_value = fake_response(json_data=[strava_activity(1), strava_activity(2, polyline="")])
+        self.assertEqual(sync_activities(self.account), 2)
+        self.assertEqual(Activity.objects.count(), 2)
+        a = Activity.objects.get(strava_id=1)
+        self.assertEqual(a.summary_polyline, SAMPLE_POLYLINE)
+        self.assertEqual(a.start_lat, 38.5)
+
+        # 2e synchro : on ne demande que les activités plus récentes
+        get.return_value = fake_response(json_data=[])
+        sync_activities(self.account)
+        self.assertIn("after", get.call_args.kwargs["params"])
+        self.assertEqual(Activity.objects.count(), 2)
+
+    @mock.patch("activities.strava.requests.get")
+    def test_sync_paginates(self, get):
+        from .sync import PER_PAGE, sync_activities
+        page1 = [strava_activity(i) for i in range(PER_PAGE)]
+        page2 = [strava_activity(PER_PAGE + 1)]
+        get.side_effect = [fake_response(json_data=page1), fake_response(json_data=page2)]
+        self.assertEqual(sync_activities(self.account), PER_PAGE + 1)
+        self.assertEqual(get.call_count, 2)
+
+    @mock.patch("activities.strava.requests.get")
+    def test_sync_view_shows_rate_limit_error(self, get):
         get.return_value = fake_response(status=429)
-        response = self.client.get(reverse("activities:list"))
+        response = self.client.post(reverse("activities:sync"), follow=True)
         self.assertContains(response, "Limite de requêtes Strava")
 
-    def test_list_requires_login(self):
-        self.client.logout()
+
+class ActivityPagesTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        from .sync import _to_fields
+        for data in (strava_activity(1, "Sortie du soir"), strava_activity(2, "Vélo", sport="Ride"),
+                     strava_activity(3, "Tapis", polyline="")):
+            Activity.objects.create(account=self.account, strava_id=data["id"], **_to_fields(data))
+
+    def test_list_reads_from_db(self):
         response = self.client.get(reverse("activities:list"))
-        self.assertEqual(response.status_code, 302)
+        self.assertContains(response, "Sortie du soir")
+        self.assertContains(response, "10,23 km")
+        self.assertContains(response, "50 min")
+
+    def test_list_filters_by_sport(self):
+        response = self.client.get(reverse("activities:list"), {"sport": "Ride"})
+        self.assertContains(response, "Vélo")
+        self.assertNotContains(response, "Sortie du soir")
+
+    def test_detail_has_route(self):
+        response = self.client.get(reverse("activities:detail", args=[1]))
+        self.assertContains(response, 'id="route-data"')
+        self.assertContains(response, "leaflet")
+
+    def test_detail_without_route(self):
+        response = self.client.get(reverse("activities:detail", args=[3]))
+        self.assertContains(response, "Pas de tracé GPS")
+
+    def test_detail_of_other_user_is_404(self):
+        other = get_user_model().objects.create(username="strava_99")
+        other_acc = StravaAccount.objects.create(
+            user=other, athlete_id=99, access_token="x", refresh_token="y", expires_at=timezone.now())
+        from .sync import _to_fields
+        Activity.objects.create(account=other_acc, strava_id=500, **_to_fields(strava_activity(500)))
+        self.assertEqual(self.client.get(reverse("activities:detail", args=[500])).status_code, 404)
+
+    def test_map_contains_only_routes(self):
+        response = self.client.get(reverse("activities:map"))
+        self.assertEqual(len(response.context["routes"]), 2)
+        self.assertContains(response, "2 parcours")
+
+    def test_pages_require_login(self):
+        self.client.logout()
+        for url in (reverse("activities:list"), reverse("activities:map"), reverse("activities:detail", args=[1])):
+            self.assertEqual(self.client.get(url).status_code, 302)
 
     @mock.patch("activities.strava.requests.post")
-    def test_disconnect_deletes_tokens(self, post):
+    def test_disconnect_deletes_everything(self, post):
         response = self.client.post(reverse("activities:disconnect"))
         self.assertRedirects(response, reverse("activities:home"))
         self.assertFalse(StravaAccount.objects.exists())
+        self.assertFalse(Activity.objects.exists())

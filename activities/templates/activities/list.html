@@ -3,39 +3,55 @@
 {% block content %}
   <h1>Mes activités</h1>
 
-  {% if error %}
-    <ul class="messages"><li class="error">{{ error }}</li></ul>
-  {% endif %}
+  <div class="toolbar">
+    <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+      <button class="btn" type="submit">Synchroniser avec Strava</button>
+    </form>
+    {% if sports %}
+      <form method="get">
+        <select name="sport" onchange="this.form.submit()">
+          <option value="">Tous les sports ({{ total }})</option>
+          {% for s in sports %}<option value="{{ s }}" {% if s == sport %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </form>
+    {% endif %}
+  </div>
 
-  {% if activities %}
-    <table style="width:100%; border-collapse:collapse; background:#fff;">
+  {% if page_obj.object_list %}
+    <table class="data">
       <thead>
-        <tr style="text-align:left; border-bottom:1px solid var(--line);">
-          <th style="padding:.6rem;">Date</th><th>Nom</th><th>Type</th><th>Distance</th><th>Durée</th><th>D+</th>
-        </tr>
+        <tr><th>Date</th><th>Nom</th><th>Type</th><th>Distance</th><th>Durée</th><th>D+</th></tr>
       </thead>
       <tbody>
-        {% for a in activities %}
-          <tr style="border-bottom:1px solid var(--line);">
-            <td style="padding:.6rem;">{{ a.start_date_local|slice:":10" }}</td>
-            <td>{{ a.name }}</td>
-            <td>{{ a.sport_type|default:a.type }}</td>
+        {% for a in page_obj %}
+          <tr>
+            <td>{{ a.start_date_local|default:a.start_date|date:"d/m/Y" }}</td>
+            <td><a href="{% url 'activities:detail' a.strava_id %}">{{ a.name }}</a></td>
+            <td>{{ a.sport_type }}</td>
             <td>{{ a.distance_km }} km</td>
-            <td>{{ a.moving_time_min }} min</td>
+            <td>{{ a.duration_display }}</td>
             <td>{{ a.total_elevation_gain|floatformat:0 }} m</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
-    <p style="display:flex; gap:.5rem; margin-top:1rem;">
-      {% if page > 1 %}<a class="btn secondary" href="?page={{ page|add:-1 }}">← Plus récentes</a>{% endif %}
-      {% if activities|length == 30 %}<a class="btn secondary" href="?page={{ page|add:1 }}">Plus anciennes →</a>{% endif %}
+    <p class="toolbar">
+      {% if page_obj.has_previous %}<a class="btn secondary" href="?page={{ page_obj.previous_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">← Plus récentes</a>{% endif %}
+      <span>Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a class="btn secondary" href="?page={{ page_obj.next_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">Plus anciennes →</a>{% endif %}
     </p>
-  {% elif not error %}
-    <p>Aucune activité trouvée.</p>
+  {% else %}
+    <p>Aucune activité enregistrée. Clique sur « Synchroniser avec Strava » pour les importer.</p>
   {% endif %}
 
-  <form method="post" action="{% url 'activities:disconnect' %}" style="margin-top:3rem;">{% csrf_token %}
-    <button class="btn secondary" type="submit">Retirer l'accès Strava et supprimer mes données</button>
-  </form>
+  <details style="margin-top:3rem;">
+    <summary>Options avancées</summary>
+    <form method="post" action="{% url 'activities:sync' %}" style="margin-top:1rem;">{% csrf_token %}
+      <input type="hidden" name="full" value="1">
+      <button class="btn secondary" type="submit">Tout réimporter depuis Strava</button>
+    </form>
+    <form method="post" action="{% url 'activities:disconnect' %}" style="margin-top:1rem;">{% csrf_token %}
+      <button class="btn secondary" type="submit">Retirer l'accès Strava et supprimer mes données</button>
+    </form>
+  </details>
 {% endblock %}

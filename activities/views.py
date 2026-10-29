@@ -4,11 +4,13 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect, render
+from django.core.paginator import Paginator
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from . import strava
-from .models import StravaAccount
+from . import polyline, strava
+from .models import Activity, StravaAccount
+from .sync import sync_activities
 
 SESSION_STATE_KEY = "strava_oauth_state"
 
@@ -74,6 +76,14 @@ def strava_callback(request):
         },
     )
     login(request, user)
+
+    account = user.strava
+    if not account.activities.exists():
+        try:
+            count = sync_activities(account)
+            messages.success(request, f"Bienvenue ! {count} activité(s) importée(s) depuis Strava.")
+        except strava.StravaError as exc:
+            messages.error(request, f"Connecté, mais l'import des activités a échoué : {exc}")
     return redirect("activities:list")
 
 
@@ -96,29 +106,75 @@ def strava_disconnect(request):
     return redirect("activities:home")
 
 
+def _account_or_none(request):
+    return getattr(request.user, "strava", None)
+
+
 @login_required
 def activity_list(request):
-    account = getattr(request.user, "strava", None)
+    account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
 
-    try:
-        page = max(1, int(request.GET.get("page", 1)))
-    except ValueError:
-        page = 1
-
-    activities, error = [], None
-    try:
-        activities = strava.list_activities(account, page=page)
-    except strava.StravaError as exc:
-        error = str(exc)
-
-    for a in activities:
-        a["distance_km"] = round(a.get("distance", 0) / 1000, 2)
-        a["moving_time_min"] = round(a.get("moving_time", 0) / 60)
+    qs = account.activities.all()
+    sport = request.GET.get("sport", "")
+    if sport:
+        qs = qs.filter(sport_type=sport)
+    page_obj = Paginator(qs, 30).get_page(request.GET.get("page"))
+    sports = account.activities.order_by("sport_type").values_list("sport_type", flat=True).distinct()
 
     return render(
         request,
         "activities/list.html",
-        {"account": account, "activities": activities, "page": page, "error": error},
+        {"account": account, "page_obj": page_obj, "sports": sports, "sport": sport,
+         "total": account.activities.count()},
     )
+
+
+@require_POST
+@login_required
+def activity_sync(request):
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    full = request.POST.get("full") == "1"
+    try:
+        count = sync_activities(account, full=full)
+    except strava.StravaError as exc:
+        messages.error(request, f"Synchronisation interrompue : {exc}")
+    else:
+        if count:
+            messages.success(request, f"{count} activité(s) importée(s) depuis Strava.")
+        else:
+            messages.info(request, "Rien de nouveau sur Strava.")
+    return redirect("activities:list")
+
+
+@login_required
+def activity_detail(request, strava_id):
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
+    route = polyline.decode(activity.summary_polyline) if activity.summary_polyline else []
+    return render(request, "activities/detail.html", {"activity": activity, "route": route})
+
+
+@login_required
+def all_routes_map(request):
+    """Carte qui superpose tous les parcours de l'utilisateur."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    qs = account.activities.exclude(summary_polyline="")
+    sport = request.GET.get("sport", "")
+    if sport:
+        qs = qs.filter(sport_type=sport)
+    routes = [
+        {"id": a.strava_id, "name": a.name, "sport": a.sport_type,
+         "date": a.start_date.strftime("%d/%m/%Y"), "km": a.distance_km,
+         "coords": polyline.decode(a.summary_polyline)}
+        for a in qs.only("strava_id", "name", "sport_type", "start_date", "distance", "summary_polyline")
+    ]
+    sports = account.activities.exclude(summary_polyline="").order_by("sport_type").values_list("sport_type", flat=True).distinct()
+    return render(request, "activities/map.html", {"routes": routes, "sports": sports, "sport": sport})

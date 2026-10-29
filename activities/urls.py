@@ -11,4 +11,7 @@ urlpatterns = [
     path("strava/logout/", views.strava_logout, name="logout"),
     path("strava/disconnect/", views.strava_disconnect, name="disconnect"),
     path("activites/", views.activity_list, name="list"),
+    path("activites/synchroniser/", views.activity_sync, name="sync"),
+    path("activites/<int:strava_id>/", views.activity_detail, name="detail"),
+    path("carte/", views.all_routes_map, name="map"),
 ]

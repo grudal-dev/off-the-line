@@ -29,3 +29,46 @@ class StravaAccount(models.Model):
     def is_expired(self):
         # Marge de 5 minutes pour éviter qu'un jeton expire en pleine requête
         return self.expires_at <= timezone.now() + timezone.timedelta(minutes=5)
+
+
+class Activity(models.Model):
+    """Activité Strava enregistrée localement (synchronisée depuis l'API)."""
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="activities")
+    strava_id = models.BigIntegerField(unique=True)
+    name = models.CharField(max_length=255)
+    sport_type = models.CharField(max_length=50, blank=True)
+    start_date = models.DateTimeField()
+    start_date_local = models.DateTimeField(null=True, blank=True)
+    distance = models.FloatField(default=0, help_text="mètres")
+    moving_time = models.PositiveIntegerField(default=0, help_text="secondes")
+    elapsed_time = models.PositiveIntegerField(default=0, help_text="secondes")
+    total_elevation_gain = models.FloatField(default=0, help_text="mètres")
+    average_speed = models.FloatField(default=0, help_text="m/s")
+    summary_polyline = models.TextField(blank=True)
+    start_lat = models.FloatField(null=True, blank=True)
+    start_lng = models.FloatField(null=True, blank=True)
+    raw = models.JSONField(default=dict, blank=True)
+
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-start_date"]
+        indexes = [models.Index(fields=["account", "-start_date"])]
+
+    def __str__(self):
+        return f"{self.name} ({self.start_date:%Y-%m-%d})"
+
+    @property
+    def distance_km(self):
+        return round(self.distance / 1000, 2)
+
+    @property
+    def duration_display(self):
+        h, rem = divmod(self.moving_time, 3600)
+        m = rem // 60
+        return f"{h} h {m:02d}" if h else f"{m} min"
+
+    @property
+    def has_route(self):
+        return bool(self.summary_polyline)

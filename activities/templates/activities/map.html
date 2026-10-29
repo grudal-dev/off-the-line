@@ -1,0 +1,40 @@
+{% extends "activities/base.html" %}
+{% block title %}Tous mes parcours · Off the line{% endblock %}
+{% block head %}{% include "activities/leaflet_head.html" %}{% endblock %}
+{% block content %}
+  <h1>Tous mes parcours</h1>
+  <div class="toolbar">
+    <form method="get">
+      <select name="sport" onchange="this.form.submit()">
+        <option value="">Tous les sports</option>
+        {% for s in sports %}<option value="{{ s }}" {% if s == sport %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </form>
+    <span style="color:var(--muted)">{{ routes|length }} parcours</span>
+  </div>
+  {% if routes %}
+    <div id="map" class="map" style="height:640px;"></div>
+    {{ routes|json_script:"routes-data" }}
+  {% else %}
+    <p>Aucun parcours avec tracé GPS. Synchronise tes activités depuis la page Activités.</p>
+  {% endif %}
+{% endblock %}
+{% block scripts %}{% if routes %}
+<script>
+  const routes = JSON.parse(document.getElementById("routes-data").textContent);
+  const map = L.map("map", { preferCanvas: true });
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
+  }).addTo(map);
+  const group = L.featureGroup().addTo(map);
+  for (const r of routes) {
+    const line = L.polyline(r.coords, { color: "#fc4c02", weight: 2, opacity: 0.45 });
+    line.bindTooltip(`${r.name} · ${r.date} · ${r.km} km`, { sticky: true });
+    line.on("mouseover", () => line.setStyle({ opacity: 1, weight: 4 }));
+    line.on("mouseout", () => line.setStyle({ opacity: 0.45, weight: 2 }));
+    line.on("click", () => { window.location = `/activites/${r.id}/`; });
+    line.addTo(group);
+  }
+  map.fitBounds(group.getBounds(), { padding: [20, 20] });
+</script>
+{% endif %}{% endblock %}

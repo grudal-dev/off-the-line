@@ -1,0 +1,36 @@
+{% extends "activities/base.html" %}
+{% block title %}{{ activity.name }} · Off the line{% endblock %}
+{% block head %}{% if route %}{% include "activities/leaflet_head.html" %}{% endif %}{% endblock %}
+{% block content %}
+  <p><a href="{% url 'activities:list' %}">← Mes activités</a></p>
+  <h1>{{ activity.name }}</h1>
+  <p style="color:var(--muted)">{{ activity.sport_type }} · {{ activity.start_date_local|default:activity.start_date|date:"l j F Y, H:i" }}</p>
+
+  <div class="stats">
+    <div><strong>{{ activity.distance_km }} km</strong><span>Distance</span></div>
+    <div><strong>{{ activity.duration_display }}</strong><span>Temps en mouvement</span></div>
+    <div><strong>{{ activity.total_elevation_gain|floatformat:0 }} m</strong><span>Dénivelé +</span></div>
+  </div>
+
+  {% if route %}
+    <div id="map" class="map"></div>
+    {{ route|json_script:"route-data" }}
+  {% else %}
+    <p>Pas de tracé GPS pour cette activité.</p>
+  {% endif %}
+
+  <p style="margin-top:1rem;"><a href="https://www.strava.com/activities/{{ activity.strava_id }}" target="_blank" rel="noopener">Voir sur Strava ↗</a></p>
+{% endblock %}
+{% block scripts %}{% if route %}
+<script>
+  const route = JSON.parse(document.getElementById("route-data").textContent);
+  const map = L.map("map");
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+  const line = L.polyline(route, { color: "#fc4c02", weight: 4 }).addTo(map);
+  L.circleMarker(route[0], { radius: 6, color: "#fff", fillColor: "#2e9e44", fillOpacity: 1, weight: 2 }).addTo(map).bindTooltip("Départ");
+  L.circleMarker(route[route.length - 1], { radius: 6, color: "#fff", fillColor: "#d92d20", fillOpacity: 1, weight: 2 }).addTo(map).bindTooltip("Arrivée");
+  map.fitBounds(line.getBounds(), { padding: [20, 20] });
+</script>
+{% endif %}{% endblock %}
