@@ -33,6 +33,7 @@ Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
 
 - `config/` : réglages du projet Django
 - `activities/` : app principale (connexion Strava, activités, visualisations)
+- `activities/static/activities/` : feuille de style, icônes, polices Barlow et Leaflet hébergés localement
 
 ## Tests
 

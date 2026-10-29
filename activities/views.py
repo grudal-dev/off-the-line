@@ -6,9 +6,10 @@ from django.contrib.auth import get_user_model, login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import formats
 from django.views.decorators.http import require_POST
 
-from . import polyline, strava
+from . import geo, polyline, sports, strava
 from .models import Activity, StravaAccount
 from .sync import sync_activities
 
@@ -166,15 +167,23 @@ def all_routes_map(request):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
-    qs = account.activities.exclude(summary_polyline="")
-    sport = request.GET.get("sport", "")
-    if sport:
-        qs = qs.filter(sport_type=sport)
-    routes = [
-        {"id": a.strava_id, "name": a.name, "sport": a.sport_type,
-         "date": a.start_date.strftime("%d/%m/%Y"), "km": a.distance_km,
-         "coords": polyline.decode(a.summary_polyline)}
-        for a in qs.only("strava_id", "name", "sport_type", "start_date", "distance", "summary_polyline")
+    qs = account.activities.exclude(summary_polyline="").only(
+        "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance", "summary_polyline")
+    routes, counts = [], {}
+    for a in qs:
+        coords = polyline.decode(a.summary_polyline)
+        fam = sports.family(a.sport_type)
+        counts[fam] = counts.get(fam, 0) + 1
+        routes.append({
+            "id": a.strava_id, "name": a.name, "sport": sports.label(a.sport_type),
+            "family": fam, "color": sports.FAMILIES[fam][1],
+            "date": formats.date_format(a.start_date_local or a.start_date, "j F Y"),
+            "km": a.distance_km, "coords": coords, "thumb": geo.svg_path(coords, max_points=60),
+        })
+    families = [
+        {"key": key, "label": label, "color": color, "count": counts[key]}
+        for key, (label, color) in sports.FAMILIES.items() if key in counts
     ]
-    sports = account.activities.exclude(summary_polyline="").order_by("sport_type").values_list("sport_type", flat=True).distinct()
-    return render(request, "activities/map.html", {"routes": routes, "sports": sports, "sport": sport})
+    total_km = round(sum(r["km"] for r in routes))
+    return render(request, "activities/map.html",
+                  {"routes": routes, "families": families, "total_km": total_km})

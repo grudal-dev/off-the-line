@@ -1,38 +1,167 @@
 {% extends "activities/base.html" %}
 {% block title %}Tous mes parcours · Off the line{% endblock %}
 {% block head %}{% include "activities/leaflet_head.html" %}{% endblock %}
+{% block main_class %}full{% endblock %}
 {% block content %}
-  <h1>Tous mes parcours</h1>
-  <div class="toolbar">
-    <form method="get">
-      <select name="sport" onchange="this.form.submit()">
-        <option value="">Tous les sports</option>
-        {% for s in sports %}<option value="{{ s }}" {% if s == sport %}selected{% endif %}>{{ s }}</option>{% endfor %}
-      </select>
-    </form>
-    <span style="color:var(--muted)">{{ routes|length }} parcours</span>
-  </div>
   {% if routes %}
-    <div id="map" class="map" style="height:640px;"></div>
-    {{ routes|json_script:"routes-data" }}
+  <div class="atlas">
+    <aside class="atlas-panel">
+      <div class="atlas-head">
+        <h1>Tous mes parcours</h1>
+        <div class="totals" aria-live="polite">
+          <p><strong id="total-count">{{ routes|length }}</strong>parcours</p>
+          <p><strong id="total-km">{{ total_km|floatformat:"0g" }}</strong>kilomètres</p>
+        </div>
+        {% if families|length > 1 %}
+          <ul class="chips" aria-label="Sports affichés">
+            {% for f in families %}
+              <li><button type="button" class="chip" data-family="{{ f.key }}" aria-pressed="true">
+                <span class="dot" style="--c: {{ f.color }}"></span>{{ f.label }} <span class="muted">{{ f.count }}</span>
+              </button></li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      <ul class="route-list" id="route-list">
+        {% for r in routes %}
+          <li data-family="{{ r.family }}">
+            <a class="route-item" href="{% url 'activities:detail' r.id %}" data-route="{{ r.id }}">
+              <svg class="thumb" viewBox="0 0 100 100" style="--c: {{ r.color }}" aria-hidden="true"><path d="{{ r.thumb }}"/></svg>
+              <span><strong>{{ r.name }}</strong><span>{{ r.sport }}, {{ r.date }}</span></span>
+              <span class="km">{{ r.km|floatformat:1 }} km</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </aside>
+    <div class="atlas-map" id="atlas-map">
+      <div id="map" role="img" aria-label="Carte de tous les parcours"></div>
+      <div class="map-switch" role="group" aria-label="Fond de carte">
+        <button type="button" data-base="dark" aria-pressed="true">Nuit</button>
+        <button type="button" data-base="light" aria-pressed="false">Plan</button>
+      </div>
+    </div>
+  </div>
+  {{ routes|json_script:"routes-data" }}
   {% else %}
-    <p>Aucun parcours avec tracé GPS. Synchronise tes activités depuis la page Activités.</p>
+  <div style="padding: 3rem 1rem;">
+    <div class="empty-state" style="margin: 0 auto; max-width: 40rem;">
+      <p>Aucun parcours avec tracé GPS pour l'instant. Synchronise tes activités pour les voir apparaître ici.</p>
+      <a class="btn" href="{% url 'activities:list' %}">Aller aux activités</a>
+    </div>
+  </div>
   {% endif %}
 {% endblock %}
 {% block scripts %}{% if routes %}
 <script>
+(() => {
   const routes = JSON.parse(document.getElementById("routes-data").textContent);
-  const map = L.map("map", { preferCanvas: true });
-  L.tileLayer(BASEMAP.url, BASEMAP.options).addTo(map);
+  const box = document.getElementById("atlas-map");
+  const list = document.getElementById("route-list");
+
+  // Rendu canvas qui additionne les tracés qui se superposent :
+  // les chemins les plus empruntés ressortent plus clairs, comme une heatmap.
+  const BlendCanvas = L.Canvas.extend({
+    _draw() {
+      this._ctx.globalCompositeOperation = this.options.blend;
+      L.Canvas.prototype._draw.call(this);
+    },
+  });
+  const renderer = new BlendCanvas({ padding: 0.5, tolerance: 6, blend: "lighter" });
+  const map = L.map("map", { renderer, zoomSnap: 0.25, zoomControl: false });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+
+  const STYLE = {
+    dark: { weight: 2, opacity: 0.4 },
+    light: { weight: 2.5, opacity: 0.55 },
+  };
+  let base = "dark";
+  try { base = localStorage.getItem("otl-base") || "dark"; } catch (e) {}
+  let tiles = null;
+
   const group = L.featureGroup().addTo(map);
+  const byId = new Map();
+  let active = null;
+
   for (const r of routes) {
-    const line = L.polyline(r.coords, { color: "#fc4c02", weight: 2, opacity: 0.45 });
-    line.bindTooltip(`${r.name} · ${r.date} · ${r.km} km`, { sticky: true });
-    line.on("mouseover", () => line.setStyle({ opacity: 1, weight: 4 }));
-    line.on("mouseout", () => line.setStyle({ opacity: 0.45, weight: 2 }));
+    const line = L.polyline(r.coords, { color: r.color, ...STYLE[base] });
+    line.route = r;
+    line.bindTooltip(
+      `<strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.sport)}, ${r.date}, ${r.km.toFixed(1).replace(".", ",")} km</span>`,
+      { sticky: true, className: "route-tip", direction: "top", offset: [0, -8] }
+    );
+    line.on("mouseover", () => highlight(r.id, true));
+    line.on("mouseout", () => highlight(r.id, false));
     line.on("click", () => { window.location = `/activites/${r.id}/`; });
     line.addTo(group);
+    byId.set(r.id, line);
   }
-  map.fitBounds(group.getBounds(), { padding: [20, 20] });
+
+  function setBase(name) {
+    base = name;
+    if (tiles) tiles.remove();
+    tiles = L.tileLayer(BASEMAP[name].url, BASEMAP[name].options).addTo(map);
+    renderer.options.blend = name === "dark" ? "lighter" : "multiply";
+    box.classList.toggle("light", name === "light");
+    for (const line of byId.values()) line.setStyle(STYLE[name]);
+    document.querySelectorAll("[data-base]").forEach(b => b.setAttribute("aria-pressed", b.dataset.base === name));
+    try { localStorage.setItem("otl-base", name); } catch (e) {}
+  }
+  document.querySelectorAll("[data-base]").forEach(b => b.addEventListener("click", () => setBase(b.dataset.base)));
+  setBase(base);
+
+  function highlight(id, on) {
+    const line = byId.get(id);
+    const item = list.querySelector(`[data-route="${id}"]`);
+    if (on) {
+      if (active && active !== id) highlight(active, false);
+      active = id;
+      line.setStyle({ color: base === "dark" ? "#ffffff" : "#1c2629", weight: 4, opacity: 1 });
+      line.bringToFront();
+      item.classList.add("is-active");
+    } else {
+      line.setStyle({ color: line.route.color, ...STYLE[base] });
+      item.classList.remove("is-active");
+      if (active === id) active = null;
+    }
+  }
+
+  // Survol de la liste : met le parcours en évidence sur la carte
+  list.addEventListener("mouseover", e => {
+    const a = e.target.closest("[data-route]");
+    if (a) highlight(Number(a.dataset.route), true);
+  });
+  list.addEventListener("mouseleave", () => active && highlight(active, false));
+  list.addEventListener("focusin", e => {
+    const a = e.target.closest("[data-route]");
+    if (!a) return;
+    const id = Number(a.dataset.route);
+    highlight(id, true);
+    map.flyToBounds(byId.get(id).getBounds(), { padding: [40, 40], duration: 0.6 });
+  });
+
+  // Filtre par famille de sport
+  const hidden = new Set();
+  document.querySelectorAll("[data-family].chip").forEach(chip => chip.addEventListener("click", () => {
+    const fam = chip.dataset.family;
+    hidden.has(fam) ? hidden.delete(fam) : hidden.add(fam);
+    chip.setAttribute("aria-pressed", !hidden.has(fam));
+    let count = 0, km = 0;
+    for (const [id, line] of byId) {
+      const show = !hidden.has(line.route.family);
+      if (show) { count++; km += line.route.km; group.addLayer(line); } else group.removeLayer(line);
+    }
+    list.querySelectorAll("li[data-family]").forEach(li => { li.hidden = hidden.has(li.dataset.family); });
+    document.getElementById("total-count").textContent = count;
+    document.getElementById("total-km").textContent = Math.round(km).toLocaleString("fr-FR");
+    if (count) map.flyToBounds(group.getBounds(), { padding: [30, 30], duration: 0.6 });
+  }));
+
+  map.fitBounds(group.getBounds(), { padding: [30, 30] });
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+})();
 </script>
 {% endif %}{% endblock %}

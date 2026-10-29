@@ -206,7 +206,8 @@ class ActivityPagesTests(LoggedInTestCase):
     def test_map_contains_only_routes(self):
         response = self.client.get(reverse("activities:map"))
         self.assertEqual(len(response.context["routes"]), 2)
-        self.assertContains(response, "2 parcours")
+        self.assertContains(response, 'data-route="1"')
+        self.assertNotContains(response, 'data-route="3"')
 
     def test_pages_require_login(self):
         self.client.logout()

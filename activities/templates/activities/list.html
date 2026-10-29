@@ -1,57 +1,77 @@
 {% extends "activities/base.html" %}
+{% load routes %}
 {% block title %}Mes activités · Off the line{% endblock %}
 {% block content %}
-  <h1>Mes activités</h1>
-
-  <div class="toolbar">
+  <div class="page-head">
+    <div>
+      <h1>Mes activités</h1>
+      <p class="muted">{{ total }} activité{{ total|pluralize }} importée{{ total|pluralize }} depuis Strava</p>
+    </div>
     <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
       <button class="btn" type="submit">Synchroniser avec Strava</button>
     </form>
-    {% if sports %}
-      <form method="get">
-        <select name="sport" onchange="this.form.submit()">
-          <option value="">Tous les sports ({{ total }})</option>
-          {% for s in sports %}<option value="{{ s }}" {% if s == sport %}selected{% endif %}>{{ s }}</option>{% endfor %}
-        </select>
-      </form>
-    {% endif %}
   </div>
 
-  {% if page_obj.object_list %}
-    <table class="data">
-      <thead>
-        <tr><th>Date</th><th>Nom</th><th>Type</th><th>Distance</th><th>Durée</th><th>D+</th></tr>
-      </thead>
-      <tbody>
-        {% for a in page_obj %}
-          <tr>
-            <td>{{ a.start_date_local|default:a.start_date|date:"d/m/Y" }}</td>
-            <td><a href="{% url 'activities:detail' a.strava_id %}">{{ a.name }}</a></td>
-            <td>{{ a.sport_type }}</td>
-            <td>{{ a.distance_km }} km</td>
-            <td>{{ a.duration_display }}</td>
-            <td>{{ a.total_elevation_gain|floatformat:0 }} m</td>
-          </tr>
+  {% if sports|length > 1 %}
+    <nav class="toolbar" aria-label="Filtrer par sport">
+      <ul class="chips">
+        <li><a class="chip" href="?" {% if not sport %}aria-current="true"{% endif %}>Tous</a></li>
+        {% for s in sports %}
+          <li><a class="chip" href="?sport={{ s|urlencode }}" {% if s == sport %}aria-current="true"{% endif %}>
+            <span class="dot" style="--c: {{ s|sport_color }}"></span>{{ s|sport_label }}</a></li>
         {% endfor %}
-      </tbody>
-    </table>
-    <p class="toolbar">
-      {% if page_obj.has_previous %}<a class="btn secondary" href="?page={{ page_obj.previous_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">← Plus récentes</a>{% endif %}
-      <span>Page {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
-      {% if page_obj.has_next %}<a class="btn secondary" href="?page={{ page_obj.next_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">Plus anciennes →</a>{% endif %}
-    </p>
-  {% else %}
-    <p>Aucune activité enregistrée. Clique sur « Synchroniser avec Strava » pour les importer.</p>
+      </ul>
+    </nav>
   {% endif %}
 
-  <details style="margin-top:3rem;">
+  {% if page_obj.object_list %}
+    <ol class="activity-list">
+      {% for a in page_obj %}
+        <li class="activity">
+          {% with d=a.summary_polyline|route_path %}
+            {% if d %}
+              <svg class="thumb" viewBox="0 0 100 100" style="--c: {{ a.sport_type|sport_color }}" aria-hidden="true"><path d="{{ d }}"/></svg>
+            {% else %}
+              <span class="thumb empty" aria-hidden="true">–</span>
+            {% endif %}
+          {% endwith %}
+          <div>
+            <a class="activity-name" href="{% url 'activities:detail' a.strava_id %}">{{ a.name }}</a>
+            <span class="activity-meta">
+              <span class="dot" style="--c: {{ a.sport_type|sport_color }}"></span>
+              {{ a.sport_type|sport_label }}, {{ a.start_date_local|default:a.start_date|date:"j F Y" }}
+            </span>
+          </div>
+          <p class="figure">{% if a.distance %}{{ a.distance_km }} km{% else %}–{% endif %}<small>Distance</small></p>
+          <p class="figure optional">{{ a.duration_display }}<small>En mouvement</small></p>
+          <p class="figure optional">{{ a.total_elevation_gain|floatformat:0 }} m<small>Dénivelé +</small></p>
+        </li>
+      {% endfor %}
+    </ol>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pager" aria-label="Pagination">
+        {% if page_obj.has_previous %}<a class="btn ghost" href="?page={{ page_obj.previous_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">Plus récentes</a>{% else %}<span></span>{% endif %}
+        <span class="muted">Page {{ page_obj.number }} sur {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="btn ghost" href="?page={{ page_obj.next_page_number }}{% if sport %}&sport={{ sport|urlencode }}{% endif %}">Plus anciennes</a>{% else %}<span></span>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="empty-state">
+      <p>Aucune activité pour l'instant. Lance une synchronisation pour importer tes sorties Strava.</p>
+      <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+        <button class="btn" type="submit">Synchroniser avec Strava</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <details class="advanced">
     <summary>Options avancées</summary>
-    <form method="post" action="{% url 'activities:sync' %}" style="margin-top:1rem;">{% csrf_token %}
+    <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
       <input type="hidden" name="full" value="1">
-      <button class="btn secondary" type="submit">Tout réimporter depuis Strava</button>
+      <button class="btn ghost" type="submit">Tout réimporter depuis Strava</button>
     </form>
-    <form method="post" action="{% url 'activities:disconnect' %}" style="margin-top:1rem;">{% csrf_token %}
-      <button class="btn secondary" type="submit">Retirer l'accès Strava et supprimer mes données</button>
+    <form method="post" action="{% url 'activities:disconnect' %}">{% csrf_token %}
+      <button class="btn ghost" type="submit">Retirer l'accès Strava et supprimer mes données</button>
     </form>
   </details>
 {% endblock %}

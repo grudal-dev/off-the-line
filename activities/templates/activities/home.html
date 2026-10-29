@@ -1,6 +1,17 @@
 {% extends "activities/base.html" %}
+{% block main_class %}full{% endblock %}
 {% block content %}
-  <h1>Off the line</h1>
-  <p>Visualise tes parcours Strava sous différentes formes.</p>
-  <a class="btn" href="{% url 'activities:strava_login' %}">Se connecter avec Strava</a>
+  <section class="hero">
+    <svg class="hero-route" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <path pathLength="1" d="M760 900 C 820 820, 900 860, 930 780 S 880 640, 960 600 S 1110 640, 1130 560 S 1040 430, 1120 380 S 1270 400, 1290 320 S 1220 200, 1300 150 S 1420 160, 1450 110"/>
+      <circle cx="760" cy="900" r="12"/>
+      <circle class="end" cx="1450" cy="110" r="12" style="fill: var(--ink)"/>
+    </svg>
+    <div class="hero-text">
+      <h1>Toutes tes sorties, sur une seule carte.</h1>
+      <p>Connecte ton compte Strava : Off the line importe tes activités et trace chacun de tes parcours, seul ou superposé aux autres.</p>
+      <a class="btn big" href="{% url 'activities:strava_login' %}">Se connecter avec Strava</a>
+      <small>Accès en lecture seule. Tu peux retirer l'accès et supprimer tes données à tout moment.</small>
+    </div>
+  </section>
 {% endblock %}

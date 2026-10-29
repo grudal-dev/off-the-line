@@ -5,59 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="{% static 'activities/icon.svg' %}" type="image/svg+xml">
   <link rel="apple-touch-icon" href="{% static 'activities/apple-touch-icon.png' %}">
+  <link rel="preload" href="{% static 'activities/fonts/barlow-condensed-latin-700-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'activities/site.css' %}">
   <title>{% block title %}Off the line{% endblock %}</title>
-  <style>
-    :root { --orange: #fc4c02; --ink: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fafafa; }
-    header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; background: #fff; border-bottom: 1px solid var(--line); }
-    header a.brand { font-weight: 700; text-decoration: none; color: var(--ink); }
-    main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
-    .btn { display: inline-block; padding: .6rem 1.1rem; border-radius: 6px; border: 0; background: var(--orange); color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-    .btn.secondary { background: transparent; color: var(--muted); border: 1px solid var(--line); }
-    .messages { list-style: none; padding: 0; }
-    .messages li { padding: .75rem 1rem; border-radius: 6px; background: #fff3cd; margin-bottom: .5rem; }
-    .messages li.error { background: #fde2e1; }
-    .user { display: flex; align-items: center; gap: .75rem; }
-    .user img { width: 32px; height: 32px; border-radius: 50%; }
-    .user form { margin: 0; }
-    nav.main { display: flex; gap: 1.25rem; }
-    nav.main a { color: var(--muted); text-decoration: none; font-weight: 500; }
-    nav.main a:hover { color: var(--ink); }
-    .messages li.success { background: #e3f5e1; }
-    .messages li.info { background: #e8f0fe; }
-    table.data { width: 100%; border-collapse: collapse; background: #fff; }
-    table.data th, table.data td { padding: .6rem; text-align: left; border-bottom: 1px solid var(--line); }
-    table.data a { color: var(--ink); }
-    .toolbar { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
-    .toolbar form { margin: 0; }
-    select { padding: .5rem; border-radius: 6px; border: 1px solid var(--line); font: inherit; }
-    .map { height: 520px; border-radius: 8px; border: 1px solid var(--line); }
-    .stats { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1rem 0 1.5rem; }
-    .stats div { display: flex; flex-direction: column; }
-    .stats strong { font-size: 1.4rem; }
-    .stats span { color: var(--muted); font-size: .9rem; }
-  </style>
   {% block head %}{% endblock %}
 </head>
 <body>
-  <header>
-    <a class="brand" href="{% url 'activities:home' %}">Off the line</a>
+  {% with url_name=request.resolver_match.url_name %}
+  <header class="site-header">
+    <a class="brand" href="{% url 'activities:home' %}">
+      <img src="{% static 'activities/icon.svg' %}" alt="">
+      <span>Off the line</span>
+    </a>
     {% if user.is_authenticated and user.strava %}
-      <nav class="main">
-        <a href="{% url 'activities:list' %}">Activités</a>
-        <a href="{% url 'activities:map' %}">Carte</a>
+      <nav class="site-nav" aria-label="Navigation principale">
+        <a href="{% url 'activities:list' %}" {% if url_name == "list" or url_name == "detail" %}aria-current="page"{% endif %}>Activités</a>
+        <a href="{% url 'activities:map' %}" {% if url_name == "map" %}aria-current="page"{% endif %}>Carte</a>
       </nav>
       <div class="user">
         {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% endif %}
         <span>{{ user.strava.firstname }}</span>
         <form method="post" action="{% url 'activities:logout' %}">{% csrf_token %}
-          <button class="btn secondary" type="submit">Se déconnecter</button>
+          <button class="link-button" type="submit">Se déconnecter</button>
         </form>
       </div>
     {% endif %}
   </header>
-  <main>
+  {% endwith %}
+  <main class="{% block main_class %}{% endblock %}">
     {% if messages %}
       <ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
     {% endif %}

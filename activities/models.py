@@ -70,5 +70,16 @@ class Activity(models.Model):
         return f"{h} h {m:02d}" if h else f"{m} min"
 
     @property
+    def speed_display(self):
+        """Allure (min/km) pour la course et la marche, vitesse (km/h) sinon."""
+        from . import sports
+        if not self.average_speed:
+            return None
+        if sports.uses_pace(self.sport_type):
+            sec = round(1000 / self.average_speed)
+            return {"value": f"{sec // 60}:{sec % 60:02d}", "unit": "/km", "label": "Allure moyenne"}
+        return {"value": f"{self.average_speed * 3.6:.1f}".replace(".", ","), "unit": "km/h", "label": "Vitesse moyenne"}
+
+    @property
     def has_route(self):
         return bool(self.summary_polyline)
