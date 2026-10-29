@@ -190,15 +190,25 @@ details.advanced form { margin-top: .75rem; }
 .route-item strong { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .route-item span { font-size: var(--t-small); color: var(--slate); }
 .route-item .km { font-family: var(--cond); font-weight: 600; font-size: 1.125rem; color: var(--ink); }
-.atlas-map { position: relative; min-height: 0; background: #2b3437; }
-.atlas-map.light { background: #e8e8e6; }
+.atlas-map { position: relative; min-height: 0; background: var(--contour-soft); }
+.atlas-map[data-theme="dark"] { background: #2b3437; }
 .atlas-map #map { position: absolute; inset: 0; }
-.map-switch {
-  position: absolute; z-index: 500; top: 1rem; right: 1rem; display: flex; padding: 3px;
-  background: rgba(28, 38, 41, .85); border-radius: 999px; backdrop-filter: blur(6px);
+.basemap-picker {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; justify-content: flex-end;
+  padding: 4px 4px 4px 4px; background: rgba(251, 252, 250, .94); border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(28, 38, 41, .25); font-family: var(--sans);
 }
-.map-switch button { border: 0; background: none; color: #cfd6d8; font: inherit; font-size: var(--t-small); font-weight: 500; padding: .3rem .85rem; border-radius: 999px; cursor: pointer; }
-.map-switch button[aria-pressed="true"] { background: #fff; color: var(--ink); }
+.basemap-choices { display: flex; flex-wrap: wrap; gap: 2px; }
+.basemap-picker button {
+  border: 0; background: none; color: var(--slate); font: inherit; font-size: var(--t-small); font-weight: 500;
+  padding: .3rem .7rem; border-radius: 7px; cursor: pointer;
+}
+.basemap-picker button:hover { color: var(--ink); background: var(--paper); }
+.basemap-picker button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.relief-toggle { display: flex; align-items: center; gap: .35rem; padding: 0 .6rem 0 .5rem; border-left: 1px solid var(--contour-soft); font-size: var(--t-small); color: var(--ink); cursor: pointer; }
+.relief-toggle input { accent-color: var(--route); margin: 0; }
+.relief-pane { mix-blend-mode: multiply; }
+.leaflet-container[data-theme="dark"] .relief-pane { mix-blend-mode: soft-light; }
 
 /* Infobulles Leaflet */
 .map.leaflet-container, .atlas-map .leaflet-container { font-family: var(--sans); background: transparent; }

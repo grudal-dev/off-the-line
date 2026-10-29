@@ -29,6 +29,8 @@ La carte globale utilise le fond sombre CARTO, qui exige désormais une clé gra
 demande-la sur https://carto.com/basemaps/apikey puis renseigne `CARTO_API_KEY` dans `.env`.
 Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
 
+Les autres fonds du sélecteur (Topo OpenTopoMap, Plan IGN, Satellite Esri, relief Esri) ne demandent pas de clé.
+
 ## Structure
 
 - `config/` : réglages du projet Django

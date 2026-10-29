@@ -36,10 +36,6 @@
     </aside>
     <div class="atlas-map" id="atlas-map">
       <div id="map" role="img" aria-label="Carte de tous les parcours"></div>
-      <div class="map-switch" role="group" aria-label="Fond de carte">
-        <button type="button" data-base="dark" aria-pressed="true">Nuit</button>
-        <button type="button" data-base="light" aria-pressed="false">Plan</button>
-      </div>
     </div>
   </div>
   {{ routes|json_script:"routes-data" }}
@@ -71,20 +67,23 @@
   const map = L.map("map", { renderer, zoomSnap: 0.25, zoomControl: false });
   L.control.zoom({ position: "bottomright" }).addTo(map);
 
+  // Style des tracés selon le type de fond : additif sur fond sombre,
+  // plus épais et opaque sur les cartes colorées pour rester lisible.
   const STYLE = {
-    dark: { weight: 2, opacity: 0.4 },
-    light: { weight: 2.5, opacity: 0.55 },
+    dark: { weight: 2, opacity: 0.4, blend: "lighter", hl: "#ffffff" },
+    light: { weight: 2.5, opacity: 0.55, blend: "multiply", hl: "#1c2629" },
+    color: { weight: 3, opacity: 0.75, blend: "source-over", hl: "#1c2629" },
+    photo: { weight: 3, opacity: 0.85, blend: "source-over", hl: "#ffffff" },
   };
-  let base = "dark";
-  try { base = localStorage.getItem("otl-base") || "dark"; } catch (e) {}
-  let tiles = null;
+  let theme = "color";
+  const lineStyle = () => ({ weight: STYLE[theme].weight, opacity: STYLE[theme].opacity });
 
   const group = L.featureGroup().addTo(map);
   const byId = new Map();
   let active = null;
 
   for (const r of routes) {
-    const line = L.polyline(r.coords, { color: r.color, ...STYLE[base] });
+    const line = L.polyline(r.coords, { color: r.color, ...lineStyle() });
     line.route = r;
     line.bindTooltip(
       `<strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.sport)}, ${r.date}, ${r.km.toFixed(1).replace(".", ",")} km</span>`,
@@ -97,18 +96,12 @@
     byId.set(r.id, line);
   }
 
-  function setBase(name) {
-    base = name;
-    if (tiles) tiles.remove();
-    tiles = L.tileLayer(BASEMAP[name].url, BASEMAP[name].options).addTo(map);
-    renderer.options.blend = name === "dark" ? "lighter" : "multiply";
-    box.classList.toggle("light", name === "light");
-    for (const line of byId.values()) line.setStyle(STYLE[name]);
-    document.querySelectorAll("[data-base]").forEach(b => b.setAttribute("aria-pressed", b.dataset.base === name));
-    try { localStorage.setItem("otl-base", name); } catch (e) {}
-  }
-  document.querySelectorAll("[data-base]").forEach(b => b.addEventListener("click", () => setBase(b.dataset.base)));
-  setBase(base);
+  mountBasemaps(map, def => {
+    theme = def.theme;
+    renderer.options.blend = STYLE[theme].blend;
+    box.dataset.theme = theme;
+    for (const line of byId.values()) line.setStyle(lineStyle());
+  });
 
   function highlight(id, on) {
     const line = byId.get(id);
@@ -116,11 +109,11 @@
     if (on) {
       if (active && active !== id) highlight(active, false);
       active = id;
-      line.setStyle({ color: base === "dark" ? "#ffffff" : "#1c2629", weight: 4, opacity: 1 });
+      line.setStyle({ color: STYLE[theme].hl, weight: 4, opacity: 1 });
       line.bringToFront();
       item.classList.add("is-active");
     } else {
-      line.setStyle({ color: line.route.color, ...STYLE[base] });
+      line.setStyle({ color: line.route.color, ...lineStyle() });
       item.classList.remove("is-active");
       if (active === id) active = null;
     }
