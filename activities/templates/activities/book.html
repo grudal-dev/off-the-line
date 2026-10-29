@@ -1,0 +1,241 @@
+{% load static %}<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="icon" href="{% static 'activities/icon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'activities/site.css' %}">
+  <link rel="stylesheet" href="{% static 'activities/book.css' %}">
+  {% include "activities/leaflet_head.html" %}
+</head>
+<body class="book">
+  <div class="book-toolbar" role="toolbar" aria-label="Livre">
+    <a href="{% url 'activities:book' %}">Retour</a>
+    <label>Fond de carte <select id="base-select"></select></label>
+    <label><input type="checkbox" id="relief-toggle"> Relief</label>
+    <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
+    <button type="button" class="btn" id="print-btn">Enregistrer en PDF</button>
+  </div>
+
+  <!-- Couverture -->
+  <section class="page cover">
+    <div class="book-map cover-map" id="map-cover"></div>
+    <div class="cover-text">
+      <h1>{{ title }}</h1>
+      <p>{{ period|capfirst }}{% if author %}, {{ author }}{% endif %}</p>
+      <p class="cover-figs">{{ totals.days }} jours, {{ totals.stages }} étapes, {{ totals.km|floatformat:"0g" }} km, {{ totals.elevation|floatformat:"0g" }} m de dénivelé</p>
+    </div>
+  </section>
+
+  {% if chapters|length > 1 %}
+  <!-- Sommaire -->
+  <section class="page contents">
+    <h2 class="page-title">Sommaire</h2>
+    <ol>
+      {% for c in chapters %}
+        <li>
+          <span class="toc-n">{{ forloop.counter }}</span>
+          <span><strong>{{ c.journey.name }}</strong><span>{{ c.journey.title|capfirst }}, {{ c.dates }}</span></span>
+          <span class="toc-figs">{{ c.journey.distance_km|floatformat:"0g" }} km</span>
+        </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endif %}
+
+  {% for c in chapters %}{% with j=c.journey %}
+  <!-- Ouverture du périple -->
+  <section class="page opener">
+    {% if chapters|length > 1 %}<p class="kicker">Périple {{ forloop.counter }}</p>{% endif %}
+    <h2 class="opener-title">{{ j.name }}</h2>
+    <p class="opener-sub">{{ j.title|capfirst }}, {{ c.dates }}</p>
+    <div class="book-map" id="map-j{{ j.id }}"></div>
+    <dl class="figs figs-7">
+      <div><dt>Jours</dt><dd>{{ j.days }}</dd></div>
+      <div><dt>Étapes</dt><dd>{{ j.legs|length }}</dd></div>
+      <div><dt>Nuits</dt><dd>{{ c.nights }}</dd></div>
+      <div><dt>Distance</dt><dd>{{ j.distance_km|floatformat:"0g" }}<small>km</small></dd></div>
+      <div><dt>Dénivelé +</dt><dd>{{ j.elevation|floatformat:"0g" }}<small>m</small></dd></div>
+      <div><dt>En mouvement</dt><dd>{{ j.moving_display }}</dd></div>
+      <div><dt>Point culminant</dt><dd>{% if c.highest %}{{ c.highest|floatformat:"0g" }}<small>m</small>{% else %}–{% endif %}</dd></div>
+    </dl>
+  </section>
+
+  <!-- Carnet de route -->
+  <section class="page roadbook">
+    <h2 class="page-title">Carnet de route</h2>
+    {% if c.profile %}
+      <figure class="profile big">
+        <svg viewBox="0 0 {{ c.profile.width }} {{ c.profile.height }}" preserveAspectRatio="none" aria-hidden="true">
+          <path class="area" d="{{ c.profile.area }}"/><path class="line" d="{{ c.profile.line }}"/>
+        </svg>
+        <figcaption>Profil du périple : de {{ c.profile.min|floatformat:"0g" }} à {{ c.profile.max|floatformat:"0g" }} m d'altitude sur {{ c.profile.km|floatformat:"0g" }} km</figcaption>
+      </figure>
+    {% endif %}
+    {% if j.story %}<div class="story">{{ j.story|linebreaks }}</div>{% endif %}
+    <table class="stage-table">
+      <thead><tr><th scope="col">Étape</th><th scope="col">Date</th><th scope="col">Parcours</th><th scope="col" class="num">Distance</th><th scope="col" class="num">D+</th><th scope="col" class="num">Temps</th></tr></thead>
+      <tbody>
+        {% for s in c.stages %}
+          <tr>
+            <td><span class="stage-dot" style="--c: {{ s.color }}">{{ s.n }}</span></td>
+            <td>{{ s.date|capfirst }}</td>
+            <td>{{ s.label }}</td>
+            <td class="num">{{ s.km|floatformat:1 }} km</td>
+            <td class="num">{{ s.elevation|floatformat:"0g" }} m</td>
+            <td class="num">{{ s.duration }}</td>
+          </tr>
+          {% if s.night_after %}<tr class="night-row"><td></td><td colspan="5">Nuit {{ forloop.counter }}</td></tr>{% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {% for s in c.stages %}
+  <!-- Étape -->
+  <section class="page stage-page{% if not s.lead_photos %} no-photos{% endif %}" style="--c: {{ s.color }}">
+    <header class="stage-head">
+      <span class="stage-num">{{ s.n }}</span>
+      <div>
+        <p class="kicker">Étape {{ s.n }} sur {{ c.stages|length }}, {{ s.date }}</p>
+        <h3>{{ s.label }}</h3>
+        {% if s.label != s.activity_name %}<p class="muted">{{ s.activity_name }}</p>{% endif %}
+      </div>
+    </header>
+    <dl class="figs figs-4">
+      <div><dt>Distance</dt><dd>{{ s.km|floatformat:1 }}<small>km</small></dd></div>
+      <div><dt>En mouvement</dt><dd>{{ s.duration }}</dd></div>
+      <div><dt>Dénivelé +</dt><dd>{{ s.elevation|floatformat:"0g" }}<small>m</small></dd></div>
+      <div>{% if s.speed %}<dt>{{ s.speed.label }}</dt><dd>{{ s.speed.value }}<small>{{ s.speed.unit }}</small></dd>{% else %}<dt>Altitude max</dt><dd>{% if s.profile %}{{ s.profile.max|floatformat:"0g" }}<small>m</small>{% else %}–{% endif %}</dd>{% endif %}</div>
+    </dl>
+    <div class="book-map" id="map-s{{ s.id }}"></div>
+    {% if s.profile %}
+      <figure class="profile">
+        <svg viewBox="0 0 {{ s.profile.width }} {{ s.profile.height }}" preserveAspectRatio="none" aria-hidden="true">
+          <path class="area" d="{{ s.profile.area }}"/><path class="line" d="{{ s.profile.line }}"/>
+        </svg>
+        <figcaption><span>{{ s.profile.min|floatformat:"0g" }} m</span><span>{{ s.profile.max|floatformat:"0g" }} m</span></figcaption>
+      </figure>
+    {% endif %}
+    {% if s.description %}<blockquote class="stage-text">{{ s.description|linebreaksbr }}</blockquote>{% endif %}
+    {% if s.lead_photos %}
+      <div class="photo-row photos-{{ s.lead_photos|length }}">
+        {% for p in s.lead_photos %}<figure><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>{% endfor %}
+      </div>
+    {% endif %}
+    {% if s.night_after %}<p class="night-note">Nuit {{ s.n }}, puis étape {{ s.n|add:1 }}</p>{% endif %}
+  </section>
+  {% for chunk in s.photo_pages %}
+  <section class="page photo-page" style="--c: {{ s.color }}">
+    <p class="kicker">Étape {{ s.n }}, {{ s.label }} : photos</p>
+    <div class="photo-grid photos-{{ chunk|length }}">
+      {% for p in chunk %}<figure><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>{% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  {% endfor %}
+  {% endwith %}{% endfor %}
+
+  <!-- Dos -->
+  <section class="page back">
+    <div>
+      <p class="back-figs"><strong>{{ totals.km|floatformat:"0g" }}</strong> km</p>
+      <p class="back-figs"><strong>{{ totals.elevation|floatformat:"0g" }}</strong> m de dénivelé</p>
+      <p class="back-figs"><strong>{{ totals.days }}</strong> jours sur la route</p>
+    </div>
+    <p class="colophon"><img src="{% static 'activities/icon.svg' %}" alt=""> Off the line, d'après tes activités Strava. Cartes : <span id="map-credit"></span>.</p>
+  </section>
+
+  {{ maps|json_script:"maps-data" }}
+  <script>
+  (() => {
+    const maps = JSON.parse(document.getElementById("maps-data").textContent);
+    const status = document.getElementById("load-status");
+    const select = document.getElementById("base-select");
+    const reliefBox = document.getElementById("relief-toggle");
+    const defs = BASEMAP.layers.filter(d => d.theme !== "dark");
+    let base = "topo";
+    try { base = localStorage.getItem("otl-book-base") || "topo"; } catch (e) {}
+    if (!defs.some(d => d.key === base)) base = defs[0].key;
+    select.innerHTML = defs.map(d => `<option value="${d.key}">${d.label}</option>`).join("");
+    select.value = base;
+
+    const instances = [];
+    for (const m of maps) {
+      const el = document.getElementById("map-" + m.id);
+      if (!el) continue;
+      const map = L.map(el, {
+        zoomControl: false, attributionControl: true, dragging: false, scrollWheelZoom: false,
+        doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, zoomSnap: 0.1,
+        fadeAnimation: false, zoomAnimation: false,
+      });
+      map.attributionControl.setPrefix(false);
+      const group = L.featureGroup().addTo(map);
+      for (const s of m.stages) {
+        L.polyline(s.coords, { color: "#fff", weight: 7, opacity: 0.95 }).addTo(group);
+      }
+      m.stages.forEach((s, i) => {
+        L.polyline(s.coords, { color: s.color, weight: 3.5 }).addTo(group);
+        if (m.stages.length > 1 && m.id !== "cover") {
+          L.marker(s.coords[0], { icon: L.divIcon({ className: "", html: `<span class="pin pin-stage">${i + 1}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(group);
+        }
+      });
+      if (m.stages.length === 1) {
+        const c = m.stages[0].coords;
+        L.circleMarker(c[0], { radius: 6, color: "#1c2629", weight: 3, fillColor: "#fff", fillOpacity: 1 }).addTo(group);
+        L.circleMarker(c[c.length - 1], { radius: 6, color: "#fff", weight: 3, fillColor: "#1c2629", fillOpacity: 1 }).addTo(group);
+      }
+      map.fitBounds(group.getBounds(), { padding: m.id === "cover" ? [60, 60] : [28, 28] });
+      if (m.id === "cover") map.panBy([0, 70], { animate: false });  // laisse la place au titre
+      instances.push({ map, tiles: null, relief: null });
+    }
+
+    // Les cartes doivent être chargées avant d'imprimer, sinon le PDF a des trous
+    let pending = 0;
+    function track(layer) {
+      pending++;
+      update();
+      let done = false;
+      const finish = () => { if (!done) { done = true; pending--; update(); } };
+      layer.once("load", finish);
+      setTimeout(finish, 15000);
+    }
+    function update() {
+      status.textContent = pending ? `Chargement des cartes (${pending} restantes)…` : "Prêt à imprimer";
+    }
+    function setBase(key) {
+      const def = defs.find(d => d.key === key);
+      for (const inst of instances) {
+        if (inst.tiles) inst.tiles.remove();
+        inst.tiles = L.tileLayer(def.url, def.options).addTo(inst.map);
+        track(inst.tiles);
+      }
+      document.getElementById("map-credit").innerHTML = def.options.attribution;
+      try { localStorage.setItem("otl-book-base", key); } catch (e) {}
+    }
+    function setRelief(on) {
+      for (const inst of instances) {
+        if (inst.relief) { inst.relief.remove(); inst.relief = null; }
+        if (on) {
+          if (!inst.map.getPane("relief")) {
+            inst.map.createPane("relief").style.zIndex = 250;
+            inst.map.getPane("relief").classList.add("relief-pane");
+          }
+          inst.relief = L.tileLayer(BASEMAP.hillshade.url, { ...BASEMAP.hillshade.options, pane: "relief" }).addTo(inst.map);
+          track(inst.relief);
+        }
+      }
+    }
+    select.addEventListener("change", () => setBase(select.value));
+    reliefBox.addEventListener("change", () => setRelief(reliefBox.checked));
+    setBase(base);
+
+    document.getElementById("print-btn").addEventListener("click", () => {
+      if (pending && !confirm("Des cartes sont encore en cours de chargement. Imprimer quand même ?")) return;
+      window.print();
+    });
+  })();
+  </script>
+</body>
+</html>

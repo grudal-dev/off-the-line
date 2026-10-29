@@ -16,4 +16,6 @@ urlpatterns = [
     path("carte/", views.all_routes_map, name="map"),
     path("periples/", views.journey_list, name="journeys"),
     path("periples/<int:journey_id>/", views.journey_detail, name="journey"),
+    path("livre/", views.book_builder, name="book"),
+    path("livre/apercu/", views.book_view, name="book_view"),
 ]

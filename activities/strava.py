@@ -101,6 +101,15 @@ def activity_photos(account, activity_id, size=1024):
     return api_get(account, f"/activities/{activity_id}/photos", {"size": size, "photo_sources": "true"})
 
 
+def activity_detail(account, activity_id):
+    return api_get(account, f"/activities/{activity_id}", {"include_all_efforts": "false"})
+
+
+def activity_streams(account, activity_id, keys=("distance", "altitude")):
+    return api_get(account, f"/activities/{activity_id}/streams",
+                   {"keys": ",".join(keys), "key_by_type": "true"})
+
+
 def deauthorize(account):
     """Révoque l'accès côté Strava (best effort)."""
     try:

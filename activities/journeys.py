@@ -38,6 +38,17 @@ class Leg:
     end: tuple
     start_at: object
     end_at: object
+    start_name: str = None  # renseignés par places.name_journeys
+    end_name: str = None
+
+    @property
+    def label(self):
+        """« Faverges → Albertville », « Autour de Moûtiers », ou None si lieux inconnus."""
+        if self.start_name and self.end_name:
+            if self.start_name == self.end_name:
+                return f"Autour de {self.start_name}"
+            return f"{self.start_name} → {self.end_name}"
+        return None
 
     @property
     def is_loop(self):
@@ -52,6 +63,27 @@ class Leg:
 class Journey:
     legs: list
     nights: list = field(default_factory=list)  # index des étapes suivies d'une nuit
+    start_name: str = None
+    end_name: str = None
+    custom_title: str = ""
+    story: str = ""
+
+    @property
+    def place_name(self):
+        start, end = self.start_name, self.end_name
+        if start and end:
+            back_home = start == end or geo.distance_km(self.legs[0].start, self.legs[-1].end) < JOIN_KM
+            return f"Boucle depuis {start}" if back_home else f"{start} → {end}"
+        if start:
+            return f"Au départ de {start}"
+        if end:
+            return f"Jusqu'à {end}"
+        return None
+
+    @property
+    def name(self):
+        """Nom affiché : celui choisi par l'utilisateur, sinon les lieux, sinon le type de voyage."""
+        return self.custom_title or self.place_name or self.title[:1].upper() + self.title[1:]
 
     @property
     def activities(self):
@@ -207,10 +239,23 @@ def detect(activities):
     return journeys
 
 
-def for_account(account):
-    qs = account.activities.exclude(summary_polyline="").only(
+def for_account(account, budget=None):
+    """Périples d'un compte, avec titres/récits saisis et noms de lieux (voir places.py)."""
+    from . import places
+    from .models import JourneyNote
+
+    found = detect(_queryset(account))
+    notes = {n.journey_id: n for n in JourneyNote.objects.filter(account=account)}
+    for j in found:
+        note = notes.get(j.id)
+        if note:
+            j.custom_title, j.story = note.title, note.story
+    return places.name_journeys(found, budget)
+
+
+def _queryset(account):
+    return account.activities.exclude(summary_polyline="").only(
         "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
         "moving_time", "elapsed_time", "total_elevation_gain", "summary_polyline",
-        "start_lat", "start_lng", "raw",
-    )
-    return detect(qs)
+        "start_lat", "start_lng", "raw", "description", "profile", "details_fetched_at",
+    ).prefetch_related("photos")

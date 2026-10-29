@@ -11,8 +11,8 @@ from django.urls import reverse
 from django.utils import formats
 from django.views.decorators.http import require_POST
 
-from . import geo, journeys, polyline, sports, strava
-from .models import Activity, StravaAccount
+from . import book, geo, journeys, places, polyline, sports, strava
+from .models import Activity, JourneyNote, StravaAccount
 from .sync import sync_activities, sync_photos
 
 SESSION_STATE_KEY = "strava_oauth_state"
@@ -169,6 +169,8 @@ def _sync_photos_with_message(request, account):
     if remaining:
         messages.info(request, f"{remaining} activité(s) avec photos restent à importer : "
                                "relance la synchronisation dans quelques minutes.")
+    # Nomme les nouveaux périples pendant qu'on y est (lieux mis en cache)
+    journeys.for_account(account, places.Budget(lookups=60))
 
 
 @login_required
@@ -209,7 +211,7 @@ def all_routes_map(request):
     ]
     total_km = round(sum(r["km"] for r in routes))
     trips = [
-        {"id": j.id, "title": j.title, "url": reverse("activities:journey", args=[j.id]),
+        {"id": j.id, "title": j.name, "url": reverse("activities:journey", args=[j.id]),
          "dates": _date_range(j), "stages": [a.strava_id for a in j.activities],
          "colors": _stage_colors(len(j.legs))}
         for j in journeys.for_account(account)
@@ -241,16 +243,17 @@ def journey_list(request):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
-    items = []
-    for j in journeys.for_account(account):
-        coords = [polyline.decode(a.summary_polyline) for a in j.activities]
-        flat = [p for c in coords for p in c]
-        # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
-        items.append({"journey": j, "dates": _date_range(j), "thumb": [
-            {"d": geo.svg_path(c, frame=flat), "color": col}
-            for c, col in zip(coords, _stage_colors(len(coords)))
-        ]})
+    # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
+    items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j)}
+             for j in journeys.for_account(account, places.Budget(lookups=30))]
     return render(request, "activities/journeys.html", {"items": items})
+
+
+def _find_journey(account, journey_id, budget=None):
+    journey = next((j for j in journeys.for_account(account, budget) if j.id == journey_id), None)
+    if journey is None:
+        raise Http404("Périple introuvable")
+    return journey
 
 
 @login_required
@@ -258,15 +261,22 @@ def journey_detail(request, journey_id):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
-    journey = next((j for j in journeys.for_account(account) if j.id == journey_id), None)
-    if journey is None:
-        raise Http404("Périple introuvable")
+    if request.method == "POST":
+        _find_journey(account, journey_id)  # 404 si ce n'est pas un périple de l'utilisateur
+        JourneyNote.objects.update_or_create(
+            account=account, journey_id=journey_id,
+            defaults={"title": request.POST.get("title", "").strip()[:200],
+                      "story": request.POST.get("story", "").strip()},
+        )
+        messages.success(request, "Périple mis à jour.")
+        return redirect("activities:journey", journey_id=journey_id)
+    journey = _find_journey(account, journey_id, places.Budget(lookups=20))
     colors = _stage_colors(len(journey.legs))
     stages = []
     for i, (leg, color) in enumerate(zip(journey.legs, colors)):
         a = leg.activity
         stages.append({
-            "n": i + 1, "id": a.strava_id, "name": a.name, "color": color,
+            "n": i + 1, "id": a.strava_id, "name": a.name, "color": color, "label": leg.label,
             "sport": sports.label(a.sport_type),
             "date": formats.date_format(a.start_date_local or a.start_date, "l j F"),
             "km": a.distance_km, "elevation": round(a.total_elevation_gain),
@@ -276,5 +286,71 @@ def journey_detail(request, journey_id):
     nights = sum(1 for s in stages if s["night_after"])
     return render(request, "activities/journey.html", {
         "journey": journey, "dates": _date_range(journey), "stages": stages, "nights": nights,
-        "stages_json": [{k: s[k] for k in ("n", "id", "name", "color", "coords", "night_after")} for s in stages],
+        "stages_json": [{k: s[k] for k in ("n", "id", "name", "label", "color", "coords", "night_after")}
+                        for s in stages],
+    })
+
+
+@login_required
+def book_builder(request):
+    """Livre : choix des périples, puis préparation des données manquantes."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    found = journeys.for_account(account, places.Budget(lookups=30))
+    if request.method == "POST":
+        wanted = {int(x) for x in request.POST.getlist("j") if x.isdigit()}
+        chosen = [j for j in found if j.id in wanted]
+        if not chosen:
+            messages.error(request, "Choisis au moins un périple pour créer le livre.")
+            return redirect("activities:book")
+        _, problem = book.prepare(account, chosen)
+        if problem:
+            messages.info(request, problem)
+        query = "&".join(f"j={j.id}" for j in sorted(chosen, key=lambda j: j.legs[0].start_at))
+        title = request.POST.get("title", "").strip()
+        if title:
+            from urllib.parse import quote
+            query += f"&titre={quote(title)}"
+        return redirect(f"{reverse('activities:book_view')}?{query}")
+    preselected = {int(x) for x in request.GET.getlist("j") if x.isdigit()}
+    items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
+             for j in found]
+    return render(request, "activities/book_builder.html", {"items": items})
+
+
+def _journey_thumb(j):
+    coords = [polyline.decode(a.summary_polyline) for a in j.activities]
+    flat = [p for c in coords for p in c]
+    return [{"d": geo.svg_path(c, frame=flat), "color": col} for c, col in zip(coords, _stage_colors(len(coords)))]
+
+
+@login_required
+def book_view(request):
+    """Le livre lui-même : une page HTML mise en page pour l'impression (A4), à enregistrer en PDF."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    wanted = [int(x) for x in request.GET.getlist("j") if x.isdigit()]
+    found = {j.id: j for j in journeys.for_account(account)}
+    chosen = [found[i] for i in wanted if i in found]
+    if not chosen:
+        raise Http404("Aucun périple sélectionné")
+    chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j)) for j in chosen]
+    title = request.GET.get("titre", "").strip() or (chosen[0].name if len(chosen) == 1 else "Mes périples")
+    first, last = chosen[0].first_day, chosen[-1].last_day
+    totals = {
+        "km": round(sum(j.distance_km for j in chosen)), "elevation": sum(j.elevation for j in chosen),
+        "days": sum(j.days for j in chosen), "stages": sum(len(j.legs) for j in chosen),
+    }
+    maps = [{"id": f"j{c['journey'].id}", "stages": [{"coords": s["coords"], "color": s["color"]} for s in c["stages"]]}
+            for c in chapters]
+    maps += [{"id": f"s{s['id']}", "stages": [{"coords": s["coords"], "color": s["color"]}]}
+             for c in chapters for s in c["stages"]]
+    maps.append({"id": "cover", "stages": [st for m in maps[:len(chapters)] for st in m["stages"]]})
+    return render(request, "activities/book.html", {
+        "title": title, "chapters": chapters, "totals": totals, "maps": maps,
+        "period": formats.date_format(first, "F Y") if (first.year, first.month) == (last.year, last.month)
+        else f"{formats.date_format(first, 'F Y')} – {formats.date_format(last, 'F Y')}",
+        "author": f"{account.firstname} {account.lastname}".strip(),
     })

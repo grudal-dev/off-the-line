@@ -1,0 +1,47 @@
+{% extends "activities/base.html" %}
+{% block title %}Créer un livre · Off the line{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <div>
+      <h1>Créer un livre</h1>
+      <p class="muted">Choisis un ou plusieurs périples : Off the line en fait un carnet de voyage à imprimer ou à enregistrer en PDF, avec une synthèse de chaque périple puis une page par étape.</p>
+    </div>
+  </div>
+
+  {% if items %}
+    <form method="post" class="book-form">{% csrf_token %}
+      <fieldset>
+        <legend>Périples à inclure</legend>
+        <ol class="journey-list pick-list">
+          {% for item in items %}{% with j=item.journey %}
+            <li>
+              <label class="journey-card pick">
+                <input type="checkbox" name="j" value="{{ j.id }}" {% if item.checked %}checked{% endif %}>
+                <svg class="journey-thumb" viewBox="0 0 100 100" aria-hidden="true">
+                  {% for t in item.thumb %}<path d="{{ t.d }}" style="stroke: {{ t.color }}"/>{% endfor %}
+                </svg>
+                <span class="journey-text">
+                  <strong class="pick-name">{{ j.name }}</strong>
+                  <span class="muted">{{ j.title|capfirst }}, {{ item.dates }}</span>
+                  <span class="pick-figs">{{ j.legs|length }} étapes, {{ j.distance_km|floatformat:"0g" }} km, {{ j.elevation|floatformat:"0g" }} m D+</span>
+                </span>
+              </label>
+            </li>
+          {% endwith %}{% endfor %}
+        </ol>
+      </fieldset>
+      <div class="book-submit">
+        <label>Titre du livre
+          <input class="field" type="text" name="title" maxlength="120" placeholder="Par défaut : le nom du périple, ou « Mes périples »">
+        </label>
+        <button class="btn big" type="submit">Créer le livre</button>
+      </div>
+      <p class="muted small-print">La première fois, Off the line récupère sur Strava la description et le profil d'altitude de chaque étape (deux requêtes par étape) : compte quelques secondes.</p>
+    </form>
+  {% else %}
+    <div class="empty-state">
+      <p>Il faut au moins un périple pour créer un livre.</p>
+      <a class="btn ghost" href="{% url 'activities:journeys' %}">Voir les périples</a>
+    </div>
+  {% endif %}
+{% endblock %}

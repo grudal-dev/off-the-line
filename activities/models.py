@@ -48,6 +48,10 @@ class Activity(models.Model):
     summary_polyline = models.TextField(blank=True)
     photo_count = models.PositiveIntegerField(default=0)
     photos_synced_at = models.DateTimeField(null=True, blank=True)
+    # Récupérés à la demande (livre) : description saisie sur Strava et profil d'altitude
+    description = models.TextField(blank=True)
+    profile = models.JSONField(null=True, blank=True, help_text="[[km, altitude], …] sous-échantillonné")
+    details_fetched_at = models.DateTimeField(null=True, blank=True)
     start_lat = models.FloatField(null=True, blank=True)
     start_lng = models.FloatField(null=True, blank=True)
     raw = models.JSONField(default=dict, blank=True)
@@ -101,3 +105,32 @@ class ActivityPhoto(models.Model):
 
     def __str__(self):
         return f"Photo {self.unique_id} ({self.activity})"
+
+
+class Place(models.Model):
+    """Cache du géocodage inverse : nom de commune pour un point (arrondi à ~1 km)."""
+
+    lat_key = models.DecimalField(max_digits=6, decimal_places=2)
+    lng_key = models.DecimalField(max_digits=6, decimal_places=2)
+    name = models.CharField(max_length=200, blank=True)  # vide : rien trouvé
+    source = models.CharField(max_length=20, blank=True)
+    fetched_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("lat_key", "lng_key")]
+
+    def __str__(self):
+        return f"{self.name or '?'} ({self.lat_key}, {self.lng_key})"
+
+
+class JourneyNote(models.Model):
+    """Titre et récit choisis par l'utilisateur pour un périple (identifié par sa 1re activité)."""
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="journey_notes")
+    journey_id = models.BigIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    story = models.TextField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("account", "journey_id")]

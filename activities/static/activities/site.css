@@ -261,7 +261,17 @@ details.advanced form { margin-top: .75rem; }
 .journey-figures dd { margin: 0; font-family: var(--cond); font-size: 1.5rem; font-weight: 600; line-height: 1.1; }
 
 .atlas-head .back { margin-bottom: .5rem; }
-.atlas-head #replay { margin-top: .25rem; }
+.journey-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .25rem; }
+.journey-actions .btn { padding: .5rem .9rem; font-size: var(--t-small); }
+.journey-edit { margin-top: .75rem; font-size: var(--t-small); }
+.journey-edit summary { cursor: pointer; color: var(--water); }
+.journey-edit form { display: grid; gap: .6rem; margin-top: .6rem; }
+.journey-edit label { display: grid; gap: .25rem; font-weight: 500; }
+.journey-edit input, .journey-edit textarea, .field {
+  font: inherit; font-weight: 400; padding: .5rem .6rem; border: 1px solid var(--contour); border-radius: 6px; background: #fff; color: var(--ink);
+}
+.journey-edit .btn { justify-self: start; }
+.journey-story { margin: .75rem 0 0; font-size: var(--t-small); color: var(--slate); max-height: 7.5em; overflow: auto; }
 .stage-list { list-style: none; margin: 0; padding: .5rem 0; overflow-y: auto; flex: 1; }
 .stage {
   display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: .75rem; align-items: center;
@@ -297,6 +307,20 @@ details.advanced form { margin-top: .75rem; }
 .leaflet-container a.journey-label, .leaflet-container a.journey-label:hover { color: #fff; }
 .journey-label:hover { background: #6a1b9a; }
 .journey-toggle { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .75rem; font-size: var(--t-small); }
+
+/* Créer un livre */
+.book-form fieldset { border: 0; padding: 0; margin: 0; }
+.book-form legend { font-weight: 600; margin-bottom: .75rem; }
+.journey-card.pick { cursor: pointer; grid-template-columns: auto 110px minmax(0, 1fr); }
+.journey-card.pick .journey-thumb { width: 110px; height: 110px; }
+.journey-card.pick input { width: 1.25rem; height: 1.25rem; accent-color: var(--route); }
+.journey-card.pick:has(input:checked) { border-color: var(--route); box-shadow: inset 0 0 0 1px var(--route); }
+.pick .journey-text { display: grid; gap: .15rem; }
+.pick-name { font-family: var(--cond); font-size: var(--t-h3); font-weight: 700; }
+.pick-figs { font-size: var(--t-small); }
+.book-submit { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; margin-top: 1.5rem; }
+.book-submit label { display: grid; gap: .3rem; font-weight: 500; flex: 1 1 20rem; }
+.small-print { font-size: var(--t-small); margin-top: 1rem; }
 
 /* Infobulles Leaflet */
 .map.leaflet-container, .atlas-map .leaflet-container { font-family: var(--sans); background: transparent; }

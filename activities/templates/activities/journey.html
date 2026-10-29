@@ -1,5 +1,5 @@
 {% extends "activities/base.html" %}
-{% block title %}{{ journey.title|capfirst }} · Off the line{% endblock %}
+{% block title %}{{ journey.name }} · Off the line{% endblock %}
 {% block head %}{% include "activities/leaflet_head.html" %}{% endblock %}
 {% block main_class %}full{% endblock %}
 {% block content %}
@@ -7,14 +7,30 @@
   <aside class="atlas-panel">
     <div class="atlas-head">
       <a class="back" href="{% url 'activities:journeys' %}">Tous les périples</a>
-      <h1>{{ journey.title|capfirst }}</h1>
-      <p class="muted" style="margin: 0 0 1rem">{{ dates|capfirst }}</p>
+      <h1>{{ journey.name }}</h1>
+      <p class="muted" style="margin: 0 0 1rem">{{ journey.title|capfirst }}, {{ dates }}</p>
       <div class="totals">
         <p><strong>{{ journey.distance_km|floatformat:"0g" }}</strong>kilomètres</p>
         <p><strong>{{ journey.elevation|floatformat:"0g" }}</strong>m de dénivelé</p>
         <p><strong>{{ nights }}</strong>nuit{{ nights|pluralize }}</p>
       </div>
-      <button type="button" class="btn ghost" id="replay">Rejouer le parcours</button>
+      <div class="journey-actions">
+        <button type="button" class="btn ghost" id="replay">Rejouer le parcours</button>
+        <a class="btn ghost" href="{% url 'activities:book' %}?j={{ journey.id }}">Créer un livre</a>
+      </div>
+      <details class="journey-edit">
+        <summary>Renommer et raconter</summary>
+        <form method="post">{% csrf_token %}
+          <label>Titre
+            <input type="text" name="title" value="{{ journey.custom_title }}" placeholder="{{ journey.place_name|default:journey.title }}" maxlength="200">
+          </label>
+          <label>Récit <span class="muted">(repris dans le livre)</span>
+            <textarea name="story" rows="5" placeholder="Pourquoi ce voyage, avec qui, les meilleurs moments…">{{ journey.story }}</textarea>
+          </label>
+          <button class="btn" type="submit">Enregistrer</button>
+        </form>
+      </details>
+      {% if journey.story %}<p class="journey-story">{{ journey.story|linebreaksbr }}</p>{% endif %}
     </div>
     <ol class="stage-list" id="stage-list">
       {% for s in stages %}
@@ -22,8 +38,8 @@
           <a class="stage" href="{% url 'activities:detail' s.id %}" data-stage="{{ s.n }}">
             <span class="stage-n" style="--c: {{ s.color }}">{{ s.n }}</span>
             <span>
-              <strong>{{ s.name }}</strong>
-              <span>{{ s.date|capfirst }}, {{ s.sport|lower }}</span>
+              <strong>{{ s.label|default:s.name }}</strong>
+              <span>{{ s.date|capfirst }}{% if s.label %}, {{ s.name }}{% else %}, {{ s.sport|lower }}{% endif %}</span>
             </span>
             <span class="stage-figs">{{ s.km|floatformat:1 }} km<small>{{ s.elevation }} m D+</small></span>
           </a>
@@ -57,7 +73,7 @@
   }
   for (const s of stages) {
     const line = L.polyline(s.coords, { color: s.color, weight: 5, lineCap: "round" }).addTo(map);
-    line.bindTooltip(`Étape ${s.n} : ${escapeHtml(s.name)}`, { sticky: true, className: "route-tip" });
+    line.bindTooltip(`Étape ${s.n} : ${escapeHtml(s.label || s.name)}`, { sticky: true, className: "route-tip" });
     line.on("mouseover", () => focus(s.n, true));
     line.on("mouseout", () => focus(s.n, false));
     line.on("click", () => { window.location = `/activites/${s.id}/`; });

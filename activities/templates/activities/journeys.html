@@ -6,6 +6,7 @@
       <h1>Périples</h1>
       <p class="muted">Tes activités enchaînées sur plusieurs jours, d'un point à un autre, regroupées automatiquement.</p>
     </div>
+    {% if items %}<a class="btn ghost" href="{% url 'activities:book' %}">Créer un livre</a>{% endif %}
   </div>
 
   {% if items %}
@@ -17,8 +18,8 @@
             {% for t in item.thumb %}<path d="{{ t.d }}" style="stroke: {{ t.color }}"/>{% endfor %}
           </svg>
           <div class="journey-text">
-            <h2><a href="{% url 'activities:journey' j.id %}">{{ j.title }}</a></h2>
-            <p class="muted">{{ item.dates|capfirst }}</p>
+            <h2><a href="{% url 'activities:journey' j.id %}">{{ j.name }}</a></h2>
+            <p class="muted">{{ j.title|capfirst }}, {{ item.dates }}</p>
             <dl class="journey-figures">
               <div><dt>Étapes</dt><dd>{{ j.legs|length }}</dd></div>
               <div><dt>Distance</dt><dd>{{ j.distance_km|floatformat:"0g" }} km</dd></div>

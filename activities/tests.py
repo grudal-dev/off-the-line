@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Activity, ActivityPhoto, StravaAccount
+from .models import Activity, ActivityPhoto, Place, StravaAccount
 
 TOKEN_RESPONSE = {
     "access_token": "acc-123",
@@ -114,6 +114,11 @@ class LoggedInTestCase(TestCase):
             expires_at=timezone.now() + timedelta(hours=1),
         )
         self.client.force_login(self.user)
+        # Pas de géocodage réseau dans les tests de pages (voir PlaceNamingTests)
+        for target in ("activities.places._geopf", "activities.places._nominatim"):
+            patcher = mock.patch(target, return_value="")
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
 
 class TokenRefreshTests(LoggedInTestCase):
@@ -381,3 +386,109 @@ class JourneyPagesTests(LoggedInTestCase):
     def test_empty_list_explains_rules(self):
         Activity.objects.all().delete()
         self.assertContains(self.client.get(reverse("activities:journeys")), "Aucun périple")
+
+
+def fake_http(places=None, photos=None):
+    """Simule requests.get pour Strava et les géocodeurs, selon l'URL appelée."""
+    places = places or {}
+
+    def get(url, params=None, **kwargs):
+        if "geopf" in url:
+            name = places.get((round(params["lat"], 1), round(params["lon"], 1)), "")
+            return fake_response(json_data={"features": [{"properties": {"city": name}}] if name else []})
+        if "nominatim" in url:
+            return fake_response(json_data={"address": {"village": "Ailleurs"}})
+        if url.endswith("/streams"):
+            return fake_response(json_data={"distance": {"data": [0, 500, 1000, 1500]},
+                                            "altitude": {"data": [400, 450, 520, 480]}})
+        if url.endswith("/photos"):
+            return fake_response(json_data=photos or [])
+        return fake_response(json_data={"description": "Une belle journée."})
+    return get
+
+
+PLACE_NAMES = {(45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}
+
+
+class PlaceNamingTests(TestCase):
+    @mock.patch("activities.places.requests.get", side_effect=fake_http(PLACE_NAMES))
+    def test_journey_and_stages_are_named_and_cached(self, get):
+        from .journeys import detect
+        from .places import Budget, name_journeys
+        j = detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)])[0]
+        name_journeys([j], Budget())
+        self.assertEqual(j.name, "Annecy → Albertville")
+        self.assertEqual(j.legs[0].label, "Annecy → Faverges")
+        calls = get.call_count
+        name_journeys([j], Budget())  # tout est en cache
+        self.assertEqual(get.call_count, calls)
+
+    @mock.patch("activities.places.requests.get", side_effect=fake_http(PLACE_NAMES))
+    def test_round_trip_is_a_loop_and_unknown_place_falls_back(self, get):
+        from .journeys import detect
+        from .places import Budget, name_journeys
+        j = detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ANNECY)])[0]
+        name_journeys([j], Budget())
+        self.assertEqual(j.name, "Boucle depuis Annecy")
+        far = detect([leg(3, 10, 8, MOUTIERS, BOURG), leg(4, 11, 8, BOURG, (45.92, 6.87))])[0]
+        name_journeys([far], Budget(nominatim=0))
+        self.assertEqual(far.name, "2 jours à vélo")
+
+    def test_without_budget_no_network(self):
+        from .journeys import detect
+        from .places import name_journeys
+        with mock.patch("activities.places.requests.get") as get:
+            j = detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)])[0]
+            name_journeys([j])
+            get.assert_not_called()
+            self.assertEqual(j.name, "2 jours à vélo")
+
+
+class BookTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.save()
+        ActivityPhoto.objects.create(activity=Activity.objects.get(strava_id=2), unique_id="x",
+                                     url="https://img.example.com/x.jpg", caption="Au col")
+
+    def test_rename_and_story(self):
+        self.client.post(reverse("activities:journey", args=[1]), {"title": "Mon tour", "story": "Il faisait beau."})
+        response = self.client.get(reverse("activities:journey", args=[1]))
+        self.assertContains(response, "Mon tour")
+        self.assertContains(response, "Il faisait beau.")
+
+    @mock.patch("activities.strava.requests.get", side_effect=fake_http(PLACE_NAMES))
+    def test_builder_fetches_details_then_book_renders(self, get):
+        Place.objects.all().delete()
+        with mock.patch("activities.places._geopf", side_effect=lambda p: {
+                (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
+            self.assertContains(self.client.get(reverse("activities:book")), "Annecy → Albertville")
+        response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("j=1", response["Location"])
+        a = Activity.objects.get(strava_id=1)
+        self.assertEqual(a.description, "Une belle journée.")
+        self.assertEqual(a.profile[-1], [1.5, 480])
+
+        book_page = self.client.get(response["Location"])
+        self.assertContains(book_page, "<title>Été 2026</title>", html=False)
+        self.assertContains(book_page, "Carnet de route")
+        self.assertContains(book_page, "Annecy → Faverges")
+        self.assertContains(book_page, "https://img.example.com/x.jpg")
+        self.assertContains(book_page, 'id="map-s2"')
+
+        # Régénérer ne refait pas d'appels Strava
+        calls = get.call_count
+        self.client.post(reverse("activities:book"), {"j": ["1"]})
+        strava_calls = [c for c in get.call_args_list[calls:] if "strava.com" in c.args[0]]
+        self.assertEqual(strava_calls, [])
+
+    def test_builder_requires_a_choice(self):
+        response = self.client.post(reverse("activities:book"), {}, follow=True)
+        self.assertContains(response, "Choisis au moins un périple")
+
+    def test_book_of_unknown_journey_is_404(self):
+        self.assertEqual(self.client.get(reverse("activities:book_view"), {"j": "999"}).status_code, 404)

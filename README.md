@@ -40,6 +40,21 @@ le départ précédent (sinon ce sont des boucles depuis chez soi). Les chaînes
 s'éloignent pas d'au moins 10 km, tiennent en une journée ou font des allers-retours entre
 deux lieux (domicile-travail) sont écartées. Les seuils sont des constantes en haut du module.
 
+Les périples sont nommés d'après les communes de départ et d'arrivée (« Annecy → Chamonix-Mont-Blanc »,
+« Boucle depuis Annecy »), via le géocodage inverse de la Géoplateforme IGN, ou de Nominatim
+(OpenStreetMap) hors de France. Les noms sont mis en cache en base. Le titre et un récit peuvent
+être modifiés depuis la page du périple.
+
+## Livre
+
+L'onglet « Livre » fabrique un carnet de voyage à partir d'un ou plusieurs périples : couverture,
+sommaire, puis pour chaque périple une page d'ouverture (carte et chiffres clés), un carnet de route
+(profil d'altitude, récit, tableau des étapes) et une page par étape (carte, profil, description
+Strava, photos), avec des pages de photos supplémentaires si besoin. C'est une page HTML au format
+A4 : le bouton « Enregistrer en PDF » ouvre l'impression du navigateur (choisir « Enregistrer au
+format PDF »). Descriptions et profils d'altitude sont récupérés sur Strava à la première génération
+(deux requêtes par étape) puis mis en cache.
+
 ## Structure
 
 - `config/` : réglages du projet Django

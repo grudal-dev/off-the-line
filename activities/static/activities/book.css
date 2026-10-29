@@ -1,0 +1,128 @@
+/* Livre de voyage : pages A4 à l'écran comme à l'impression.
+   Les pages ont des dimensions fixes en mm : rien ne bouge entre l'aperçu et le PDF. */
+
+@page { size: A4; margin: 0; }
+
+body.book {
+  background: #d9ddd8; margin: 0;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  counter-reset: page;
+}
+
+.book-toolbar {
+  position: sticky; top: 0; z-index: 2000; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem;
+  padding: .75rem 1.5rem; background: var(--sheet); border-bottom: 1px solid var(--contour-soft);
+  font-size: var(--t-small);
+}
+.book-toolbar label { display: flex; align-items: center; gap: .4rem; }
+.book-toolbar select { font: inherit; padding: .3rem .4rem; border-radius: 6px; border: 1px solid var(--contour); }
+.book-toolbar .btn { margin-left: auto; }
+
+.page {
+  width: 210mm; height: 297mm; margin: 10mm auto; padding: 16mm 16mm 20mm;
+  background: var(--sheet); box-shadow: 0 2px 12px rgba(28, 38, 41, .18);
+  position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 5mm;
+  font-size: 10.5pt; line-height: 1.45; color: var(--ink);
+  counter-increment: page; break-after: page;
+}
+.page:not(.cover)::after {
+  content: counter(page); position: absolute; bottom: 9mm; left: 0; right: 0; text-align: center;
+  font-family: var(--cond); font-size: 10pt; color: var(--slate);
+}
+.page h2, .page h3 { margin: 0; }
+.kicker { margin: 0; font-size: 9.5pt; color: var(--slate); }
+.page-title { font-size: 26pt; }
+
+/* Cartes */
+.book-map { flex: 1 1 auto; min-height: 70mm; border-radius: 3mm; background: var(--contour-soft); }
+.book-map .leaflet-control-attribution { font-size: 6.5pt; background: rgba(255, 255, 255, .75); }
+
+/* Couverture : la carte occupe toute la page */
+.cover { padding: 0; }
+.cover-map { position: absolute; inset: 0; border-radius: 0; }
+.cover-text {
+  position: absolute; left: 14mm; right: 14mm; bottom: 14mm; z-index: 1000;
+  padding: 9mm 10mm; background: var(--sheet); border-radius: 3mm; box-shadow: 0 2px 14px rgba(28, 38, 41, .25);
+}
+.cover-text h1 { font-size: 40pt; line-height: .95; margin: 0 0 3mm; }
+.cover-text p { margin: 0; font-size: 12pt; color: var(--slate); }
+.cover-text .cover-figs { margin-top: 2mm; color: var(--ink); font-weight: 500; }
+
+/* Sommaire */
+.contents ol { list-style: none; padding: 0; margin: 4mm 0 0; }
+.contents li { display: grid; grid-template-columns: 14mm 1fr auto; gap: 4mm; align-items: baseline; padding: 4mm 0; border-bottom: .3mm solid var(--contour-soft); }
+.toc-n { font-family: var(--cond); font-size: 22pt; font-weight: 700; color: var(--route); }
+.contents strong { display: block; font-family: var(--cond); font-size: 16pt; }
+.contents li span span { color: var(--slate); }
+.toc-figs { font-family: var(--cond); font-size: 13pt; font-weight: 600; }
+
+/* Ouverture d'un périple */
+.opener-title { font-size: 34pt; line-height: .98; }
+.opener-sub { margin: -3mm 0 0; font-size: 12pt; color: var(--slate); }
+
+/* Chiffres clés */
+.figs { display: grid; gap: 3mm 4mm; margin: 0; padding: 3.5mm 0; border-top: .3mm solid var(--contour-soft); border-bottom: .3mm solid var(--contour-soft); }
+.figs-7 { grid-template-columns: repeat(7, 1fr); }
+.figs-4 { grid-template-columns: repeat(4, 1fr); }
+.figs div { display: flex; flex-direction: column-reverse; }
+.figs dt { font-size: 8.5pt; color: var(--slate); }
+.figs dd { margin: 0; font-family: var(--cond); font-size: 19pt; font-weight: 600; line-height: 1.05; }
+.figs-7 dd { font-size: 16pt; }
+.figs dd small { font-size: 10pt; margin-left: .6mm; font-weight: 500; }
+
+/* Profils d'altitude */
+.profile { margin: 0; flex: none; }
+.profile svg { display: block; width: 100%; height: 22mm; }
+.profile.big svg { height: 38mm; }
+.profile .area { fill: color-mix(in srgb, var(--c, var(--route)) 22%, transparent); }
+.profile .line { fill: none; stroke: var(--c, var(--route)); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.profile figcaption { display: flex; justify-content: space-between; font-size: 8pt; color: var(--slate); margin-top: 1mm; }
+.profile.big figcaption { display: block; }
+
+/* Carnet de route */
+.story { font-size: 11pt; max-height: 60mm; overflow: hidden; }
+.story p { margin: 0 0 2.5mm; }
+.stage-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.stage-table th { text-align: left; font-weight: 500; color: var(--slate); font-size: 8.5pt; padding: 0 2mm 1.5mm 0; border-bottom: .3mm solid var(--contour); }
+.stage-table td { padding: 2mm 2mm 2mm 0; border-bottom: .3mm solid var(--contour-soft); vertical-align: middle; }
+.stage-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stage-dot { display: inline-grid; place-items: center; width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--c); color: #fff; font-family: var(--cond); font-weight: 700; font-size: 10pt; }
+.night-row td { padding: .8mm 0; border-bottom-style: dotted; color: var(--slate); font-size: 8.5pt; }
+
+/* Page d'étape */
+.stage-head { display: grid; grid-template-columns: auto 1fr; gap: 5mm; align-items: center; }
+.stage-num { font-family: var(--cond); font-weight: 700; font-size: 54pt; line-height: .8; color: var(--c); }
+.stage-head h3 { font-family: var(--cond); font-size: 24pt; line-height: 1; margin: .8mm 0; }
+.stage-head .muted { margin: 0; font-size: 9.5pt; }
+.stage-text {
+  margin: 0; padding: .5mm 0 .5mm 4mm; border-left: 1mm solid var(--c); font-size: 10.5pt;
+  display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden; flex: none;
+}
+.photo-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; flex: none; }
+.photo-row.photos-1 { grid-template-columns: 1fr; }
+.photo-row.photos-2 { grid-template-columns: 1fr 1fr; }
+.photo-row img { width: 100%; height: 52mm; object-fit: cover; border-radius: 2mm; display: block; background: var(--contour-soft); }
+.photo-row.photos-1 img { height: 70mm; }
+.photo-row figcaption, .photo-grid figcaption { font-size: 8pt; color: var(--slate); margin-top: 1mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-row figure, .photo-grid figure { margin: 0; min-width: 0; }
+.night-note { position: absolute; right: 16mm; bottom: 9mm; margin: 0; font-size: 8.5pt; color: var(--slate); }
+
+/* Pages de photos */
+.photo-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 4mm; min-height: 0; }
+.photo-grid.photos-1 { grid-template-columns: 1fr; }
+.photo-grid figure { display: flex; flex-direction: column; min-height: 0; }
+.photo-grid img { flex: 1; min-height: 0; width: 100%; object-fit: cover; border-radius: 2mm; background: var(--contour-soft); }
+
+/* Dos du livre */
+.back { justify-content: center; align-items: center; text-align: center; background: var(--paper) url("contours.svg") center / cover no-repeat; }
+.back-figs { margin: 0 0 4mm; font-size: 14pt; color: var(--slate); }
+.back-figs strong { display: block; font-family: var(--cond); font-size: 40pt; line-height: 1; color: var(--ink); }
+.colophon { position: absolute; bottom: 14mm; left: 16mm; right: 16mm; margin: 0; font-size: 8pt; color: var(--slate); display: flex; align-items: center; justify-content: center; gap: 2mm; flex-wrap: wrap; }
+.colophon img { width: 5mm; height: 5mm; border-radius: 1.2mm; }
+.page.back::after { display: none; }
+
+@media print {
+  body.book { background: none; }
+  .book-toolbar { display: none; }
+  .page { margin: 0; box-shadow: none; }
+}
