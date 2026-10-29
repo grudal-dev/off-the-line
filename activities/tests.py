@@ -215,6 +215,17 @@ class PhotoSyncTests(LoggedInTestCase):
         self.assertContains(self.client.get(reverse("activities:map")), "https://img.example.com/a.jpg")
 
 
+class PhotoBackfillTests(LoggedInTestCase):
+    def test_old_activities_get_photo_count_from_raw(self):
+        import importlib
+        from django.apps import apps
+        from .sync import _to_fields
+        data = {**strava_activity(7), "total_photo_count": 3}
+        Activity.objects.create(account=self.account, strava_id=7, **{**_to_fields(data), "photo_count": 0})
+        importlib.import_module("activities.migrations.0004_backfill_photo_count").backfill(apps, None)
+        self.assertEqual(Activity.objects.get(strava_id=7).photo_count, 3)
+
+
 class ActivityPagesTests(LoggedInTestCase):
     def setUp(self):
         super().setUp()

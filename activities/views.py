@@ -162,6 +162,8 @@ def _sync_photos_with_message(request, account):
         return
     if photos:
         messages.success(request, f"{photos} photo(s) importée(s).")
+    elif not account.activities.filter(photo_count__gt=0).exists():
+        messages.info(request, "Strava n'indique aucune photo sur tes activités.")
     if remaining:
         messages.info(request, f"{remaining} activité(s) avec photos restent à importer : "
                                "relance la synchronisation dans quelques minutes.")
