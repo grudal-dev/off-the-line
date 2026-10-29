@@ -97,6 +97,8 @@ class ActivityPhoto(models.Model):
     activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name="photos")
     unique_id = models.CharField(max_length=100, unique=True)
     url = models.URLField(max_length=1000)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
     caption = models.TextField(blank=True)
     taken_at = models.DateTimeField(null=True, blank=True)
 
@@ -134,3 +136,65 @@ class JourneyNote(models.Model):
 
     class Meta:
         unique_together = [("account", "journey_id")]
+
+
+class Book(models.Model):
+    """Livre de voyage enregistré : périples choisis et personnalisation."""
+
+    COVER_MAP, COVER_PHOTO = "map", "photo"
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="books")
+    title = models.CharField(max_length=200, blank=True)
+    subtitle = models.CharField(max_length=300, blank=True)
+    journey_ids = models.JSONField(default=list)
+    cover = models.CharField(max_length=10, default=COVER_MAP)
+    cover_photo = models.CharField(max_length=30, blank=True, help_text="clé de photo (s:12 ou u:3)")
+    options = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False}
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.title or f"Livre {self.pk}"
+
+    def option(self, key):
+        return self.options.get(key, self.DEFAULT_OPTIONS[key])
+
+
+class BookStage(models.Model):
+    """Personnalisation d'une étape dans un livre (ce qui n'est pas défini garde la valeur Strava)."""
+
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="stages")
+    activity_id = models.BigIntegerField()
+    title = models.CharField(max_length=200, blank=True)
+    text = models.TextField(blank=True)
+    text_edited = models.BooleanField(default=False, help_text="texte saisi (même vide) au lieu de la description Strava")
+    photos = models.JSONField(null=True, blank=True,
+                              help_text="[{key, caption}] dans l'ordre ; null = toutes les photos Strava")
+
+    class Meta:
+        unique_together = [("book", "activity_id")]
+
+
+def book_photo_path(instance, filename):
+    return f"livres/{instance.book_id}/{filename}"
+
+
+class BookPhoto(models.Model):
+    """Photo ajoutée par l'utilisateur à une étape d'un livre."""
+
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="uploads")
+    activity_id = models.BigIntegerField()
+    image = models.ImageField(upload_to=book_photo_path, width_field="width", height_field="height")
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    caption = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def key(self):
+        return f"u:{self.pk}"

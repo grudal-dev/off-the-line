@@ -17,5 +17,8 @@ urlpatterns = [
     path("periples/", views.journey_list, name="journeys"),
     path("periples/<int:journey_id>/", views.journey_detail, name="journey"),
     path("livre/", views.book_builder, name="book"),
-    path("livre/apercu/", views.book_view, name="book_view"),
+    path("livre/<int:book_id>/", views.book_detail, name="book_detail"),
+    path("livre/<int:book_id>/modifier/", views.book_update, name="book_update"),
+    path("livre/<int:book_id>/photos/", views.book_upload, name="book_upload"),
+    path("livre/<int:book_id>/supprimer/", views.book_delete, name="book_delete"),
 ]

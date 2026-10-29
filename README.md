@@ -52,7 +52,17 @@ sommaire, puis pour chaque périple une page d'ouverture (carte et chiffres clé
 (profil d'altitude, récit, tableau des étapes) et une page par étape (carte, profil, description
 Strava, photos), avec des pages de photos supplémentaires si besoin. C'est une page HTML au format
 A4 : le bouton « Enregistrer en PDF » ouvre l'impression du navigateur (choisir « Enregistrer au
-format PDF »). Descriptions et profils d'altitude sont récupérés sur Strava à la première génération
+format PDF »).
+
+Les livres sont enregistrés (« Mes livres ») et personnalisables avec « Personnaliser » : titres et
+textes modifiables directement sur la page, choix, ordre et légendes des photos de chaque étape,
+ajout de photos personnelles, couverture carte ou photo, sections affichées (sommaire, carnet de
+route, profils, dos). Les photos ne sont jamais recadrées : leur nombre par page et leur
+disposition dépendent de leurs proportions (`book.best_layout`). Les cartes du livre sont
+uniquement en imagerie satellite (Esri World Imagery, attribution imprimée).
+
+Les photos ajoutées sont stockées dans `media/` (`DJANGO_MEDIA_ROOT`). Django ne les sert qu'en
+mode DEBUG : en production, il faut les servir par le serveur web ou un stockage externe. Descriptions et profils d'altitude sont récupérés sur Strava à la première génération
 (deux requêtes par étape) puis mis en cache.
 
 ## Structure

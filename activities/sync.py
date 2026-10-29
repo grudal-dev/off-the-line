@@ -74,7 +74,9 @@ def sync_photos(account, limit=PHOTO_BATCH):
         keep = []
         for item in items:
             urls = item.get("urls") or {}
-            url = urls[max(urls, key=int)] if urls else None  # la plus grande taille renvoyée
+            size_key = max(urls, key=int) if urls else None  # la plus grande taille renvoyée
+            url = urls.get(size_key)
+            dims = (item.get("sizes") or {}).get(size_key) or [None, None]
             if not url or not item.get("unique_id"):
                 continue
             taken_at = parse_datetime(item["created_at"]) if item.get("created_at") else None
@@ -82,7 +84,7 @@ def sync_photos(account, limit=PHOTO_BATCH):
                 unique_id=item["unique_id"],
                 defaults={
                     "activity": activity, "url": url, "caption": (item.get("caption") or "")[:2000],
-                    "taken_at": taken_at,
+                    "taken_at": taken_at, "width": dims[0], "height": dims[1],
                 },
             )
             keep.append(item["unique_id"])

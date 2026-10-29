@@ -129,6 +129,12 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Photos ajoutées aux livres. En production, servir ce dossier par le serveur web
+# (ou un stockage externe) : Django ne les sert lui-même qu'en mode DEBUG.
+MEDIA_URL = "media/"
+MEDIA_ROOT = Path(os.environ.get("DJANGO_MEDIA_ROOT", BASE_DIR / "media"))
+DATA_UPLOAD_MAX_MEMORY_SIZE = 30 * 1024 * 1024
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

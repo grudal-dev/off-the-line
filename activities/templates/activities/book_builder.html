@@ -1,10 +1,30 @@
 {% extends "activities/base.html" %}
-{% block title %}Créer un livre · Off the line{% endblock %}
+{% block title %}Livres · Off the line{% endblock %}
 {% block content %}
+  {% if books %}
+    <section class="my-books" aria-labelledby="my-books-title">
+      <h1 id="my-books-title">Mes livres</h1>
+      <ul>
+        {% for b in books %}
+          <li>
+            <div>
+              <a class="my-book-title" href="{% url 'activities:book_detail' b.book.pk %}">{{ b.book }}</a>
+              <span class="muted">{{ b.names|join:", " }}. Modifié le {{ b.book.updated_at|date:"j F Y" }}.</span>
+            </div>
+            <a class="btn ghost" href="{% url 'activities:book_detail' b.book.pk %}?edition=1">Personnaliser</a>
+            <form method="post" action="{% url 'activities:book_delete' b.book.pk %}" onsubmit="return confirm('Supprimer ce livre et les photos que tu y as ajoutées ?')">{% csrf_token %}
+              <button class="link-button" type="submit">Supprimer</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
   <div class="page-head">
     <div>
-      <h1>Créer un livre</h1>
-      <p class="muted">Choisis un ou plusieurs périples : Off the line en fait un carnet de voyage à imprimer ou à enregistrer en PDF, avec une synthèse de chaque périple puis une page par étape.</p>
+      {% if books %}<h2>Nouveau livre</h2>{% else %}<h1>Créer un livre</h1>{% endif %}
+      <p class="muted">Choisis un ou plusieurs périples : Off the line en fait un carnet de voyage à imprimer ou à enregistrer en PDF, avec une synthèse de chaque périple puis une page par étape. Tu pourras ensuite tout personnaliser : textes, photos, couverture, sections.</p>
     </div>
   </div>
 

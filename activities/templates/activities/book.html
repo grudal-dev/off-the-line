@@ -11,24 +11,47 @@
 </head>
 <body class="book">
   <div class="book-toolbar" role="toolbar" aria-label="Livre">
-    <a href="{% url 'activities:book' %}">Retour</a>
-    <label>Fond de carte <select id="base-select"></select></label>
-    <label><input type="checkbox" id="relief-toggle"> Relief</label>
+    <a href="{% url 'activities:book' %}">Mes livres</a>
+    {% if edit %}
+      <a class="btn" href="?">Terminer</a>
+      <span class="edit-hint">Clique sur un texte pour le modifier. Enregistrement automatique.</span>
+    {% else %}
+      <a class="btn ghost" href="?edition=1">Personnaliser</a>
+    {% endif %}
     <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
+    <span id="save-status" class="muted" aria-live="polite"></span>
     <button type="button" class="btn" id="print-btn">Enregistrer en PDF</button>
   </div>
+  {% if edit %}
+  <div class="book-layout-panel">
+    <strong>Mise en page</strong>
+    <label><input type="checkbox" data-option="toc" {% if opt.toc %}checked{% endif %}> Sommaire</label>
+    <label><input type="checkbox" data-option="roadbook" {% if opt.roadbook %}checked{% endif %}> Carnet de route</label>
+    <label><input type="checkbox" data-option="profiles" {% if opt.profiles %}checked{% endif %}> Profils d'altitude</label>
+    <label><input type="checkbox" data-option="back" {% if opt.back %}checked{% endif %}> Dos du livre</label>
+    <span class="sep"></span>
+    <strong>Couverture</strong>
+    <label><input type="radio" name="cover" value="map" {% if book.cover == "map" %}checked{% endif %}> Carte</label>
+    <label><input type="radio" name="cover" value="photo" {% if book.cover == "photo" %}checked{% endif %} {% if not all_photos %}disabled{% endif %}> Photo</label>
+    {% if not all_photos %}<span class="muted">(ajoute des photos à une étape pour l'utiliser)</span>{% endif %}
+  </div>
+  {% endif %}
 
   <!-- Couverture -->
-  <section class="page cover">
-    <div class="book-map cover-map" id="map-cover"></div>
+  <section class="page cover{% if book.cover == "photo" and cover_photo %} cover-with-photo{% endif %}">
+    {% if book.cover == "photo" and cover_photo %}
+      <div class="cover-photo-frame"><img class="cover-photo" src="{{ cover_photo.url }}" alt=""></div>
+    {% else %}
+      <div class="book-map cover-map" id="map-cover"></div>
+    {% endif %}
     <div class="cover-text">
-      <h1>{{ title }}</h1>
-      <p>{{ period|capfirst }}{% if author %}, {{ author }}{% endif %}</p>
+      <h1 data-edit="book.title" data-placeholder="Titre du livre">{{ title }}</h1>
+      <p data-edit="book.subtitle" data-placeholder="Sous-titre">{{ subtitle }}</p>
       <p class="cover-figs">{{ totals.days }} jours, {{ totals.stages }} étapes, {{ totals.km|floatformat:"0g" }} km, {{ totals.elevation|floatformat:"0g" }} m de dénivelé</p>
     </div>
   </section>
 
-  {% if chapters|length > 1 %}
+  {% if chapters|length > 1 and opt.toc %}
   <!-- Sommaire -->
   <section class="page contents">
     <h2 class="page-title">Sommaire</h2>
@@ -48,7 +71,7 @@
   <!-- Ouverture du périple -->
   <section class="page opener">
     {% if chapters|length > 1 %}<p class="kicker">Périple {{ forloop.counter }}</p>{% endif %}
-    <h2 class="opener-title">{{ j.name }}</h2>
+    <h2 class="opener-title" data-edit="journey.title" data-journey="{{ j.id }}" data-placeholder="{{ j.place_name|default:j.title }}">{{ j.name }}</h2>
     <p class="opener-sub">{{ j.title|capfirst }}, {{ c.dates }}</p>
     <div class="book-map" id="map-j{{ j.id }}"></div>
     <dl class="figs figs-7">
@@ -62,10 +85,11 @@
     </dl>
   </section>
 
+  {% if opt.roadbook %}
   <!-- Carnet de route -->
   <section class="page roadbook">
     <h2 class="page-title">Carnet de route</h2>
-    {% if c.profile %}
+    {% if c.profile and opt.profiles %}
       <figure class="profile big">
         <svg viewBox="0 0 {{ c.profile.width }} {{ c.profile.height }}" preserveAspectRatio="none" aria-hidden="true">
           <path class="area" d="{{ c.profile.area }}"/><path class="line" d="{{ c.profile.line }}"/>
@@ -73,7 +97,7 @@
         <figcaption>Profil du périple : de {{ c.profile.min|floatformat:"0g" }} à {{ c.profile.max|floatformat:"0g" }} m d'altitude sur {{ c.profile.km|floatformat:"0g" }} km</figcaption>
       </figure>
     {% endif %}
-    {% if j.story %}<div class="story">{{ j.story|linebreaks }}</div>{% endif %}
+    {% if j.story or edit %}<div class="story" data-edit="journey.story" data-journey="{{ j.id }}" data-multiline data-placeholder="Raconte ce périple : le projet, les compagnons de route, les moments forts…">{{ j.story }}</div>{% endif %}
     <table class="stage-table">
       <thead><tr><th scope="col">Étape</th><th scope="col">Date</th><th scope="col">Parcours</th><th scope="col" class="num">Distance</th><th scope="col" class="num">D+</th><th scope="col" class="num">Temps</th></tr></thead>
       <tbody>
@@ -91,15 +115,17 @@
       </tbody>
     </table>
   </section>
+  {% endif %}
 
   {% for s in c.stages %}
   <!-- Étape -->
-  <section class="page stage-page{% if not s.lead_photos %} no-photos{% endif %}" style="--c: {{ s.color }}">
+  <section class="page stage-page{% if not s.lead_photos %} no-photos{% endif %}" id="etape-{{ s.id }}" style="--c: {{ s.color }}">
+    {% if edit %}<button type="button" class="edit-photos" data-activity="{{ s.id }}">Photos de l'étape ({{ s.all_photos|length }})</button>{% endif %}
     <header class="stage-head">
       <span class="stage-num">{{ s.n }}</span>
       <div>
         <p class="kicker">Étape {{ s.n }} sur {{ c.stages|length }}, {{ s.date }}</p>
-        <h3>{{ s.label }}</h3>
+        <h3 data-edit="stage.title" data-activity="{{ s.id }}" data-placeholder="{{ s.default_label }}">{{ s.label }}</h3>
         {% if s.label != s.activity_name %}<p class="muted">{{ s.activity_name }}</p>{% endif %}
       </div>
     </header>
@@ -110,7 +136,7 @@
       <div>{% if s.speed %}<dt>{{ s.speed.label }}</dt><dd>{{ s.speed.value }}<small>{{ s.speed.unit }}</small></dd>{% else %}<dt>Altitude max</dt><dd>{% if s.profile %}{{ s.profile.max|floatformat:"0g" }}<small>m</small>{% else %}–{% endif %}</dd>{% endif %}</div>
     </dl>
     <div class="book-map" id="map-s{{ s.id }}"></div>
-    {% if s.profile %}
+    {% if s.profile and opt.profiles %}
       <figure class="profile">
         <svg viewBox="0 0 {{ s.profile.width }} {{ s.profile.height }}" preserveAspectRatio="none" aria-hidden="true">
           <path class="area" d="{{ s.profile.area }}"/><path class="line" d="{{ s.profile.line }}"/>
@@ -118,10 +144,10 @@
         <figcaption><span>{{ s.profile.min|floatformat:"0g" }} m</span><span>{{ s.profile.max|floatformat:"0g" }} m</span></figcaption>
       </figure>
     {% endif %}
-    {% if s.description %}<blockquote class="stage-text">{{ s.description|linebreaksbr }}</blockquote>{% endif %}
+    {% if s.description or edit %}<blockquote class="stage-text" data-edit="stage.text" data-activity="{{ s.id }}" data-multiline data-placeholder="Ajoute un texte pour cette étape…">{{ s.description }}</blockquote>{% endif %}
     {% if s.lead_photos %}
-      <div class="photo-row photos-{{ s.lead_photos|length }}">
-        {% for p in s.lead_photos %}<figure><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>{% endfor %}
+      <div class="photo-box" style="flex-basis: {{ s.photo_box_h|stringformat:"s" }}mm">
+        {% for p in s.lead_photos %}{% include "activities/book_photo.html" %}{% endfor %}
       </div>
     {% endif %}
     {% if s.night_after %}<p class="night-note">Nuit {{ s.n }}, puis étape {{ s.n|add:1 }}</p>{% endif %}
@@ -129,14 +155,15 @@
   {% for chunk in s.photo_pages %}
   <section class="page photo-page" style="--c: {{ s.color }}">
     <p class="kicker">Étape {{ s.n }}, {{ s.label }} : photos</p>
-    <div class="photo-grid photos-{{ chunk|length }}">
-      {% for p in chunk %}<figure><img src="{{ p.url }}" alt="{{ p.caption }}">{% if p.caption %}<figcaption>{{ p.caption }}</figcaption>{% endif %}</figure>{% endfor %}
+    <div class="photo-box photo-box-page" data-valign="center">
+      {% for p in chunk %}{% include "activities/book_photo.html" %}{% endfor %}
     </div>
   </section>
   {% endfor %}
   {% endfor %}
   {% endwith %}{% endfor %}
 
+  {% if opt.back %}
   <!-- Dos -->
   <section class="page back">
     <div>
@@ -146,21 +173,129 @@
     </div>
     <p class="colophon"><img src="{% static 'activities/icon.svg' %}" alt=""> Off the line, d'après tes activités Strava. Cartes : <span id="map-credit"></span>.</p>
   </section>
+  {% endif %}
 
-  {{ maps|json_script:"maps-data" }}
+  {% if edit %}
+  <dialog class="photo-editor" id="photo-editor" aria-labelledby="pe-title">
+    <form method="dialog" class="pe-head">
+      <h2 id="pe-title">Photos de l'étape</h2>
+      <button class="link-button" value="cancel">Fermer</button>
+    </form>
+    <p class="muted">Coche les photos à garder, change leur ordre et leurs légendes. Les premières vont sur la page de l'étape (autant que la place le permet), les suivantes sur des pages de photos. Les photos ne sont jamais recadrées : la page s'adapte à leur format.</p>
+    <ol class="pe-list" id="pe-list"></ol>
+    <div class="pe-foot">
+      <label class="btn ghost pe-upload">Ajouter des photos<input type="file" id="pe-files" accept="image/*" multiple hidden></label>
+      <span id="pe-status" class="muted" aria-live="polite"></span>
+      <button type="button" class="btn" id="pe-save">Enregistrer</button>
+    </div>
+  </dialog>
+  {{ editor|json_script:"editor-data" }}
+  {% endif %}
+
   <script>
+  // Photos sans recadrage : même calcul que book.best_layout côté serveur, mais avec
+  // la taille réelle de chaque zone et les vraies proportions des images une fois chargées.
+  (() => {
+    const MM = 96 / 25.4, GAP = 3 * MM, CAPTION = 5 * MM;
+    function best(items, W, H) {
+      const n = items.length;
+      let top = null;
+      for (let mask = 0; mask < 1 << (n - 1); mask++) {
+        const rows = [[items[0]]];
+        for (let i = 1; i < n; i++) {
+          if (mask >> (i - 1) & 1) rows.push([]);
+          rows[rows.length - 1].push(items[i]);
+        }
+        const heights = rows.map(r => (W - GAP * (r.length - 1)) / r.reduce((a, p) => a + p.ratio, 0));
+        const caps = rows.map(r => r.some(p => p.caption) ? CAPTION : 0);
+        const fixed = GAP * (rows.length - 1) + caps.reduce((a, b) => a + b, 0);
+        const sum = heights.reduce((a, b) => a + b, 0);
+        const scale = Math.min(1, Math.max(0, (H - fixed) / sum));
+        // Même note que côté serveur : surface occupée et équilibre entre les photos
+        const area = rows.reduce((a, r, k) => a + r.reduce((b, p) => b + heights[k] * scale * Math.sqrt(p.ratio), 0), 0);
+        if (!top || area > top.area + 1e-6) top = { rows, heights, caps, scale, area, fixed };
+      }
+      return top;
+    }
+    function layout(box) {
+      const figs = [...box.querySelectorAll("figure")];
+      const items = figs.map(f => ({ el: f, ratio: parseFloat(f.dataset.ratio) || 1.5, caption: f.hasAttribute("data-caption") }));
+      const W = box.clientWidth, H = box.clientHeight;
+      if (!items.length || !W || !H) return;
+      const L = best(items, W, H);
+      const used = L.heights.reduce((a, h) => a + h * L.scale, 0) + L.fixed;
+      let y = box.dataset.valign === "center" ? (H - used) / 2 : 0;
+      L.rows.forEach((row, k) => {
+        const h = L.heights[k] * L.scale;
+        const rowW = row.reduce((a, p) => a + p.ratio * h, 0) + GAP * (row.length - 1);
+        let x = (W - rowW) / 2;
+        for (const p of row) {
+          const w = p.ratio * h;
+          Object.assign(p.el.style, { left: `${x}px`, top: `${y}px`, width: `${w}px` });
+          p.el.querySelector("img").style.height = `${h}px`;
+          x += w + GAP;
+        }
+        y += h + L.caps[k] + GAP;
+      });
+      box.classList.add("is-laid-out");
+    }
+    const boxes = [...document.querySelectorAll(".photo-box")];
+    window.photosPending = 0;
+    for (const box of boxes) {
+      for (const img of box.querySelectorAll("img")) {
+        const fig = img.closest("figure");
+        const done = () => {
+          if (img.naturalWidth && img.naturalHeight) fig.dataset.ratio = img.naturalWidth / img.naturalHeight;
+          layout(box);
+        };
+        if (img.complete) done(); else { window.photosPending++; img.addEventListener("load", () => { window.photosPending--; done(); }); img.addEventListener("error", () => { window.photosPending--; }); }
+      }
+      layout(box);
+    }
+    window.addEventListener("resize", () => boxes.forEach(layout));
+  })();
+  </script>
+  {{ maps|json_script:"maps-data" }}
+  {{ opt|json_script:"options-data" }}
+  <form hidden>{% csrf_token %}</form>
+  <script>
+  const BOOK = {
+    update: "{% url 'activities:book_update' book.pk %}",
+    upload: "{% url 'activities:book_upload' book.pk %}",
+    edit: {{ edit|yesno:"true,false" }},
+    options: JSON.parse(document.getElementById("options-data").textContent),
+    csrf: document.querySelector("[name=csrfmiddlewaretoken]").value,
+  };
+  const saveStatus = document.getElementById("save-status");
+  async function saveBook(payload) {
+    saveStatus.textContent = "Enregistrement…";
+    try {
+      const r = await fetch(BOOK.update, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": BOOK.csrf },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || r.status);
+      saveStatus.textContent = "Enregistré";
+      setTimeout(() => { if (saveStatus.textContent === "Enregistré") saveStatus.textContent = ""; }, 2000);
+      return true;
+    } catch (e) {
+      saveStatus.textContent = `Échec de l'enregistrement (${e.message})`;
+      return false;
+    }
+  }
+  function reloadAt(activityId, reopen) {
+    try { sessionStorage.setItem("otl-reopen", reopen ? String(activityId) : ""); } catch (e) {}
+    if (activityId) location.hash = "etape-" + activityId;
+    location.reload();
+  }
+
   (() => {
     const maps = JSON.parse(document.getElementById("maps-data").textContent);
     const status = document.getElementById("load-status");
-    const select = document.getElementById("base-select");
-    const reliefBox = document.getElementById("relief-toggle");
-    const defs = BASEMAP.layers.filter(d => d.theme !== "dark");
-    let base = "topo";
-    try { base = localStorage.getItem("otl-book-base") || "topo"; } catch (e) {}
-    if (!defs.some(d => d.key === base)) base = defs[0].key;
-    select.innerHTML = defs.map(d => `<option value="${d.key}">${d.label}</option>`).join("");
-    select.value = base;
-
+    // Le livre n'utilise que l'imagerie satellite (droits d'impression plus clairs que
+    // les cartes dessinées) ; l'attribution reste affichée sur chaque carte et au dos.
+    const SATELLITE = BASEMAP.layers.find(d => d.key === "satellite");
     const instances = [];
     for (const m of maps) {
       const el = document.getElementById("map-" + m.id);
@@ -188,7 +323,7 @@
       }
       map.fitBounds(group.getBounds(), { padding: m.id === "cover" ? [60, 60] : [28, 28] });
       if (m.id === "cover") map.panBy([0, 70], { animate: false });  // laisse la place au titre
-      instances.push({ map, tiles: null, relief: null });
+      instances.push({ map, tiles: null });
     }
 
     // Les cartes doivent être chargées avant d'imprimer, sinon le PDF a des trous
@@ -202,40 +337,144 @@
       setTimeout(finish, 15000);
     }
     function update() {
-      status.textContent = pending ? `Chargement des cartes (${pending} restantes)…` : "Prêt à imprimer";
+      status.textContent = pending ? `Chargement des cartes (${pending} restantes)…` : "Cartes prêtes";
     }
-    function setBase(key) {
-      const def = defs.find(d => d.key === key);
-      for (const inst of instances) {
-        if (inst.tiles) inst.tiles.remove();
-        inst.tiles = L.tileLayer(def.url, def.options).addTo(inst.map);
-        track(inst.tiles);
-      }
-      document.getElementById("map-credit").innerHTML = def.options.attribution;
-      try { localStorage.setItem("otl-book-base", key); } catch (e) {}
+    for (const inst of instances) {
+      inst.tiles = L.tileLayer(SATELLITE.url, SATELLITE.options).addTo(inst.map);
+      track(inst.tiles);
     }
-    function setRelief(on) {
-      for (const inst of instances) {
-        if (inst.relief) { inst.relief.remove(); inst.relief = null; }
-        if (on) {
-          if (!inst.map.getPane("relief")) {
-            inst.map.createPane("relief").style.zIndex = 250;
-            inst.map.getPane("relief").classList.add("relief-pane");
-          }
-          inst.relief = L.tileLayer(BASEMAP.hillshade.url, { ...BASEMAP.hillshade.options, pane: "relief" }).addTo(inst.map);
-          track(inst.relief);
-        }
-      }
-    }
-    select.addEventListener("change", () => setBase(select.value));
-    reliefBox.addEventListener("change", () => setRelief(reliefBox.checked));
-    setBase(base);
+    const credit = document.getElementById("map-credit");
+    if (credit) credit.innerHTML = SATELLITE.options.attribution;
 
     document.getElementById("print-btn").addEventListener("click", () => {
-      if (pending && !confirm("Des cartes sont encore en cours de chargement. Imprimer quand même ?")) return;
+      if ((pending || window.photosPending) && !confirm("Des cartes ou des photos sont encore en cours de chargement. Imprimer quand même ?")) return;
       window.print();
     });
   })();
   </script>
+  {% if edit %}
+  <script>
+  (() => {
+    // Textes modifiables directement sur la page
+    for (const el of document.querySelectorAll("[data-edit]")) {
+      try { el.contentEditable = "plaintext-only"; } catch (e) { el.contentEditable = "true"; }
+      if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+      el.spellcheck = true;
+      let before = el.innerText.trim();
+      el.addEventListener("keydown", e => {
+        if (e.key === "Enter" && !el.hasAttribute("data-multiline")) { e.preventDefault(); el.blur(); }
+        if (e.key === "Escape") { el.innerText = before; el.blur(); }
+      });
+      el.addEventListener("blur", async () => {
+        const value = el.innerText.trim();
+        if (value === before) return;
+        const ok = await saveBook({ field: el.dataset.edit, value, journey: el.dataset.journey, activity: el.dataset.activity });
+        if (ok) before = value;
+        if (!value) el.innerText = "";  // affiche le texte d'aide
+      });
+    }
+
+    // Mise en page : sections affichées et couverture
+    document.querySelectorAll("[data-option]").forEach(box => box.addEventListener("change", async () => {
+      if (await saveBook({ field: "options", value: { [box.dataset.option]: box.checked } })) reloadAt();
+    }));
+    document.querySelectorAll("input[name=cover]").forEach(r => r.addEventListener("change", async () => {
+      if (await saveBook({ field: "cover", value: r.value })) location.reload();
+    }));
+
+    // Éditeur de photos d'une étape
+    const editor = JSON.parse(document.getElementById("editor-data").textContent);
+    const dialog = document.getElementById("photo-editor");
+    const list = document.getElementById("pe-list");
+    const status = document.getElementById("pe-status");
+    let current = null, photos = [];
+
+    function open(activityId) {
+      current = activityId;
+      photos = editor[activityId].photos.map(p => ({ ...p, keep: !p.excluded }));
+      document.getElementById("pe-title").textContent = `Photos : ${editor[activityId].label}`;
+      status.textContent = "";
+      render();
+      dialog.showModal();
+    }
+    function render() {
+      if (!photos.length) {
+        list.innerHTML = `<li class="pe-empty">Aucune photo pour cette étape. Ajoute les tiennes avec le bouton ci-dessous.</li>`;
+        return;
+      }
+      list.innerHTML = photos.map((p, i) => `
+        <li class="pe-item${p.keep ? "" : " is-off"}" data-i="${i}">
+          <img src="${p.url}" alt="">
+          <div class="pe-fields">
+            <label class="pe-keep"><input type="checkbox" ${p.keep ? "checked" : ""} data-act="keep"> Dans le livre</label>
+            <input type="text" class="field" value="${escapeAttr(p.caption || "")}" placeholder="Légende" maxlength="300" data-act="caption">
+            <span class="pe-source">${p.source === "upload" ? "Ajoutée par toi" : "Strava"}</span>
+          </div>
+          <div class="pe-actions">
+            <button type="button" data-act="up" ${i === 0 ? "disabled" : ""} aria-label="Monter">↑</button>
+            <button type="button" data-act="down" ${i === photos.length - 1 ? "disabled" : ""} aria-label="Descendre">↓</button>
+            <button type="button" data-act="cover">Couverture</button>
+            ${p.source === "upload" ? `<button type="button" data-act="delete">Supprimer</button>` : ""}
+          </div>
+        </li>`).join("");
+    }
+    list.addEventListener("input", e => {
+      const li = e.target.closest("[data-i]");
+      if (li && e.target.dataset.act === "caption") photos[li.dataset.i].caption = e.target.value;
+    });
+    list.addEventListener("change", e => {
+      const li = e.target.closest("[data-i]");
+      if (li && e.target.dataset.act === "keep") { photos[li.dataset.i].keep = e.target.checked; li.classList.toggle("is-off", !e.target.checked); }
+    });
+    list.addEventListener("click", async e => {
+      const btn = e.target.closest("button[data-act]");
+      if (!btn) return;
+      const i = Number(btn.closest("[data-i]").dataset.i);
+      const act = btn.dataset.act;
+      if (act === "up" || act === "down") {
+        const j = act === "up" ? i - 1 : i + 1;
+        [photos[i], photos[j]] = [photos[j], photos[i]];
+        render();
+      } else if (act === "cover") {
+        if (await saveBook({ field: "cover", value: "photo", photo: photos[i].key })) status.textContent = "Photo choisie pour la couverture.";
+      } else if (act === "delete") {
+        if (!confirm("Supprimer définitivement cette photo ?")) return;
+        if (await saveBook({ field: "upload.delete", upload: photos[i].key.slice(2) })) { photos.splice(i, 1); render(); editor[current].photos = photos; }
+      }
+    });
+    document.getElementById("pe-save").addEventListener("click", async () => {
+      const value = photos.filter(p => p.keep).map(p => ({ key: p.key, caption: p.caption || "" }));
+      if (await saveBook({ field: "stage.photos", activity: current, value })) { dialog.close(); reloadAt(current); }
+    });
+    document.getElementById("pe-files").addEventListener("change", async e => {
+      const files = [...e.target.files];
+      if (!files.length) return;
+      // On enregistre d'abord l'ordre et les légendes en cours, pour ne rien perdre au rechargement
+      const value = photos.filter(p => p.keep).map(p => ({ key: p.key, caption: p.caption || "" }));
+      if (photos.length) await saveBook({ field: "stage.photos", activity: current, value });
+      status.textContent = `Envoi de ${files.length} photo${files.length > 1 ? "s" : ""}…`;
+      const form = new FormData();
+      form.append("activity", current);
+      files.forEach(f => form.append("photos", f));
+      try {
+        const r = await fetch(BOOK.upload, { method: "POST", headers: { "X-CSRFToken": BOOK.csrf }, body: form });
+        const data = await r.json();
+        if (!data.ok) throw new Error(data.error);
+        if (data.rejected.length) alert(`Fichiers ignorés (pas des images) : ${data.rejected.join(", ")}`);
+        reloadAt(current, true);
+      } catch (err) {
+        status.textContent = `Échec de l'envoi (${err.message})`;
+      }
+    });
+    document.querySelectorAll(".edit-photos").forEach(b => b.addEventListener("click", () => open(b.dataset.activity)));
+
+    let reopen = "";
+    try { reopen = sessionStorage.getItem("otl-reopen") || ""; sessionStorage.removeItem("otl-reopen"); } catch (e) {}
+    if (reopen && editor[reopen]) open(reopen);
+
+    function escapeAttr(s) { return s.replace(/[&"<>]/g, c => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" }[c])); }
+  })();
+  </script>
+  {% endif %}
 </body>
 </html>

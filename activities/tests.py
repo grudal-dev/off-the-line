@@ -467,8 +467,10 @@ class BookTests(LoggedInTestCase):
                 (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
             self.assertContains(self.client.get(reverse("activities:book")), "Annecy → Albertville")
         response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("j=1", response["Location"])
+        from .models import Book
+        created = Book.objects.get()
+        self.assertRedirects(response, reverse("activities:book_detail", args=[created.pk]), fetch_redirect_response=False)
+        self.assertEqual(created.title, "Été 2026")
         a = Activity.objects.get(strava_id=1)
         self.assertEqual(a.description, "Une belle journée.")
         self.assertEqual(a.profile[-1], [1.5, 480])
@@ -479,6 +481,8 @@ class BookTests(LoggedInTestCase):
         self.assertContains(book_page, "Annecy → Faverges")
         self.assertContains(book_page, "https://img.example.com/x.jpg")
         self.assertContains(book_page, 'id="map-s2"')
+        self.assertNotContains(book_page, 'id="photo-editor"')
+        self.assertContains(self.client.get(response["Location"], {"edition": "1"}), 'id="photo-editor"')
 
         # Régénérer ne refait pas d'appels Strava
         calls = get.call_count
@@ -490,5 +494,134 @@ class BookTests(LoggedInTestCase):
         response = self.client.post(reverse("activities:book"), {}, follow=True)
         self.assertContains(response, "Choisis au moins un périple")
 
-    def test_book_of_unknown_journey_is_404(self):
-        self.assertEqual(self.client.get(reverse("activities:book_view"), {"j": "999"}).status_code, 404)
+    def test_book_of_unknown_journey_redirects(self):
+        from .models import Book
+        b = Book.objects.create(account=self.account, journey_ids=[999])
+        self.assertRedirects(self.client.get(reverse("activities:book_detail", args=[b.pk])), reverse("activities:book"))
+
+
+@override_settings(MEDIA_ROOT=__import__("tempfile").mkdtemp())
+class BookEditingTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        from .models import Book
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.description = "Texte Strava"
+            a.save()
+        act = Activity.objects.get(strava_id=1)
+        self.p1 = ActivityPhoto.objects.create(activity=act, unique_id="a", url="https://img.example.com/a.jpg")
+        self.p2 = ActivityPhoto.objects.create(activity=act, unique_id="b", url="https://img.example.com/b.jpg")
+        self.book = Book.objects.create(account=self.account, journey_ids=[1], title="Livre")
+        self.url = reverse("activities:book_update", args=[self.book.pk])
+
+    def post(self, **payload):
+        import json
+        return self.client.post(self.url, json.dumps(payload), content_type="application/json")
+
+    def page(self):
+        return self.client.get(reverse("activities:book_detail", args=[self.book.pk])).content.decode()
+
+    def test_edit_texts(self):
+        self.assertEqual(self.post(field="book.title", value="Nouvel été").json(), {"ok": True})
+        self.post(field="book.subtitle", value="Avec Paul")
+        self.post(field="journey.story", journey=1, value="Le grand départ.")
+        self.post(field="stage.title", activity=1, value="Le lac")
+        self.post(field="stage.text", activity=2, value="")  # retire le texte Strava de l'étape 2
+        html = self.page()
+        for text in ("Nouvel été", "Avec Paul", "Le grand départ.", "Le lac"):
+            self.assertIn(text, html)
+        self.assertEqual(html.count("Texte Strava"), 1)
+
+    def test_photo_selection_order_and_captions(self):
+        self.post(field="stage.photos", activity=1, value=[
+            {"key": f"s:{self.p2.pk}", "caption": "Au sommet"}])
+        html = self.page()
+        self.assertIn("https://img.example.com/b.jpg", html)
+        self.assertIn("Au sommet", html)
+        self.assertNotIn('src="https://img.example.com/a.jpg"', html)
+
+    def test_upload_photo_then_use_it_as_cover(self):
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = BytesIO()
+        Image.new("RGB", (3000, 2000), "green").save(buf, "PNG")
+        files = [SimpleUploadedFile("vue.png", buf.getvalue(), "image/png"),
+                 SimpleUploadedFile("notes.txt", b"pas une image", "text/plain")]
+        r = self.client.post(reverse("activities:book_upload", args=[self.book.pk]), {"activity": "2", "photos": files})
+        self.assertEqual(r.json()["added"], 1)
+        self.assertEqual(r.json()["rejected"], ["notes.txt"])
+        upload = self.book.uploads.get()
+        from PIL import Image as PILImage
+        self.assertEqual(max(PILImage.open(upload.image.path).size), 2400)  # redimensionnée
+        self.assertIn(upload.image.url, self.page())
+
+        self.post(field="cover", value="photo", photo=upload.key)
+        self.assertIn('class="cover-photo" src="' + upload.image.url, self.page())
+
+        self.post(field="upload.delete", upload=upload.pk)
+        self.assertFalse(self.book.uploads.exists())
+
+    def test_options_hide_sections(self):
+        self.assertIn("Carnet de route", self.page())
+        self.post(field="options", value={"roadbook": False, "back": False, "basemap": "ign", "bogus": 1})
+        self.book.refresh_from_db()
+        self.assertEqual(self.book.options, {"roadbook": False, "back": False, "basemap": "ign"})
+        html = self.page()
+        self.assertNotIn("Carnet de route", html)
+        self.assertNotIn("jours sur la route", html)
+
+    def test_cannot_touch_other_users_book_or_foreign_stage(self):
+        self.assertEqual(self.post(field="stage.title", activity=999, value="x").status_code, 400)
+        other = get_user_model().objects.create(username="strava_7")
+        StravaAccount.objects.create(user=other, athlete_id=7, access_token="x", refresh_token="y",
+                                     expires_at=timezone.now())
+        self.client.force_login(other)
+        self.assertEqual(self.post(field="book.title", value="pirate").status_code, 404)
+        self.assertEqual(self.client.get(reverse("activities:book_detail", args=[self.book.pk])).status_code, 404)
+
+    def test_delete_book(self):
+        self.client.post(reverse("activities:book_delete", args=[self.book.pk]))
+        from .models import Book
+        self.assertFalse(Book.objects.exists())
+
+
+class PhotoLayoutTests(TestCase):
+    def photos(self, *ratios):
+        return [{"ratio": r, "caption": ""} for r in ratios]
+
+    def test_layout_never_exceeds_the_box_and_keeps_ratios(self):
+        from .book import CONTENT_W, GAP, best_layout
+        for ratios in [(1.5,), (0.75,), (3.0, 0.75), (1.5, 1.5, 0.66), (1, 1, 1, 1, 1, 1)]:
+            layout = best_layout(self.photos(*ratios), CONTENT_W, 120)
+            # hauteur occupée = somme des rangées réduites + espaces : jamais plus que la zone
+            self.assertLessEqual(layout["scale"], 1)
+            self.assertEqual(sum(layout["rows"]), len(ratios))
+
+    def test_two_landscapes_share_a_row_portraits_get_more_room(self):
+        from .book import paginate_photos
+        lead, pages, box = paginate_photos(self.photos(1.5, 1.5, 1.5))
+        self.assertEqual(len(lead), 2)  # une 3e photo paysage serait trop petite
+        lead, pages, tall = paginate_photos(self.photos(0.75, 0.75, 0.75))
+        self.assertEqual(len(lead), 3)  # trois portraits tiennent côte à côte
+        self.assertGreater(tall, box)   # et la zone photo est plus haute
+
+    def test_photo_pages_hold_more_small_photos_than_panoramas(self):
+        from .book import paginate_photos
+        _, pages, _ = paginate_photos(self.photos(*[1.5] * 3 + [3.0] * 6))
+        self.assertTrue(all(len(p) <= 6 for p in pages))
+        self.assertEqual(sum(len(p) for p in pages) + 2, 9)
+
+    @mock.patch("activities.strava.requests.get")
+    def test_sync_stores_photo_dimensions(self, get):
+        from .sync import _to_fields, sync_photos
+        user = get_user_model().objects.create(username="strava_5")
+        acc = StravaAccount.objects.create(user=user, athlete_id=5, access_token="t", refresh_token="r",
+                                           expires_at=timezone.now() + timedelta(hours=1))
+        Activity.objects.create(account=acc, strava_id=50, **{**_to_fields(strava_activity(50)), "photo_count": 1})
+        get.return_value = fake_response(json_data=[{**strava_photo("p"), "sizes": {"1024": [768, 1024]}}])
+        sync_photos(acc)
+        photo = ActivityPhoto.objects.get()
+        self.assertEqual((photo.width, photo.height), (768, 1024))
