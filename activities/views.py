@@ -11,7 +11,7 @@ from django.views.decorators.http import require_POST
 
 from . import geo, polyline, sports, strava
 from .models import Activity, StravaAccount
-from .sync import sync_activities
+from .sync import sync_activities, sync_photos
 
 SESSION_STATE_KEY = "strava_oauth_state"
 
@@ -83,6 +83,7 @@ def strava_callback(request):
         try:
             count = sync_activities(account)
             messages.success(request, f"Bienvenue ! {count} activité(s) importée(s) depuis Strava.")
+            _sync_photos_with_message(request, account)
         except strava.StravaError as exc:
             messages.error(request, f"Connecté, mais l'import des activités a échoué : {exc}")
     return redirect("activities:list")
@@ -121,7 +122,7 @@ def activity_list(request):
     sport = request.GET.get("sport", "")
     if sport:
         qs = qs.filter(sport_type=sport)
-    page_obj = Paginator(qs, 30).get_page(request.GET.get("page"))
+    page_obj = Paginator(qs.prefetch_related("photos"), 30).get_page(request.GET.get("page"))
     sports = account.activities.order_by("sport_type").values_list("sport_type", flat=True).distinct()
 
     return render(
@@ -148,7 +149,22 @@ def activity_sync(request):
             messages.success(request, f"{count} activité(s) importée(s) depuis Strava.")
         else:
             messages.info(request, "Rien de nouveau sur Strava.")
+        _sync_photos_with_message(request, account)
     return redirect("activities:list")
+
+
+def _sync_photos_with_message(request, account):
+    """Importe un lot de photos et l'indique à l'utilisateur (une erreur ici n'est pas bloquante)."""
+    try:
+        photos, remaining = sync_photos(account)
+    except strava.StravaError as exc:
+        messages.error(request, f"Import des photos interrompu : {exc}")
+        return
+    if photos:
+        messages.success(request, f"{photos} photo(s) importée(s).")
+    if remaining:
+        messages.info(request, f"{remaining} activité(s) avec photos restent à importer : "
+                               "relance la synchronisation dans quelques minutes.")
 
 
 @login_required
@@ -158,7 +174,8 @@ def activity_detail(request, strava_id):
         return redirect("activities:home")
     activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
     route = polyline.decode(activity.summary_polyline) if activity.summary_polyline else []
-    return render(request, "activities/detail.html", {"activity": activity, "route": route})
+    return render(request, "activities/detail.html",
+                  {"activity": activity, "route": route, "photos": activity.photos.all()})
 
 
 @login_required
@@ -168,7 +185,8 @@ def all_routes_map(request):
     if account is None:
         return redirect("activities:home")
     qs = account.activities.exclude(summary_polyline="").only(
-        "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance", "summary_polyline")
+        "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance", "summary_polyline"
+    ).prefetch_related("photos")
     routes, counts = [], {}
     for a in qs:
         coords = polyline.decode(a.summary_polyline)
@@ -179,6 +197,7 @@ def all_routes_map(request):
             "family": fam, "color": sports.FAMILIES[fam][1],
             "date": formats.date_format(a.start_date_local or a.start_date, "j F Y"),
             "km": a.distance_km, "coords": coords, "thumb": geo.svg_path(coords, max_points=60),
+            "photos": [p.url for p in a.photos.all()],
         })
     families = [
         {"key": key, "label": label, "color": color, "count": counts[key]}

@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Activity, StravaAccount
+from .models import Activity, ActivityPhoto, StravaAccount
 
 TOKEN_RESPONSE = {
     "access_token": "acc-123",
@@ -165,6 +165,54 @@ class SyncTests(LoggedInTestCase):
         get.return_value = fake_response(status=429)
         response = self.client.post(reverse("activities:sync"), follow=True)
         self.assertContains(response, "Limite de requêtes Strava")
+
+
+def strava_photo(uid, caption=""):
+    return {"unique_id": uid, "caption": caption, "created_at": "2026-10-28T17:45:00Z",
+            "urls": {"600": f"https://img.example.com/{uid}-600.jpg", "1024": f"https://img.example.com/{uid}.jpg"}}
+
+
+class PhotoSyncTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        from .sync import _to_fields
+        for id_, photos in ((1, 2), (2, 0)):
+            data = {**strava_activity(id_), "total_photo_count": photos}
+            Activity.objects.create(account=self.account, strava_id=id_, **_to_fields(data))
+
+    @mock.patch("activities.strava.requests.get")
+    def test_imports_photos_only_for_activities_that_have_some(self, get):
+        from .sync import sync_photos
+        get.return_value = fake_response(json_data=[strava_photo("a", "Au sommet"), strava_photo("b")])
+        self.assertEqual(sync_photos(self.account), (2, 0))
+        self.assertEqual(get.call_count, 1)
+        self.assertIn("/activities/1/photos", get.call_args.args[0])
+        photo = ActivityPhoto.objects.get(unique_id="a")
+        self.assertEqual(photo.url, "https://img.example.com/a.jpg")  # plus grande taille
+        self.assertEqual(photo.caption, "Au sommet")
+
+        # Déjà traitée : aucun nouvel appel
+        self.assertEqual(sync_photos(self.account), (0, 0))
+        self.assertEqual(get.call_count, 1)
+
+    @mock.patch("activities.strava.requests.get")
+    def test_batch_limit_leaves_remaining(self, get):
+        from .sync import _to_fields, sync_photos
+        data = {**strava_activity(3), "total_photo_count": 1}
+        Activity.objects.create(account=self.account, strava_id=3, **_to_fields(data))
+        get.return_value = fake_response(json_data=[])
+        self.assertEqual(sync_photos(self.account, limit=1), (0, 1))
+
+    @mock.patch("activities.strava.requests.get")
+    def test_photos_shown_in_list_and_detail(self, get):
+        from .sync import sync_photos
+        get.return_value = fake_response(json_data=[strava_photo("a", "Au sommet")])
+        sync_photos(self.account)
+        self.assertContains(self.client.get(reverse("activities:list")), "https://img.example.com/a.jpg")
+        detail = self.client.get(reverse("activities:detail", args=[1]))
+        self.assertContains(detail, 'alt="Au sommet"')
+        self.assertContains(detail, 'id="lightbox"')
+        self.assertContains(self.client.get(reverse("activities:map")), "https://img.example.com/a.jpg")
 
 
 class ActivityPagesTests(LoggedInTestCase):

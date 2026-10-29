@@ -42,6 +42,13 @@
               {{ a.sport_type|sport_label }}, {{ a.start_date_local|default:a.start_date|date:"j F Y" }}
             </span>
           </div>
+          {% with photos=a.photos.all %}
+            <span class="photo-stack" {% if not photos %}aria-hidden="true"{% endif %}>
+              {% for p in photos|slice:":3" %}<img src="{{ p.url }}" alt="" loading="lazy">{% endfor %}
+              {% if photos|length > 3 %}<span class="more">+{{ photos|length|add:"-3" }}</span>{% endif %}
+              {% if photos %}<span class="sr-only">{{ photos|length }} photo{{ photos|length|pluralize }}</span>{% endif %}
+            </span>
+          {% endwith %}
           <p class="figure">{% if a.distance %}{{ a.distance_km }} km{% else %}–{% endif %}<small>Distance</small></p>
           <p class="figure optional">{{ a.duration_display }}<small>En mouvement</small></p>
           <p class="figure optional">{{ a.total_elevation_gain|floatformat:0 }} m<small>Dénivelé +</small></p>

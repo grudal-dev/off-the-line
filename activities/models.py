@@ -46,6 +46,8 @@ class Activity(models.Model):
     total_elevation_gain = models.FloatField(default=0, help_text="mètres")
     average_speed = models.FloatField(default=0, help_text="m/s")
     summary_polyline = models.TextField(blank=True)
+    photo_count = models.PositiveIntegerField(default=0)
+    photos_synced_at = models.DateTimeField(null=True, blank=True)
     start_lat = models.FloatField(null=True, blank=True)
     start_lng = models.FloatField(null=True, blank=True)
     raw = models.JSONField(default=dict, blank=True)
@@ -83,3 +85,19 @@ class Activity(models.Model):
     @property
     def has_route(self):
         return bool(self.summary_polyline)
+
+
+class ActivityPhoto(models.Model):
+    """Photo Strava rattachée à une activité."""
+
+    activity = models.ForeignKey(Activity, on_delete=models.CASCADE, related_name="photos")
+    unique_id = models.CharField(max_length=100, unique=True)
+    url = models.URLField(max_length=1000)
+    caption = models.TextField(blank=True)
+    taken_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["taken_at", "id"]
+
+    def __str__(self):
+        return f"Photo {self.unique_id} ({self.activity})"

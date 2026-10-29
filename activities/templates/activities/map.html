@@ -28,6 +28,12 @@
             <a class="route-item" href="{% url 'activities:detail' r.id %}" data-route="{{ r.id }}">
               <svg class="thumb" viewBox="0 0 100 100" style="--c: {{ r.color }}" aria-hidden="true"><path d="{{ r.thumb }}"/></svg>
               <span><strong>{{ r.name }}</strong><span>{{ r.sport }}, {{ r.date }}</span></span>
+              {% if r.photos %}
+                <span class="photo-stack small">
+                  {% for url in r.photos|slice:":2" %}<img src="{{ url }}" alt="" loading="lazy">{% endfor %}
+                  {% if r.photos|length > 2 %}<span class="more">+{{ r.photos|length|add:"-2" }}</span>{% endif %}
+                </span>
+              {% else %}<span></span>{% endif %}
               <span class="km">{{ r.km|floatformat:1 }} km</span>
             </a>
           </li>

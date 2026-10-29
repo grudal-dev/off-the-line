@@ -29,8 +29,57 @@
       <div class="no-route"><p>Pas de tracé GPS pour cette activité (séance en salle ou GPS désactivé).</p></div>
     {% endif %}
   </div>
+
+  {% if photos %}
+    <section class="gallery" aria-labelledby="photos-title">
+      <h2 id="photos-title">Photos <span class="muted">{{ photos|length }}</span></h2>
+      <ul>
+        {% for p in photos %}
+          <li><button type="button" data-index="{{ forloop.counter0 }}">
+            <img src="{{ p.url }}" alt="{{ p.caption|default:'Photo de la sortie' }}" loading="lazy">
+          </button></li>
+        {% endfor %}
+      </ul>
+    </section>
+    <dialog class="lightbox" id="lightbox" aria-label="Photo">
+      <figure><img alt=""><figcaption></figcaption></figure>
+      <button type="button" class="lb-prev" aria-label="Photo précédente">‹</button>
+      <button type="button" class="lb-next" aria-label="Photo suivante">›</button>
+      <button type="button" class="lb-close" aria-label="Fermer">×</button>
+    </dialog>
+  {% endif %}
 {% endblock %}
-{% block scripts %}{% if route %}
+{% block scripts %}
+{% if photos %}
+<script>
+(() => {
+  const thumbs = [...document.querySelectorAll(".gallery [data-index]")];
+  const box = document.getElementById("lightbox");
+  const img = box.querySelector("img");
+  const cap = box.querySelector("figcaption");
+  let i = 0;
+  function show(n) {
+    i = (n + thumbs.length) % thumbs.length;
+    const src = thumbs[i].querySelector("img");
+    img.src = src.src;
+    img.alt = src.alt;
+    cap.textContent = src.alt === "Photo de la sortie" ? "" : src.alt;
+    box.querySelectorAll(".lb-prev, .lb-next").forEach(b => b.hidden = thumbs.length < 2);
+  }
+  thumbs.forEach((t, n) => t.addEventListener("click", () => { show(n); box.showModal(); }));
+  box.querySelector(".lb-prev").addEventListener("click", () => show(i - 1));
+  box.querySelector(".lb-next").addEventListener("click", () => show(i + 1));
+  box.querySelector(".lb-close").addEventListener("click", () => box.close());
+  box.addEventListener("click", e => { if (e.target === box) box.close(); });
+  box.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft") show(i - 1);
+    if (e.key === "ArrowRight") show(i + 1);
+  });
+  box.addEventListener("close", () => thumbs[i].focus());
+})();
+</script>
+{% endif %}
+{% if route %}
 <script>
   const route = JSON.parse(document.getElementById("route-data").textContent);
   const color = "{{ activity.sport_type|sport_color }}";

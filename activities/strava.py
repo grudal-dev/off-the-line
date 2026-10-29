@@ -96,6 +96,11 @@ def list_activities(account, page=1, per_page=30):
     return api_get(account, "/athlete/activities", {"page": page, "per_page": per_page})
 
 
+def activity_photos(account, activity_id, size=1024):
+    """Photos d'une activité (point d'accès non documenté mais utilisé par les clients Strava)."""
+    return api_get(account, f"/activities/{activity_id}/photos", {"size": size, "photo_sources": "true"})
+
+
 def deauthorize(account):
     """Révoque l'accès côté Strava (best effort)."""
     try:
