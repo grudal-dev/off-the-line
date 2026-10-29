@@ -129,3 +129,6 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Les pages protégées renvoient vers l'accueil (bouton Strava)
+LOGIN_URL = "activities:home"

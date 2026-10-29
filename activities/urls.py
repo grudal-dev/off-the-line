@@ -6,4 +6,9 @@ app_name = "activities"
 
 urlpatterns = [
     path("", views.home, name="home"),
+    path("strava/login/", views.strava_login, name="strava_login"),
+    path("strava/callback/", views.strava_callback, name="strava_callback"),
+    path("strava/logout/", views.strava_logout, name="logout"),
+    path("strava/disconnect/", views.strava_disconnect, name="disconnect"),
+    path("activites/", views.activity_list, name="list"),
 ]

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Off the line{% endblock %}</title>
+  <style>
+    :root { --orange: #fc4c02; --ink: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fafafa; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; background: #fff; border-bottom: 1px solid var(--line); }
+    header a.brand { font-weight: 700; text-decoration: none; color: var(--ink); }
+    main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+    .btn { display: inline-block; padding: .6rem 1.1rem; border-radius: 6px; border: 0; background: var(--orange); color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+    .btn.secondary { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    .messages { list-style: none; padding: 0; }
+    .messages li { padding: .75rem 1rem; border-radius: 6px; background: #fff3cd; margin-bottom: .5rem; }
+    .messages li.error { background: #fde2e1; }
+    .user { display: flex; align-items: center; gap: .75rem; }
+    .user img { width: 32px; height: 32px; border-radius: 50%; }
+    .user form { margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="{% url 'activities:home' %}">Off the line</a>
+    {% if user.is_authenticated and user.strava %}
+      <div class="user">
+        {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% endif %}
+        <span>{{ user.strava.firstname }}</span>
+        <form method="post" action="{% url 'activities:logout' %}">{% csrf_token %}
+          <button class="btn secondary" type="submit">Se déconnecter</button>
+        </form>
+      </div>
+    {% endif %}
+  </header>
+  <main>
+    {% if messages %}
+      <ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
