@@ -119,6 +119,10 @@ class LoggedInTestCase(TestCase):
             patcher = mock.patch(target, return_value="")
             patcher.start()
             self.addCleanup(patcher.stop)
+        # Ni de photos à la demande (testées à part dans test_photos_on_demand)
+        self.photos_patcher = mock.patch("activities.views.ensure_photos", return_value=(0, 0, None))
+        self.photos_patcher.start()
+        self.addCleanup(self.photos_patcher.stop)
 
 
 class TokenRefreshTests(LoggedInTestCase):
