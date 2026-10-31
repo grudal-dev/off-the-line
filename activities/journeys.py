@@ -398,13 +398,16 @@ def for_account(account, budget=None, include_hidden=True):
     if not include_hidden:
         found = [j for j in found if not j.hidden]
     places.name_journeys(found, budget)
-    for j in found:  # les étapes retirées restent nommées (cache seulement) pour pouvoir les remettre
-        places.name_journeys([Journey(j.removed)] if j.removed else [], None)
+    # Les étapes retirées restent nommées (cache seulement) pour pouvoir les remettre
+    removed = [Journey(j.removed) for j in found if j.removed]
+    places.name_journeys(removed, None)
     return found
 
 
 def _queryset(account):
+    # « account » et les champs photo sont indispensables : un champ différé coûte une requête par activité
     return account.activities.exclude(summary_polyline="").only(
+        "account", "photo_count", "photos_synced_at",
         "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
         "moving_time", "elapsed_time", "total_elevation_gain", "summary_polyline",
         "start_lat", "start_lng", "raw", "description", "profile", "details_fetched_at",

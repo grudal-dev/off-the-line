@@ -65,12 +65,24 @@ def _nominatim(point, budget):
     return ""
 
 
-def lookup(point, budget):
-    """Nom de commune pour un point [lat, lng], ou None s'il n'est pas (encore) connu."""
+def load_cache():
+    """Tout le cache des lieux en une requête : {(lat_key, lng_key): nom}."""
+    return {(lat, lng): name for lat, lng, name in Place.objects.values_list("lat_key", "lng_key", "name")}
+
+
+def lookup(point, budget, cache=None):
+    """Nom de commune pour un point [lat, lng], ou None s'il n'est pas (encore) connu.
+
+    `cache` (voir load_cache) évite une requête par point quand on en nomme beaucoup.
+    """
     lat_key, lng_key = _key(point)
-    cached = Place.objects.filter(lat_key=lat_key, lng_key=lng_key).first()
-    if cached:
-        return cached.name or None
+    if cache is not None:
+        if (lat_key, lng_key) in cache:
+            return cache[(lat_key, lng_key)] or None
+    else:
+        cached = Place.objects.filter(lat_key=lat_key, lng_key=lng_key).first()
+        if cached:
+            return cached.name or None
     if budget is None or budget.exhausted:
         return None
     budget.lookups -= 1
@@ -83,6 +95,8 @@ def lookup(point, budget):
         budget.failures += 1
         return None
     Place.objects.update_or_create(lat_key=lat_key, lng_key=lng_key, defaults={"name": name, "source": source})
+    if cache is not None:
+        cache[(lat_key, lng_key)] = name
     return name or None
 
 
@@ -92,9 +106,10 @@ def name_journeys(journeys, budget=None):
     Les points déjà en cache sont toujours utilisés ; les autres sont demandés
     dans la limite du budget (aucun appel si budget est None).
     """
+    cache = load_cache() if journeys else None
     for j in journeys:
         for leg in j.legs:
-            leg.start_name = lookup(leg.start, budget)
-            leg.end_name = lookup(leg.end, budget)
+            leg.start_name = lookup(leg.start, budget, cache)
+            leg.end_name = lookup(leg.end, budget, cache)
         j.start_name, j.end_name = j.legs[0].start_name, j.legs[-1].end_name
     return journeys
