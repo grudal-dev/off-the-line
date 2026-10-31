@@ -4,7 +4,7 @@
   <div class="page-head">
     <div>
       <h1>Périples</h1>
-      <p class="muted">Tes activités enchaînées sur plusieurs jours, d'un point à un autre, regroupées automatiquement.</p>
+      <p class="muted">Tes activités enchaînées sur plus de 2 jours, d'un point à un autre, regroupées automatiquement.</p>
     </div>
     {% if items %}<a class="btn ghost" href="{% url 'activities:book' %}">Créer un livre</a>{% endif %}
   </div>
@@ -34,7 +34,7 @@
   {% else %}
     <div class="empty-state">
       <p>Aucun périple repéré pour l'instant.</p>
-      <p class="muted">Un périple, ce sont au moins deux activités sur des jours différents, où chacune repart à moins de 5 km de l'arrivée de la précédente, moins de 42 heures plus tard, et qui t'emmènent à plus de 10 km de ton point de départ. Les boucles depuis chez toi et les trajets domicile-travail ne comptent pas.</p>
+      <p class="muted">Un périple, ce sont au moins deux activités étalées sur plus de 2 jours (3 jours calendaires ou plus), où chacune repart à moins de 5 km de l'arrivée de la précédente, moins de 42 heures plus tard, et qui t'emmènent à plus de 10 km de ton point de départ. Les boucles depuis chez toi et les trajets domicile-travail ne comptent pas.</p>
     </div>
   {% endif %}
 {% endblock %}

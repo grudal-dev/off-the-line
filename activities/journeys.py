@@ -21,7 +21,7 @@ compte au moins autant d'enchaînements « à pied/vélo » que de transferts.
 L'algorithme relie chaque activité à sa meilleure suivante selon ces règles,
 suit les chaînes ainsi formées, puis écarte les faux positifs :
 boucles autour de la maison au début ou à la fin, allers-retours
-domicile-travail, chaînes qui ne vont nulle part ou tiennent en une journée.
+domicile-travail, chaînes qui ne vont nulle part ou ne s'étalent pas sur plus de 2 jours.
 Tout est calculé à la volée, sans rien stocker : c'est rapide
 (tri + parcours linéaire) et toujours à jour après une synchronisation.
 """
@@ -36,7 +36,7 @@ OVERLAP = timedelta(minutes=10)    # tolérance sur les horloges des appareils
 JOIN_KM = 5.0                      # l'étape suivante part à moins de 5 km de l'arrivée
 SAME_PLACE_KM = 2.0                # en dessous, deux points sont « le même endroit »
 MIN_SPREAD_KM = 10.0               # un périple doit emmener quelque part
-MIN_DAYS = 2
+MIN_DAYS = 3                       # strictement plus de 2 jours (calendaires, du 1er au dernier)
 TRANSFER_MAX_KM = 2000.0         # au-delà, ce n'est plus le même voyage
 TRANSFER_MAX_SPEED = 900.0       # km/h, avion compris
 HOME_MIN_STARTS = 5              # un lieu d'où partent 5 activités ou plus est « chez soi »

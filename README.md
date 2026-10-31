@@ -56,7 +56,7 @@ L'onglet « Périples » regroupe automatiquement les activités enchaînées su
 (voir `activities/journeys.py`). Deux activités sont reliées si la seconde démarre moins de
 42 h après la fin de la première, à moins de 5 km de son point d'arrivée, et ailleurs que
 le départ précédent (sinon ce sont des boucles depuis chez soi). Les chaînes qui ne
-s'éloignent pas d'au moins 10 km, tiennent en une journée ou font des allers-retours entre
+s'éloignent pas d'au moins 10 km, s'étalent sur 2 jours ou moins (il faut au moins 3 jours calendaires) ou font des allers-retours entre
 deux lieux (domicile-travail) sont écartées. Les seuils sont des constantes en haut du module.
 
 Les voyages discontinus (train, ferry, bus…) sont reconnus : quand l'étape suivante repart loin de
