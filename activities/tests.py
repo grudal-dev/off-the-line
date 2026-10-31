@@ -740,3 +740,60 @@ class TransferPagesTests(LoggedInTestCase):
         page = self.client.get(reverse("activities:book_detail", args=[b.pk]))
         self.assertContains(page, "Ferry")
         self.assertContains(page, "vol d'oiseau")
+
+
+class ImportStravaTokensCommandTests(TestCase):
+    """Commande import_strava_tokens : jetons obtenus hors du site (curl / PowerShell)."""
+
+    def _write(self, data, encoding="utf-8"):
+        import json, tempfile, os
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        with open(path, "w", encoding=encoding) as f:
+            f.write(json.dumps(data))
+        return path
+
+    def _call(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("import_strava_tokens", *args, stdout=out)
+        return out.getvalue()
+
+    def test_creates_user_and_account_like_the_oauth_callback(self):
+        out = self._call(self._write(TOKEN_RESPONSE))
+        account = StravaAccount.objects.get(athlete_id=42)
+        self.assertEqual(account.user.username, "strava_42")
+        self.assertEqual(account.refresh_token, "ref-123")
+        self.assertEqual(account.scope, "read,activity:read_all")
+        self.assertIn("créé", out)
+
+    def test_reads_powershell_utf16_file(self):
+        # Out-File de Windows PowerShell 5 écrit en UTF-16 avec BOM
+        self._call(self._write(TOKEN_RESPONSE, encoding="utf-16"))
+        self.assertTrue(StravaAccount.objects.filter(athlete_id=42).exists())
+
+    def test_reimport_updates_tokens_without_duplicating(self):
+        self._call(self._write(TOKEN_RESPONSE))
+        out = self._call(self._write({**TOKEN_RESPONSE, "refresh_token": "ref-new"}))
+        self.assertEqual(StravaAccount.objects.count(), 1)
+        self.assertEqual(StravaAccount.objects.get().refresh_token, "ref-new")
+        self.assertIn("mis à jour", out)
+
+    def test_missing_refresh_token_is_an_error(self):
+        from django.core.management.base import CommandError
+        data = {k: v for k, v in TOKEN_RESPONSE.items() if k != "refresh_token"}
+        with self.assertRaises(CommandError):
+            self._call(self._write(data))
+        self.assertFalse(StravaAccount.objects.exists())
+
+    @mock.patch("activities.strava.requests.get")
+    def test_sync_option_imports_activities(self, get):
+        get.return_value = fake_response(json_data=[{
+            "id": 7, "name": "Sortie", "sport_type": "Ride", "distance": 20000,
+            "start_date": "2026-10-01T08:00:00Z", "map": {"summary_polyline": ""},
+        }])
+        out = self._call(self._write(TOKEN_RESPONSE), "--sync")
+        self.assertEqual(StravaAccount.objects.get().activities.count(), 1)
+        self.assertIn("1 activité(s) importée(s)", out)

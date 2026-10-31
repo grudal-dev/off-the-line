@@ -23,6 +23,20 @@ Ouvre ensuite http://localhost:8000.
 2. « Authorization Callback Domain » : `localhost`
 3. Copie le Client ID et le Client Secret dans `.env`
 
+### Importer des jetons obtenus hors du site
+
+Si l'autorisation Strava a été faite à la main (navigateur + `curl` / PowerShell sur
+`POST https://www.strava.com/oauth/token`), enregistre la réponse JSON dans un fichier puis :
+
+```bash
+python manage.py import_strava_tokens strava_papa.json --sync
+```
+
+Le compte est créé comme par la connexion du site (utilisateur `strava_<id athlète>`) : l'athlète
+pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses données. Ré-importer
+un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
+et `strava_*.json` est ignoré par git.
+
 ## Carte
 
 Deux affichages : « Densité » (les tracés s'additionnent et sont recolorés selon le nombre de
