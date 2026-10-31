@@ -66,11 +66,23 @@ def sync_activities(account, full=False):
 PHOTO_BATCH = 40  # appels API maximum par synchronisation (limite Strava : 100 / 15 min)
 
 
+def is_video(item):
+    """Vidéo Strava : renvoyée par le même point d'accès que les photos, avec une vignette.
+
+    Strava ne documente pas ce point d'accès ; on recoupe plusieurs indices connus :
+    type / media_type à 2, adresse de lecture vidéo ou durée.
+    """
+    return (item.get("type") in (2, "2", "video", "Video") or item.get("media_type") in (2, "2", "video")
+            or bool(item.get("video_url")) or bool(item.get("duration")))
+
+
 def import_activity_photos(account, activity):
-    """Importe les photos d'une activité (un appel Strava). Renvoie le nombre de photos."""
+    """Importe les photos d'une activité (un appel Strava), sans les vidéos. Renvoie le nombre de photos."""
     items = strava.activity_photos(account, activity.strava_id)
     keep = []
     for item in items:
+        if is_video(item):
+            continue
         urls = item.get("urls") or {}
         size_key = max(urls, key=int) if urls else None  # la plus grande taille renvoyée
         url = urls.get(size_key)

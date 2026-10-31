@@ -30,6 +30,7 @@
     <label><input type="checkbox" data-option="roadbook" {% if opt.roadbook %}checked{% endif %}> Carnet de route</label>
     <label><input type="checkbox" data-option="profiles" {% if opt.profiles %}checked{% endif %}> Profils d'altitude</label>
     <label><input type="checkbox" data-option="back" {% if opt.back %}checked{% endif %}> Dos du livre</label>
+    <label><input type="checkbox" data-option="cities" {% if opt.cities %}checked{% endif %}> Villes sur les cartes</label>
     <span class="sep"></span>
     <strong>Couverture</strong>
     <label><input type="radio" name="cover" value="map" {% if book.cover == "map" %}checked{% endif %}> Carte</label>
@@ -347,6 +348,13 @@
       }
       map.fitBounds(group.getBounds(), { padding: m.id === "cover" ? [60, 60] : [28, 28] });
       if (m.id === "cover") map.panBy([0, 70], { animate: false });  // laisse la place au titre
+      // Quelques grandes villes pour se situer (moins sur les petites cartes d'étape)
+      if (BOOK.options.cities !== false && window.mountCities) {
+        map.cityAvoid = m.stages.length > 1 && m.id !== "cover"
+          ? m.stages.map(s => s.coords[0])
+          : m.stages.length === 1 ? [m.stages[0].coords[0], m.stages[0].coords[m.stages[0].coords.length - 1]] : [];
+        window.mountCities(map, { max: m.id.startsWith("s") ? 6 : 10, extraZoom: 0.5 });
+      }
       instances.push({ map, tiles: null });
       (window.bookMaps = window.bookMaps || {})[m.id] = { map, bounds: group.getBounds() };
     }

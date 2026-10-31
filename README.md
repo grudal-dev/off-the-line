@@ -39,6 +39,8 @@ et `strava_*.json` est ignoré par git.
 
 ### Photos à la demande
 
+Les vidéos Strava, renvoyées avec les photos, sont ignorées (`sync.is_video`).
+
 Dans un livre, les photos manquantes de **toutes** les étapes sont récupérées en arrière-plan : la page
 s'affiche tout de suite, appelle `livre/<id>/photos-strava/` par lots de 8 étapes en montrant
 l'avancement dans la barre du haut, réessaie chaque minute si Strava limite les requêtes, puis se
@@ -78,6 +80,15 @@ demande-la sur https://carto.com/basemaps/apikey puis renseigne `CARTO_API_KEY` 
 Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
 
 Les autres fonds du sélecteur (Topo OpenTopoMap, Plan IGN, Satellite Esri, relief Esri) ne demandent pas de clé.
+
+## Villes sur les cartes
+
+Les cartes affichent quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
+option « Villes sur les cartes » dans la mise en page du livre). Données : Natural Earth, *populated places*
+(domaine public), réduites à `activities/static/activities/cities.json` par `scripts/build_cities.py`, avec
+les noms en français. `activities/static/activities/cities.js` n'affiche que les villes adaptées au zoom
+(zoom minimum conseillé par Natural Earth), des plus importantes aux moins importantes, sans chevauchement,
+en évitant les pastilles d'étape, et au plus 18 par carte (6 à 10 dans le livre).
 
 ## Périples
 

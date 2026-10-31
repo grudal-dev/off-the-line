@@ -144,3 +144,25 @@ class BookPhotosTests(LoggedInTestCase):
         other = get_user_model().objects.create(username="autre")
         self.client.force_login(other)
         self.assertEqual(self.client.post(self.fetch).status_code, 404)
+
+
+class VideoFilterTests(LoggedInTestCase):
+    @mock.patch("activities.strava.requests.get")
+    def test_videos_are_not_imported_as_photos(self, get):
+        from .sync import import_activity_photos
+        a = leg(1, 10, 8, ANNECY, FAVERGES)
+        a.account = self.account
+        a.save()
+        photo = {"unique_id": "p", "type": 1, "urls": {"1024": "https://img.example.com/p.jpg"}}
+        videos = [
+            {"unique_id": "v1", "type": 2, "urls": {"1024": "https://img.example.com/v1.jpg"}},
+            {"unique_id": "v2", "media_type": 2, "urls": {"1024": "https://img.example.com/v2.jpg"}},
+            {"unique_id": "v3", "video_url": "https://v.example.com/3.mp4", "urls": {"1024": "https://img.example.com/v3.jpg"}},
+            {"unique_id": "v4", "duration": 12.5, "urls": {"1024": "https://img.example.com/v4.jpg"}},
+        ]
+        ActivityPhoto.objects.create(activity=a, unique_id="v1", url="https://img.example.com/v1.jpg")  # importée avant
+        get.return_value = fake_response(json_data=[photo] + videos)
+        self.assertEqual(import_activity_photos(self.account, a), 1)
+        self.assertEqual(list(a.photos.values_list("unique_id", flat=True)), ["p"])
+        a.refresh_from_db()
+        self.assertEqual(a.photo_count, 1)

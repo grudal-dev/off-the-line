@@ -84,6 +84,7 @@
   const route = JSON.parse(document.getElementById("route-data").textContent);
   const color = "{{ activity.sport_type|sport_color }}";
   const map = L.map("map", { zoomSnap: 0.25 });
+  if (route.length) map.cityAvoid = [route[0], route[route.length - 1]];  // départ et arrivée restent dégagés
   mountBasemaps(map);
   // Liseré blanc sous le tracé pour qu'il reste lisible sur n'importe quel fond
   L.polyline(route, { color: "#fff", weight: 8, opacity: 0.9 }).addTo(map);
