@@ -1,4 +1,5 @@
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib import messages
@@ -213,8 +214,9 @@ def all_routes_map(request):
     trips = [
         {"id": j.id, "title": j.name, "url": reverse("activities:journey", args=[j.id]),
          "dates": _date_range(j), "stages": [a.strava_id for a in j.activities],
-         "colors": _stage_colors(len(j.legs)), "transfers": j.transfers}
-        for j in journeys.for_account(account)
+         "colors": _stage_colors(len(j.legs)), "transfers": j.transfers,
+         "days": j.days, "km": round(j.distance_km)}
+        for j in journeys.for_account(account, include_hidden=False)
     ]
     return render(request, "activities/map.html",
                   {"routes": routes, "families": families, "total_km": total_km, "journeys": trips})
@@ -244,9 +246,10 @@ def journey_list(request):
     if account is None:
         return redirect("activities:home")
     # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
-    items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j)}
-             for j in journeys.for_account(account, places.Budget(lookups=30))]
-    return render(request, "activities/journeys.html", {"items": items})
+    found = journeys.for_account(account, places.Budget(lookups=30))
+    items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j)} for j in found if not j.hidden]
+    hidden = [{"journey": j, "dates": _date_range(j)} for j in found if j.hidden]
+    return render(request, "activities/journeys.html", {"items": items, "hidden": hidden})
 
 
 def _find_journey(account, journey_id, budget=None):
@@ -266,8 +269,29 @@ def journey_detail(request, journey_id):
         index, mode = request.POST.get("transfer_index", ""), request.POST.get("mode", "")
         if index.isdigit() and int(index) in found.transfers and mode in journeys.TRANSPORT_MODES:
             note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
-            note.transfers = {**note.transfers, index: mode}
+            # Réécrit au format « a<id> » : les modes suivent l'étape même si on en retire d'autres
+            modes = {journeys.transfer_key(found.legs[i]): m for i, m in found.transfer_modes.items()}
+            modes[journeys.transfer_key(found.legs[int(index)])] = mode
+            note.transfers = modes
             note.save()
+        return redirect("activities:journey", journey_id=journey_id)
+    action = request.POST.get("action") if request.method == "POST" else None
+    if action == "stages":
+        _correct_stages(request, account, _find_journey(account, journey_id))
+        return redirect("activities:journey", journey_id=journey_id)
+    if action in ("hide", "unhide", "reset"):
+        _find_journey(account, journey_id)
+        note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
+        if action == "reset":
+            note.excluded, note.added, note.stage_names = [], [], {}
+            messages.success(request, "Étapes remises comme détectées automatiquement.")
+        else:
+            note.hidden = action == "hide"
+            messages.success(request, "Périple masqué : il n'apparaît plus dans la liste, la carte ni les livres."
+                             if note.hidden else "Périple rétabli.")
+        note.save()
+        if action == "hide":
+            return redirect("activities:journeys")
         return redirect("activities:journey", journey_id=journey_id)
     if request.method == "POST":
         _find_journey(account, journey_id)  # 404 si ce n'est pas un périple de l'utilisateur
@@ -285,6 +309,7 @@ def journey_detail(request, journey_id):
         a = leg.activity
         stages.append({
             "n": i + 1, "id": a.strava_id, "name": a.name, "color": color, "label": leg.label,
+            "custom_label": leg.custom_label, "auto_label": leg.auto_label,
             "sport": sports.label(a.sport_type),
             "date": formats.date_format(a.start_date_local or a.start_date, "l j F"),
             "km": a.distance_km, "elevation": round(a.total_elevation_gain),
@@ -293,13 +318,74 @@ def journey_detail(request, journey_id):
             "coords": polyline.decode(a.summary_polyline),
         })
     nights = sum(1 for s in stages if s["night_after"])
+    removed = [{"id": leg.activity.strava_id, "name": leg.activity.name, "label": leg.label,
+                "date": formats.date_format(leg.activity.start_date_local or leg.activity.start_date, "l j F"),
+                "km": leg.activity.distance_km} for leg in journey.removed]
+    candidates = [{"id": a.strava_id, "name": a.name, "km": a.distance_km, "sport": sports.label(a.sport_type),
+                   "date": formats.date_format(a.start_date_local or a.start_date, "l j F")}
+                  for a in _addable_activities(account, journey)]
     return render(request, "activities/journey.html", {
         "journey": journey, "dates": _date_range(journey), "stages": stages, "nights": nights,
+        "removed": removed, "candidates": candidates,
         "stages_json": [{k: s[k] for k in ("n", "id", "name", "label", "color", "coords", "night_after",
                                             "transfer_after")}
                         for s in stages],
         "transport_modes": journeys.TRANSPORT_MODES,
     })
+
+
+ADD_WINDOW = timedelta(days=3)  # on peut ajouter les sorties jusqu'à 3 jours avant/après le périple
+
+
+def _addable_activities(account, journey):
+    """Activités qu'on peut ajouter à un périple : avec tracé, autour de ses dates, pas déjà dedans."""
+    present = {leg.activity.strava_id for leg in journey.legs + journey.removed}
+    start = journey.legs[0].start_at - ADD_WINDOW
+    end = journey.legs[-1].start_at + ADD_WINDOW
+    qs = (account.activities.exclude(summary_polyline="").filter(start_date__range=(start, end))
+          .exclude(strava_id__in=present).order_by("start_date"))
+    return list(qs.only("strava_id", "name", "sport_type", "distance", "start_date", "start_date_local")[:40])
+
+
+def _ids(request, name):
+    return {int(x) for x in request.POST.getlist(name) if x.isdigit()}
+
+
+def _correct_stages(request, account, journey):
+    """Formulaire « Corriger les étapes » : renommer, retirer, remettre, ajouter."""
+    note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey.id)
+    current = [leg.activity.strava_id for leg in journey.legs]
+    excluded = {int(x) for x in note.excluded}
+    added = [int(x) for x in note.added]
+
+    remove = _ids(request, "remove") & set(current)
+    restore = _ids(request, "restore") & excluded
+    add = _ids(request, "add") & {a.strava_id for a in _addable_activities(account, journey)}
+    if len(current) - len(remove) + len(restore) + len(add) < 1:
+        messages.error(request, "Un périple doit garder au moins une étape. "
+                                "Pour l'écarter entièrement, utilise « Ce n'est pas un périple ».")
+        return
+
+    names = dict(note.stage_names)
+    for aid in current:
+        if f"name_{aid}" in request.POST:
+            value = request.POST[f"name_{aid}"].strip()[:200]
+            if value:
+                names[str(aid)] = value
+            else:
+                names.pop(str(aid), None)
+
+    # Une étape ajoutée à la main qu'on retire est simplement oubliée ; une étape détectée est exclue
+    excluded = (excluded - restore) | {aid for aid in remove if aid not in added}
+    added = [aid for aid in added if aid not in remove] + sorted(add)
+    note.excluded, note.added, note.stage_names = sorted(excluded), added, names
+    note.save()
+    changes = []
+    if remove:
+        changes.append(f"{len(remove)} étape(s) retirée(s)")
+    if restore or add:
+        changes.append(f"{len(restore) + len(add)} étape(s) ajoutée(s)")
+    messages.success(request, (", ".join(changes) + ".").capitalize() if changes else "Étapes enregistrées.")
 
 
 @login_required
@@ -324,7 +410,7 @@ def book_builder(request):
         return redirect("activities:book_detail", book_id=new.pk)
     preselected = {int(x) for x in request.GET.getlist("j") if x.isdigit()}
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
-             for j in found]
+             for j in found if not j.hidden or j.id in preselected]
     names = {j.id: j.name for j in found}
     books = [{"book": b, "names": [names.get(i, "Périple introuvable") for i in b.journey_ids]}
              for b in account.books.all()]

@@ -55,15 +55,20 @@ class Leg:
     end_at: object
     start_name: str = None  # renseignés par places.name_journeys
     end_name: str = None
+    custom_label: str = ""  # nom choisi par l'utilisateur
 
     @property
-    def label(self):
+    def auto_label(self):
         """« Faverges → Albertville », « Autour de Moûtiers », ou None si lieux inconnus."""
         if self.start_name and self.end_name:
             if self.start_name == self.end_name:
                 return f"Autour de {self.start_name}"
             return f"{self.start_name} → {self.end_name}"
         return None
+
+    @property
+    def label(self):
+        return self.custom_label or self.auto_label
 
     @property
     def is_loop(self):
@@ -84,6 +89,10 @@ class Journey:
     end_name: str = None
     custom_title: str = ""
     story: str = ""
+    key: int = None       # identifiant stable : 1re activité de la chaîne détectée (avant corrections)
+    hidden: bool = False  # l'utilisateur a indiqué que ce n'est pas un périple
+    removed: list = field(default_factory=list)  # étapes détectées que l'utilisateur a retirées
+    corrected: bool = False
 
     def transfer_after(self, i):
         """Le transfert qui suit l'étape i (ou None) : distance à vol d'oiseau, mode, lieux."""
@@ -123,7 +132,7 @@ class Journey:
 
     @property
     def id(self):
-        return self.legs[0].activity.strava_id
+        return self.key if self.key is not None else self.legs[0].activity.strava_id
 
     @property
     def first_day(self):
@@ -315,25 +324,83 @@ def detect(activities):
         if _is_journey(chain, transfer):
             nights = [i for i in range(len(chain) - 1) if chain[i + 1].day != chain[i].day]
             jumps = [i for i in range(len(chain) - 1) if chain[i] in transfer]
-            journeys.append(Journey(chain, nights, jumps))
+            journeys.append(Journey(chain, nights, jumps, key=chain[0].activity.strava_id))
     journeys.sort(key=lambda j: j.legs[0].start_at, reverse=True)
     return journeys
 
 
-def for_account(account, budget=None):
-    """Périples d'un compte, avec titres/récits saisis et noms de lieux (voir places.py)."""
+def _breaks(legs):
+    """Nuits et transferts d'une suite d'étapes (après corrections de l'utilisateur)."""
+    nights = [i for i in range(len(legs) - 1) if legs[i + 1].day != legs[i].day]
+    jumps = [i for i in range(len(legs) - 1) if geo.distance_km(legs[i].end, legs[i + 1].start) > JOIN_KM]
+    return nights, jumps
+
+
+def transfer_key(leg):
+    """Clé d'un mode de transport en base : l'activité qui précède le transfert."""
+    return f"a{leg.activity.strava_id}"
+
+
+def _saved_modes(note, detected_legs):
+    """{id activité: mode}, depuis le nouveau format (« a123 ») ou l'ancien (index dans la chaîne détectée)."""
+    modes = {}
+    for k, mode in (note.transfers or {}).items():
+        k = str(k)
+        if mode not in TRANSPORT_MODES:
+            continue
+        if k.startswith("a") and k[1:].isdigit():
+            modes[int(k[1:])] = mode
+        elif k.isdigit() and int(k) < len(detected_legs):
+            modes.setdefault(detected_legs[int(k)].activity.strava_id, mode)
+    return modes
+
+
+def apply_note(journey, note, activities_by_id):
+    """Applique titre, récit et corrections (étapes retirées, ajoutées, renommées) d'un JourneyNote."""
+    journey.custom_title, journey.story, journey.hidden = note.title, note.story, note.hidden
+    modes = _saved_modes(note, journey.legs)
+
+    excluded = {int(x) for x in note.excluded or []}
+    added = [int(x) for x in note.added or [] if int(x) in activities_by_id]
+    if excluded or added:
+        kept = [leg for leg in journey.legs if leg.activity.strava_id not in excluded]
+        present = {leg.activity.strava_id for leg in kept}
+        extra = _legs([activities_by_id[x] for x in dict.fromkeys(added) if x not in present and x not in excluded])
+        legs = sorted(kept + extra, key=lambda leg: leg.start_at)
+        if legs:  # un périple garde toujours au moins une étape
+            journey.removed = [leg for leg in journey.legs if leg.activity.strava_id in excluded]
+            journey.legs = legs
+            journey.nights, journey.transfers = _breaks(legs)
+            journey.corrected = True
+
+    names = note.stage_names or {}
+    for leg in journey.legs + journey.removed:
+        leg.custom_label = names.get(str(leg.activity.strava_id), "")
+    journey.corrected = journey.corrected or bool(names)
+    journey.transfer_modes = {i: modes[journey.legs[i].activity.strava_id] for i in journey.transfers
+                              if journey.legs[i].activity.strava_id in modes}
+    return journey
+
+
+def for_account(account, budget=None, include_hidden=True):
+    """Périples d'un compte, avec titres/récits, corrections saisies et noms de lieux (voir places.py)."""
     from . import places
     from .models import JourneyNote
 
-    found = detect(_queryset(account))
+    activities = list(_queryset(account))
+    found = detect(activities)
+    by_id = {a.strava_id: a for a in activities}
     notes = {n.journey_id: n for n in JourneyNote.objects.filter(account=account)}
     for j in found:
         note = notes.get(j.id)
         if note:
-            j.custom_title, j.story = note.title, note.story
-            j.transfer_modes = {int(k): v for k, v in (note.transfers or {}).items()
-                                if str(k).isdigit() and v in TRANSPORT_MODES}
-    return places.name_journeys(found, budget)
+            apply_note(j, note, by_id)
+    if not include_hidden:
+        found = [j for j in found if not j.hidden]
+    places.name_journeys(found, budget)
+    for j in found:  # les étapes retirées restent nommées (cache seulement) pour pouvoir les remettre
+        places.name_journeys([Journey(j.removed)] if j.removed else [], None)
+    return found
 
 
 def _queryset(account):

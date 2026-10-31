@@ -30,6 +30,61 @@
           <button class="btn" type="submit">Enregistrer</button>
         </form>
       </details>
+      <details class="journey-edit" id="corriger" {% if request.GET.corriger %}open{% endif %}>
+        <summary>Corriger les étapes{% if journey.corrected %} <span class="tag">modifié</span>{% endif %}</summary>
+        <form method="post" class="stage-fix">{% csrf_token %}
+          <input type="hidden" name="action" value="stages">
+          <fieldset>
+            <legend>Étapes du périple</legend>
+            {% for s in stages %}
+              <div class="fix-row">
+                <span class="stage-n small" style="--c: {{ s.color }}">{{ s.n }}</span>
+                <label class="fix-name"><span class="sr-only">Nom de l'étape {{ s.n }}</span>
+                  <input type="text" name="name_{{ s.id }}" value="{{ s.custom_label }}" maxlength="200"
+                         placeholder="{{ s.auto_label|default:s.name }}">
+                  <small class="muted">{{ s.date|capfirst }}, {{ s.km|floatformat:1 }} km</small>
+                </label>
+                <label class="fix-remove"><input type="checkbox" name="remove" value="{{ s.id }}"> Retirer</label>
+              </div>
+            {% endfor %}
+          </fieldset>
+          {% if removed %}
+            <fieldset>
+              <legend>Étapes retirées</legend>
+              {% for r in removed %}
+                <label class="fix-pick"><input type="checkbox" name="restore" value="{{ r.id }}">
+                  <span><strong>{{ r.label|default:r.name }}</strong><small class="muted">{{ r.date|capfirst }}, {{ r.km|floatformat:1 }} km</small></span>
+                  <em>Remettre</em></label>
+              {% endfor %}
+            </fieldset>
+          {% endif %}
+          {% if candidates %}
+            <fieldset>
+              <legend>Ajouter une sortie <span class="muted">(3 jours avant ou après)</span></legend>
+              {% for c in candidates %}
+                <label class="fix-pick"><input type="checkbox" name="add" value="{{ c.id }}">
+                  <span><strong>{{ c.name }}</strong><small class="muted">{{ c.date|capfirst }}, {{ c.sport|lower }}, {{ c.km|floatformat:1 }} km</small></span>
+                  <em>Ajouter</em></label>
+              {% endfor %}
+            </fieldset>
+          {% endif %}
+          <button class="btn" type="submit">Enregistrer les corrections</button>
+        </form>
+        <div class="fix-more">
+          {% if journey.corrected %}
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="reset">
+              <button class="link-button" type="submit">Revenir à la détection automatique</button></form>
+          {% endif %}
+          {% if journey.hidden %}
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="unhide">
+              <button class="link-button" type="submit">Rétablir ce périple</button></form>
+          {% else %}
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="hide">
+              <button class="link-button danger" type="submit">Ce n'est pas un périple</button></form>
+          {% endif %}
+        </div>
+      </details>
+      {% if journey.hidden %}<p class="notice">Ce périple est masqué : il n'apparaît ni dans la liste, ni sur la carte, ni dans les nouveaux livres.</p>{% endif %}
       {% if journey.story %}<p class="journey-story">{{ journey.story|linebreaksbr }}</p>{% endif %}
     </div>
     <ol class="stage-list" id="stage-list">

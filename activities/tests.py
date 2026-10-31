@@ -731,7 +731,7 @@ class TransferPagesTests(LoggedInTestCase):
         self.assertContains(page, '<option value="train" selected>', html=False)
         self.client.post(url, {"transfer_index": "0", "mode": "train"})  # pas un transfert : ignoré
         from .models import JourneyNote
-        self.assertEqual(JourneyNote.objects.get().transfers, {"1": "train"})
+        self.assertEqual(JourneyNote.objects.get().transfers, {"a2": "train"})
 
     def test_book_mentions_the_transfer(self):
         from .models import Book, JourneyNote

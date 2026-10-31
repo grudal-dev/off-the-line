@@ -71,6 +71,27 @@ Les périples sont nommés d'après les communes de départ et d'arrivée (« An
 (OpenStreetMap) hors de France. Les noms sont mis en cache en base. Le titre et un récit peuvent
 être modifiés depuis la page du périple.
 
+### Corriger un périple
+
+Sur la page d'un périple, « Corriger les étapes » permet de :
+
+- **renommer** une étape (le nom est repris sur la carte et dans le livre) ;
+- **retirer** une étape détectée à tort, puis la **remettre** si besoin ;
+- **ajouter** une sortie que la détection a manquée (activités jusqu'à 3 jours avant ou après) ;
+- « **Ce n'est pas un périple** » : masque une fausse détection (liste, carte, nouveaux livres) ;
+  les périples masqués restent accessibles en bas de la page Périples pour les rétablir ;
+- « Revenir à la détection automatique » : annule toutes les corrections.
+
+Les corrections sont stockées dans `JourneyNote` (`excluded`, `added`, `stage_names`, `hidden`) et appliquées
+par-dessus la détection (`journeys.apply_note`). Un périple garde son identifiant (sa 1re activité détectée)
+même si on retire cette étape, si bien que son adresse et les livres qui l'utilisent restent valables. Les modes
+de transport des transferts sont rattachés à l'étape qui précède le transfert (clé `a<id>`).
+
+### Livre depuis une zone de la carte
+
+Sur la carte, « Sélectionner une zone pour un livre » puis faire glisser pour tracer un rectangle : les
+périples qui passent dans la zone sont listés (tous cochés) et « Créer le livre » les envoie à la page Livre.
+
 ## Livre
 
 L'onglet « Livre » fabrique un carnet de voyage à partir d'un ou plusieurs périples : couverture,

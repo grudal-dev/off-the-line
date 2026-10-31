@@ -371,3 +371,49 @@ details.advanced form { margin-top: .75rem; }
   .hero-route path { animation: none; stroke-dashoffset: 0; }
   .hero-route .end { animation: none; opacity: 1; }
 }
+
+/* Corrections d'un périple */
+.tag { display: inline-block; padding: 0 .4rem; border-radius: 4px; background: var(--paper); color: var(--slate); font-size: .75rem; font-weight: 600; vertical-align: .1em; }
+.stage-fix fieldset { border: 0; padding: 0; margin: 0 0 .4rem; display: grid; gap: .35rem; }
+.stage-fix legend { font-weight: 600; padding: 0; margin-bottom: .35rem; }
+.fix-row { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; gap: .5rem; align-items: start; }
+.stage-n.small { width: 1.6rem; height: 1.6rem; font-size: .9rem; margin-top: .3rem; }
+.journey-edit .fix-name { gap: .1rem; font-weight: 400; }
+.journey-edit .fix-name input { padding: .35rem .5rem; }
+.journey-edit .fix-remove { display: flex; gap: .3rem; align-items: center; font-weight: 400; margin-top: .45rem; white-space: nowrap; color: var(--slate); }
+.fix-row:has(.fix-remove input:checked) .fix-name { opacity: .45; text-decoration: line-through; }
+.journey-edit .fix-pick {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .5rem; align-items: center;
+  font-weight: 400; padding: .35rem .5rem; border: 1px dashed var(--contour); border-radius: 6px; cursor: pointer;
+}
+.fix-pick:has(input:checked) { border-style: solid; border-color: var(--route); background: #fff; }
+.fix-pick strong { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fix-pick small { display: block; }
+.fix-pick em { font-style: normal; font-size: .75rem; color: var(--water); }
+.fix-more { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-top: .6rem; }
+.link-button.danger { color: #b42318; }
+.notice { margin: .75rem 0 0; padding: .5rem .7rem; border-radius: 6px; background: var(--paper); font-size: var(--t-small); color: var(--slate); }
+.hidden-journeys { margin-top: 2rem; color: var(--slate); }
+.hidden-journeys summary { cursor: pointer; }
+.hidden-journeys ul { margin: .5rem 0 0; padding-left: 1.2rem; }
+
+/* Carte : sélection d'une zone pour créer un livre */
+.zone-tool { margin-top: .75rem; }
+.zone-tool .btn { padding: .5rem .9rem; font-size: var(--t-small); }
+.zone-tool .btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.zone-panel { margin-top: .75rem; padding: .75rem; border: 1px solid var(--contour); border-radius: 8px; background: #fff; font-size: var(--t-small); }
+.zone-panel h2 { font-size: 1rem; margin: 0 0 .25rem; }
+.zone-panel ul { list-style: none; margin: .5rem 0; padding: 0; display: grid; gap: .3rem; max-height: 14rem; overflow-y: auto; }
+#zone-journeys label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem; align-items: start; cursor: pointer; }
+#zone-journeys label strong { display: block; font-weight: 500; }
+#zone-journeys label .muted { display: block; }
+.zone-panel .zone-actions { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+.zone-panel > form > label { display: grid; gap: .25rem; font-weight: 500; margin-bottom: .6rem; }
+.zone-panel input[type="text"] { width: 100%; }
+.zone-panel .zone-actions[hidden], .zone-panel form[hidden] { display: none; }
+.atlas-map.is-selecting, .atlas-map.is-selecting .leaflet-interactive { cursor: crosshair !important; }
+.atlas-map.is-selecting #map { touch-action: none; }
+.zone-hint {
+  position: absolute; z-index: 1000; top: .75rem; left: 50%; transform: translateX(-50%);
+  padding: .4rem .8rem; border-radius: 999px; background: var(--ink); color: #fff; font-size: var(--t-small); pointer-events: none;
+}

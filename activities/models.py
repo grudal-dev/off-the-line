@@ -132,8 +132,18 @@ class JourneyNote(models.Model):
     journey_id = models.BigIntegerField()
     title = models.CharField(max_length=200, blank=True)
     story = models.TextField(blank=True)
-    transfers = models.JSONField(default=dict, blank=True, help_text='{"index d\'étape": "train"…}')
+    transfers = models.JSONField(default=dict, blank=True,
+                                 help_text='{"a<id de l\'étape avant le transfert>": "train"…} (ancien format : index)')
+    # Corrections de l'utilisateur, appliquées par-dessus la détection automatique
+    excluded = models.JSONField(default=list, blank=True, help_text="activités détectées retirées du périple")
+    added = models.JSONField(default=list, blank=True, help_text="activités ajoutées à la main")
+    stage_names = models.JSONField(default=dict, blank=True, help_text='{"<id activité>": "nom de l\'étape"}')
+    hidden = models.BooleanField(default=False, help_text="« Ce n'est pas un périple »")
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def has_corrections(self):
+        return bool(self.excluded or self.added or self.stage_names)
 
     class Meta:
         unique_together = [("account", "journey_id")]
