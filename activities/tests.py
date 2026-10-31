@@ -476,6 +476,9 @@ class BookTests(LoggedInTestCase):
         Place.objects.all().delete()
         with mock.patch("activities.places._geopf", side_effect=lambda p: {
                 (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
+            builder = self.client.get(reverse("activities:book"))
+            self.assertContains(builder, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
+            self.assertEqual(self.client.post(reverse("activities:journeys_complete")).json()["remaining"], 0)
             self.assertContains(self.client.get(reverse("activities:book")), "Annecy → Albertville")
         response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
         from .models import Book

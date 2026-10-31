@@ -1,4 +1,4 @@
-{% load static %}<!DOCTYPE html>
+{% load static assets %}<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
@@ -6,7 +6,7 @@
   <link rel="icon" href="{% static 'activities/icon.svg' %}" type="image/svg+xml">
   <link rel="apple-touch-icon" href="{% static 'activities/apple-touch-icon.png' %}">
   <link rel="preload" href="{% static 'activities/fonts/barlow-condensed-latin-700-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="{% static 'activities/site.css' %}">
+  <link rel="stylesheet" href="{% asset 'activities/site.css' %}">
   <title>{% block title %}Off the line{% endblock %}</title>
   {% block head %}{% endblock %}
 </head>
@@ -41,5 +41,9 @@
     {% block content %}{% endblock %}
   </main>
   {% block scripts %}{% endblock %}
+  {% if background %}
+    <div id="bg-task" data-url="{{ background.url }}" data-what="{{ background.what }}" hidden>{% csrf_token %}</div>
+    <script src="{% asset 'activities/background.js' %}"></script>
+  {% endif %}
 </body>
 </html>

@@ -432,3 +432,15 @@ details.advanced form { margin-top: .75rem; }
   color: #fff; text-shadow: 0 0 2px #000, 0 0 3px rgba(0,0,0,.85), 0 1px 4px rgba(0,0,0,.7);
 }
 .leaflet-container[data-theme="dark"] .city i, .leaflet-container[data-theme="photo"] .city i, .book-map .city i { border-color: #fff; background: #1c2629; }
+
+/* Indicateur du chargement en arrière-plan (background.js) */
+.bg-status {
+  position: fixed; z-index: 2000; left: 1rem; bottom: 1rem; display: flex; align-items: center; gap: .5rem;
+  padding: .45rem .8rem; border-radius: 999px; background: var(--ink); color: #fff; font-size: var(--t-small);
+  box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: calc(100vw - 2rem);
+}
+.bg-status[hidden] { display: none; }
+.bg-status .link-button { color: #fff; text-decoration: underline; }
+.bg-spinner { width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: bg-spin .8s linear infinite; flex: none; }
+@keyframes bg-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .bg-spinner { animation: none; } }

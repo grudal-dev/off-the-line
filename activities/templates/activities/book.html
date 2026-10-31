@@ -1,12 +1,12 @@
-{% load static %}<!DOCTYPE html>
+{% load static assets %}<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }}</title>
   <link rel="icon" href="{% static 'activities/icon.svg' %}" type="image/svg+xml">
-  <link rel="stylesheet" href="{% static 'activities/site.css' %}">
-  <link rel="stylesheet" href="{% static 'activities/book.css' %}">
+  <link rel="stylesheet" href="{% asset 'activities/site.css' %}">
+  <link rel="stylesheet" href="{% asset 'activities/book.css' %}">
   {% include "activities/leaflet_head.html" %}
 </head>
 <body class="book{% if edit %} editing{% endif %}">
@@ -20,7 +20,7 @@
     {% endif %}
     <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
     <span id="save-status" class="muted" aria-live="polite"></span>
-    {% if photos_pending %}<span id="strava-photos" class="muted" aria-live="polite">Photos Strava : {{ photos_pending }} étape{{ photos_pending|pluralize }} à vérifier…</span>{% endif %}
+    {% if photos_pending %}<span id="strava-photos" class="muted" aria-live="polite">Photos et lieux : {{ photos_pending }} élément{{ photos_pending|pluralize }} à récupérer…</span>{% endif %}
     <button type="button" class="btn" id="print-btn">Enregistrer en PDF</button>
   </div>
   {% if edit %}
@@ -749,7 +749,7 @@
       el.innerHTML = "";
       const b = document.createElement("button");
       b.type = "button"; b.className = "btn ghost";
-      b.textContent = `Afficher ${found} nouvelle${plural(found)} photo${plural(found)}`;
+      b.textContent = "Afficher les nouvelles photos et lieux";
       b.addEventListener("click", () => location.reload());
       el.appendChild(b);
     }
@@ -763,15 +763,16 @@
         return setTimeout(step, 60000);
       }
       found += data.imported;
-      const left = `${data.remaining} étape${plural(data.remaining)} à vérifier`;
+      const left = `${data.remaining} élément${plural(data.remaining)} à récupérer`;
+      if (data.error && !data.rate_limited) return done();  // noms de lieux indisponibles : on garde ce qu'on a
       if (data.error) {
         const why = data.rate_limited ? "quota Strava atteint" : "Strava ne répond pas";
-        el.textContent = `Photos : ${why}, nouvel essai dans 1 min (${left}, ${found} photo${plural(found)} trouvée${plural(found)})`;
+        el.textContent = `Photos : ${why}, nouvel essai dans 1 min (${left})`;
         el.title = data.error;
         return setTimeout(step, 60000);
       }
       if (data.remaining) {
-        el.textContent = `Photos Strava : ${left}, ${found} photo${plural(found)} trouvée${plural(found)}…`;
+        el.textContent = `Photos et lieux : ${left}…`;
         return step();
       }
       done();
