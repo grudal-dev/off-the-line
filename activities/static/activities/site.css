@@ -274,7 +274,7 @@ details.advanced form { margin-top: .75rem; }
 .journey-story { margin: .75rem 0 0; font-size: var(--t-small); color: var(--slate); max-height: 7.5em; overflow: auto; }
 .stage-list { list-style: none; margin: 0; padding: .5rem 0; overflow-y: auto; flex: 1; }
 .stage {
-  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: .75rem; align-items: center;
+  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto auto; gap: .75rem; align-items: center;
   padding: .55rem 1.25rem; color: var(--ink); text-decoration: none;
 }
 .stage:hover, .stage.is-active { background: var(--paper); color: var(--ink); }

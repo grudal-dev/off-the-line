@@ -37,6 +37,15 @@ pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses
 un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
 et `strava_*.json` est ignoré par git.
 
+### Photos à la demande
+
+Les photos d'une activité sont récupérées sur Strava la première fois qu'on l'ouvre, qu'on ouvre un
+périple qui la contient, ou qu'on crée ou affiche un livre (`sync.ensure_photos`, au plus 20 appels par
+page, 60 à la création d'un livre). Elles sont ensuite en base : les affichages suivants ne coûtent
+rien. Si Strava limite les requêtes, la page s'affiche quand même et les photos manquantes arriveront
+au prochain affichage. Le bouton « Synchroniser » importe toujours un lot de 40 activités, et la
+commande ci-dessous rattrape tout l'historique (utile pour les miniatures de la page Carte).
+
 ### Importer toutes les photos
 
 Sur le site, chaque synchronisation n'importe les photos que de 40 activités (quota Strava).
