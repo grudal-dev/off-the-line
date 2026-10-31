@@ -37,6 +37,19 @@ pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses
 un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
 et `strava_*.json` est ignoré par git.
 
+### Importer toutes les photos
+
+Sur le site, chaque synchronisation n'importe les photos que de 40 activités (quota Strava).
+Pour tout récupérer d'un coup :
+
+```bash
+python manage.py sync_photos                     # tous les comptes
+python manage.py sync_photos --athlete <id>      # un seul athlète
+```
+
+La commande enchaîne les lots et, quand Strava répond « quota atteint », attend la fenêtre de
+15 minutes suivante avant de reprendre. Elle peut être interrompue (Ctrl+C) et relancée sans rien perdre.
+
 ## Carte
 
 Deux affichages : « Densité » (les tracés s'additionnent et sont recolorés selon le nombre de

@@ -23,6 +23,10 @@ class StravaError(Exception):
     pass
 
 
+class RateLimited(StravaError):
+    """Quota de requêtes Strava atteint (HTTP 429) : il faut attendre la fenêtre suivante."""
+
+
 def authorize_url(state):
     params = {
         "client_id": settings.STRAVA_CLIENT_ID,
@@ -86,7 +90,7 @@ def api_get(account, path, params=None):
     except requests.RequestException as exc:
         raise StravaError(f"Strava injoignable : {exc}") from exc
     if response.status_code == 429:
-        raise StravaError("Limite de requêtes Strava atteinte, réessaie dans quelques minutes.")
+        raise RateLimited("Limite de requêtes Strava atteinte, réessaie dans quelques minutes.")
     if response.status_code != 200:
         raise StravaError(f"Erreur API Strava ({response.status_code}) : {response.text}")
     return response.json()
