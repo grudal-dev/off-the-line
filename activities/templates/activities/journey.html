@@ -172,6 +172,8 @@
   const last = stages[stages.length - 1];
   pin(last.coords[last.coords.length - 1], flag, "pin-finish", "Arrivée").setZIndexOffset(500);
 
+  // Les villes s'écartent des pastilles d'étape et de l'arrivée
+  map.cityAvoid = stages.map(s => s.coords[0]).concat([last.coords[last.coords.length - 1]]);
   mountBasemaps(map, def => {
     casingColor = def.theme === "dark" || def.theme === "photo" ? "#1c2629" : "#ffffff";
     box.dataset.theme = def.theme;

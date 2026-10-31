@@ -3,6 +3,7 @@
 (function () {
   const STORE = "otl-basemap";
   const RELIEF = "otl-relief";
+  const CITIES = "otl-cities";
 
   function read(key, fallback) {
     try { return localStorage.getItem(key) ?? fallback; } catch (e) { return fallback; }
@@ -21,6 +22,8 @@
     let current = read(STORE, BASEMAP.default);
     if (!defs.some(d => d.key === current)) current = BASEMAP.default;
     let relief = read(RELIEF, "0") === "1";
+    let citiesOn = read(CITIES, "1") === "1";
+    const cities = window.mountCities ? window.mountCities(map, { enabled: citiesOn }) : null;
     let tiles = null;
 
     map.createPane("relief");
@@ -36,13 +39,19 @@
           `<div class="basemap-choices" role="group" aria-label="Fond de carte">` +
           defs.map(d => `<button type="button" data-base="${d.key}">${d.label}</button>`).join("") +
           `</div>` +
-          `<label class="relief-toggle"><input type="checkbox"> Relief</label>`;
+          `<label class="relief-toggle"><input type="checkbox" data-toggle="relief"> Relief</label>` +
+          (window.mountCities ? `<label class="relief-toggle"><input type="checkbox" data-toggle="cities"> Villes</label>` : "");
         L.DomEvent.disableClickPropagation(el);
         L.DomEvent.disableScrollPropagation(el);
         el.querySelectorAll("[data-base]").forEach(b => b.addEventListener("click", () => setBase(b.dataset.base)));
-        const box = el.querySelector("input");
+        const box = el.querySelector("[data-toggle=relief]");
         box.checked = relief;
         box.addEventListener("change", () => setRelief(box.checked));
+        const cityBox = el.querySelector("[data-toggle=cities]");
+        if (cityBox) {
+          cityBox.checked = citiesOn;
+          cityBox.addEventListener("change", () => { citiesOn = cityBox.checked; write(CITIES, citiesOn ? "1" : "0"); cities.setEnabled(citiesOn); });
+        }
         this._el = el;
         return el;
       },
