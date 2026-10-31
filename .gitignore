@@ -11,6 +11,8 @@ db.sqlite3
 
 # Secrets
 .env
+# Jetons Strava exportés à la main (import_strava_tokens)
+strava_*.json
 
 # IDE / OS
 .vscode/
