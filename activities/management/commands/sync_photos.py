@@ -6,6 +6,10 @@ la fenêtre de 15 minutes suivante puis reprend là où elle s'était arrêtée.
 
     python manage.py sync_photos                    # tous les comptes
     python manage.py sync_photos --athlete 22479587 # un seul compte
+    python manage.py sync_photos --all              # vérifie aussi les activités annoncées sans photo
+
+Strava renvoie souvent 0 dans le compteur de photos de la liste des activités alors qu'il y en a :
+sans --all, ces activités-là ne sont vérifiées qu'à leur ouverture sur le site.
 """
 
 import time
@@ -30,6 +34,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--athlete", type=int, help="Identifiant Strava de l'athlète (défaut : tous les comptes)")
+        parser.add_argument("--all", action="store_true", dest="everything",
+                            help="Vérifie toutes les activités, même celles que Strava annonce sans photo "
+                                 "(un appel par activité : long)")
         parser.add_argument("--max-waits", type=int, default=20,
                             help="Nombre maximum d'attentes de quota avant d'abandonner (défaut : 20)")
 
@@ -45,14 +52,17 @@ class Command(BaseCommand):
             total, waits = 0, 0
             while True:
                 try:
-                    imported, remaining = sync_photos(account, limit=PHOTO_BATCH)
+                    imported, remaining = sync_photos(account, limit=PHOTO_BATCH, everything=options["everything"])
                 except strava.RateLimited:
                     waits += 1
                     if waits > options["max_waits"]:
                         raise CommandError("Quota Strava atteint trop souvent, relance la commande plus tard "
                                            "(les photos déjà importées sont conservées).")
                     delay = seconds_until_next_window()
-                    pending = account.activities.filter(photo_count__gt=0, photos_synced_at__isnull=True).count()
+                    pending = account.activities.filter(photos_synced_at__isnull=True)
+                    if not options["everything"]:
+                        pending = pending.filter(photo_count__gt=0)
+                    pending = pending.count()
                     self.stdout.write(f"  Quota Strava atteint ({pending} activité(s) restantes), "
                                       f"reprise dans {int(delay // 60)} min {int(delay % 60)} s…")
                     time.sleep(delay)

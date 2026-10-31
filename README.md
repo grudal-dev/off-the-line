@@ -42,7 +42,8 @@ et `strava_*.json` est ignoré par git.
 Les photos d'une activité sont récupérées sur Strava la première fois qu'on l'ouvre, qu'on ouvre un
 périple qui la contient, ou qu'on crée ou affiche un livre (`sync.ensure_photos`, au plus 20 appels par
 page, 60 à la création d'un livre). Elles sont ensuite en base : les affichages suivants ne coûtent
-rien. Si Strava limite les requêtes, la page s'affiche quand même et les photos manquantes arriveront
+rien. Toute activité jamais vérifiée est interrogée, même si Strava l'annonce sans photo : le compteur
+`total_photo_count` de la liste des activités vaut souvent 0 à tort. Si Strava limite les requêtes, la page s'affiche quand même et les photos manquantes arriveront
 au prochain affichage. Le bouton « Synchroniser » importe toujours un lot de 40 activités, et la
 commande ci-dessous rattrape tout l'historique (utile pour les miniatures de la page Carte).
 
@@ -54,6 +55,7 @@ Pour tout récupérer d'un coup :
 ```bash
 python manage.py sync_photos                     # tous les comptes
 python manage.py sync_photos --athlete <id>      # un seul athlète
+python manage.py sync_photos --all               # aussi les activités annoncées sans photo (long)
 ```
 
 La commande enchaîne les lots et, quand Strava répond « quota atteint », attend la fenêtre de

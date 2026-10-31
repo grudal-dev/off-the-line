@@ -24,23 +24,25 @@ def strava_get(url, params=None, **kwargs):
 class PhotosOnDemandTests(LoggedInTestCase):
     def setUp(self):
         super().setUp()
+        self.photos_patcher.stop()  # ici, on teste le vrai chargement à la demande
         for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE),
                   leg(3, 12, 8, ALBERTVILLE, MOUTIERS)):
             a.account = self.account
             a.summary_polyline = SAMPLE_POLYLINE
-            a.photo_count = 2 if a.strava_id != 2 else 0  # l'étape 2 n'a pas de photo
+            a.photo_count = 2 if a.strava_id != 2 else 0  # Strava annonce 0 photo pour l'étape 2 (souvent faux)
             a.save()
         self.url = reverse("activities:journey", args=[1])
 
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
     def test_opening_a_journey_imports_its_photos_once(self, get):
         page = self.client.get(self.url)
-        self.assertEqual(get.call_count, 2)  # étapes 1 et 3 seulement
-        self.assertEqual(ActivityPhoto.objects.count(), 4)
+        self.assertEqual(get.call_count, 3)  # chaque étape est vérifiée, même annoncée sans photo
+        self.assertEqual(ActivityPhoto.objects.count(), 6)
         self.assertContains(page, "https://img.example.com/1-0.jpg")
-        self.assertContains(page, "https://img.example.com/3-1.jpg")
+        self.assertContains(page, "https://img.example.com/2-0.jpg")  # le compteur Strava disait 0
+        self.assertEqual(Activity.objects.get(strava_id=2).photo_count, 2)
         self.client.get(self.url)
-        self.assertEqual(get.call_count, 2)  # déjà en base : aucun nouvel appel
+        self.assertEqual(get.call_count, 3)  # déjà vérifiées : aucun nouvel appel
 
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
     def test_opening_an_activity_imports_its_photos(self, get):
@@ -64,9 +66,43 @@ class PhotosOnDemandTests(LoggedInTestCase):
         self.assertContains(page, "recharge la page")
         self.client.get(self.url)
         self.assertEqual(get.call_count, 2)
+        self.client.get(self.url)
+        self.assertEqual(get.call_count, 3)
 
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
     def test_book_view_fetches_missing_photos(self, get):
         b = Book.objects.create(account=self.account, journey_ids=[1])
         page = self.client.get(reverse("activities:book_detail", args=[b.pk]))
         self.assertContains(page, "https://img.example.com/1-0.jpg")
+
+
+class StravaPhotoCounterTests(LoggedInTestCase):
+    """Le compteur total_photo_count de la liste Strava vaut souvent 0 alors qu'il y a des photos."""
+
+    @mock.patch("activities.strava.requests.get")
+    def test_resync_does_not_forget_photos_strava_counts_as_zero(self, get):
+        from django.utils import timezone
+        from .sync import sync_activities
+        a = leg(1, 10, 8, ANNECY, FAVERGES)
+        a.account, a.photo_count, a.photos_synced_at = self.account, 2, timezone.now()
+        a.save()
+        for i in range(2):
+            ActivityPhoto.objects.create(activity=a, unique_id=f"p{i}", url=f"https://img.example.com/{i}.jpg")
+        get.return_value = fake_response(json_data=[{
+            "id": 1, "name": "Étape 1", "sport_type": "Ride", "start_date": "2026-08-10T08:00:00Z",
+            "total_photo_count": 0, "map": {"summary_polyline": ""},
+        }])
+        sync_activities(self.account, full=True)
+        a.refresh_from_db()
+        self.assertIsNotNone(a.photos_synced_at)  # pas de nouvel import inutile
+        self.assertEqual(a.photo_count, 2)
+        self.assertEqual(a.photos.count(), 2)
+
+    @mock.patch("activities.strava.requests.get", side_effect=strava_get)
+    def test_sync_photos_all_checks_activities_announced_without_photo(self, get):
+        from .sync import sync_photos
+        a = leg(1, 10, 8, ANNECY, FAVERGES)
+        a.account = self.account
+        a.save()
+        self.assertEqual(sync_photos(self.account), (0, 0))  # par défaut : on se fie au compteur
+        self.assertEqual(sync_photos(self.account, everything=True), (2, 0))

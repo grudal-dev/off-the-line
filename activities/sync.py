@@ -48,9 +48,15 @@ def sync_activities(account, full=False):
             activity, created = Activity.objects.update_or_create(
                 strava_id=data["id"], defaults={"account": account, **_to_fields(data)}
             )
-            if not created and activity.photos_synced_at and activity.photo_count != activity.photos.count():
-                # Des photos ont été ajoutées ou retirées sur Strava : on les récupérera à nouveau
-                Activity.objects.filter(pk=activity.pk).update(photos_synced_at=None)
+            if not created and activity.photos_synced_at:
+                local = activity.photos.count()
+                if activity.photo_count > local:
+                    # Strava annonce plus de photos que nous n'en avons : on les récupérera à nouveau
+                    Activity.objects.filter(pk=activity.pk).update(photos_synced_at=None)
+                elif activity.photo_count < local:
+                    # Le compteur de la liste Strava (total_photo_count) vaut souvent 0 à tort :
+                    # on garde le nombre réellement importé
+                    Activity.objects.filter(pk=activity.pk).update(photo_count=local)
             count += 1
         if len(batch) < PER_PAGE:
             break
@@ -82,20 +88,25 @@ def import_activity_photos(account, activity):
         keep.append(item["unique_id"])
     activity.photos.exclude(unique_id__in=keep).delete()
     activity.photos_synced_at = timezone.now()
-    activity.save(update_fields=["photos_synced_at"])
+    activity.photo_count = len(keep)  # le compteur de la liste Strava n'est pas fiable
+    activity.save(update_fields=["photos_synced_at", "photo_count"])
     # Les photos ont pu être préchargées (prefetch_related) avant l'import : on oublie ce cache
     getattr(activity, "_prefetched_objects_cache", {}).pop("photos", None)
     return len(keep)
 
 
-def sync_photos(account, limit=PHOTO_BATCH):
+def sync_photos(account, limit=PHOTO_BATCH, everything=False):
     """Importe les photos des activités qui en ont et qui n'ont pas encore été traitées.
 
     Limité à `limit` activités par appel pour ménager le quota d'API ;
     les suivantes seront traitées à la prochaine synchronisation.
+    `everything` : vérifie aussi les activités que Strava annonce sans photo (son compteur
+    vaut souvent 0 à tort), au prix d'un appel par activité.
     Renvoie (photos importées, activités restant à traiter).
     """
-    pending = account.activities.filter(photo_count__gt=0, photos_synced_at__isnull=True)
+    pending = account.activities.filter(photos_synced_at__isnull=True)
+    if not everything:
+        pending = pending.filter(photo_count__gt=0)
     imported = 0
     for activity in pending.order_by("-start_date")[:limit]:
         imported += import_activity_photos(account, activity)
@@ -106,14 +117,16 @@ ON_DEMAND_LIMIT = 20  # appels maximum à l'ouverture d'une page
 
 
 def ensure_photos(account, activities, limit=None):
-    """Importe à la demande les photos des activités affichées qui n'ont pas encore été traitées.
+    """Importe à la demande les photos des activités affichées qui n'ont pas encore été vérifiées.
 
+    Toutes les activités jamais vérifiées sont interrogées, même celles que Strava annonce
+    sans photo : le compteur de la liste (total_photo_count) vaut souvent 0 à tort.
     Appelée à l'ouverture d'un périple, d'une activité ou d'un livre : seules les
     activités réellement consultées consomment du quota Strava. Ne lève jamais :
     renvoie (photos importées, activités encore en attente, message d'erreur ou None).
     """
     limit = limit or ON_DEMAND_LIMIT
-    pending = [a for a in activities if a.photo_count and not a.photos_synced_at]
+    pending = [a for a in activities if not a.photos_synced_at]
     imported = 0
     for done, activity in enumerate(pending[:limit]):
         try:
