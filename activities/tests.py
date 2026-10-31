@@ -797,3 +797,50 @@ class ImportStravaTokensCommandTests(TestCase):
         out = self._call(self._write(TOKEN_RESPONSE), "--sync")
         self.assertEqual(StravaAccount.objects.get().activities.count(), 1)
         self.assertIn("1 activité(s) importée(s)", out)
+
+
+class SyncAllPhotosCommandTests(LoggedInTestCase):
+    """Commande sync_photos : enchaîne les lots et attend quand le quota Strava est atteint."""
+
+    def setUp(self):
+        super().setUp()
+        for i in range(5):
+            Activity.objects.create(account=self.account, strava_id=100 + i, name=f"A{i}",
+                                    start_date=timezone.now() - timedelta(days=i), photo_count=1)
+
+    def _photo(self, uid):
+        return [{"unique_id": uid, "urls": {"1024": f"https://example.com/{uid}.jpg"},
+                 "sizes": {"1024": [1024, 768]}}]
+
+    def _call(self):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("sync_photos", "--athlete", "42", stdout=out)
+        return out.getvalue()
+
+    @mock.patch("activities.management.commands.sync_photos.PHOTO_BATCH", 2)
+    @mock.patch("activities.strava.requests.get")
+    def test_processes_every_batch(self, get):
+        get.side_effect = [fake_response(json_data=self._photo(f"p{i}")) for i in range(5)]
+        out = self._call()
+        self.assertEqual(ActivityPhoto.objects.count(), 5)
+        self.assertFalse(Activity.objects.filter(photos_synced_at__isnull=True).exists())
+        self.assertIn("Terminé : 5 photo(s)", out)
+
+    @mock.patch("activities.management.commands.sync_photos.time.sleep")
+    @mock.patch("activities.strava.requests.get")
+    def test_waits_on_rate_limit_then_resumes(self, get, sleep):
+        responses = [fake_response(json_data=self._photo("p0")), fake_response(status=429)]
+        responses += [fake_response(json_data=self._photo(f"p{i}")) for i in range(1, 5)]
+        get.side_effect = responses
+        out = self._call()
+        sleep.assert_called_once()
+        self.assertEqual(ActivityPhoto.objects.count(), 5)
+        self.assertIn("Quota Strava atteint", out)
+
+    def test_next_window(self):
+        from datetime import datetime
+        from .management.commands.sync_photos import seconds_until_next_window
+        self.assertEqual(seconds_until_next_window(datetime(2026, 10, 31, 21, 44, 0)), 60 + 15)
+        self.assertEqual(seconds_until_next_window(datetime(2026, 10, 31, 21, 45, 0)), 15 * 60 + 15)
