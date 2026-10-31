@@ -36,6 +36,26 @@
             <a href="{% url 'activities:journeys' %}">Voir les périples</a>
           </div>
         {% endif %}
+        <div class="zone-tool">
+          <button type="button" class="btn ghost" id="zone-btn" aria-pressed="false" aria-controls="zone-panel">Sélectionner une zone pour un livre</button>
+          <div class="zone-panel" id="zone-panel" hidden aria-live="polite">
+            <h2>Zone sélectionnée</h2>
+            <p class="muted" id="zone-summary"></p>
+            <form method="post" action="{% url 'activities:book' %}" id="zone-form">{% csrf_token %}
+              <ul id="zone-journeys"></ul>
+              <label>Titre du livre
+                <input class="field" type="text" name="title" maxlength="120" placeholder="Par défaut : le nom du périple, ou « Mes périples »">
+              </label>
+              <div class="zone-actions">
+                <button class="btn" type="submit" id="zone-submit">Créer le livre</button>
+                <button class="link-button" type="button" id="zone-clear">Effacer la zone</button>
+              </div>
+            </form>
+            <div class="zone-actions" id="zone-empty" hidden>
+              <button class="link-button" type="button" id="zone-clear-empty">Effacer la zone</button>
+            </div>
+          </div>
+        </div>
       </div>
       <ul class="route-list" id="route-list">
         {% for r in routes %}
@@ -266,6 +286,97 @@
   }));
 
   map.fitBounds(group.getBounds(), { padding: [30, 30] });
+
+  // Sélection d'une zone : on trace un rectangle, les périples qui y passent
+  // sont proposés pour créer un livre (formulaire envoyé à la page Livre).
+  const zoneBtn = document.getElementById("zone-btn");
+  const zonePanel = document.getElementById("zone-panel");
+  const zoneList = document.getElementById("zone-journeys");
+  const zoneForm = document.getElementById("zone-form");
+  const zoneEmpty = document.getElementById("zone-empty");
+  const mapEl = map.getContainer();
+  const hint = document.createElement("p");
+  hint.className = "zone-hint"; hint.hidden = true;
+  hint.textContent = "Fais glisser pour tracer la zone (Échap pour annuler)";
+  box.appendChild(hint);
+  let selecting = false, zoneStart = null, zoneRect = null, swallowClick = false;
+
+  function setSelecting(on) {
+    selecting = on;
+    zoneBtn.setAttribute("aria-pressed", on);
+    box.classList.toggle("is-selecting", on);
+    hint.hidden = !on;
+    on ? map.dragging.disable() : map.dragging.enable();
+  }
+  function clearZone() {
+    if (zoneRect) { zoneRect.remove(); zoneRect = null; }
+    zonePanel.hidden = true;
+  }
+  zoneBtn.addEventListener("click", () => {
+    if (selecting) return setSelecting(false);
+    clearZone();
+    setSelecting(true);
+  });
+  document.getElementById("zone-clear").addEventListener("click", clearZone);
+  document.getElementById("zone-clear-empty").addEventListener("click", clearZone);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && selecting) { setSelecting(false); clearZone(); } });
+
+  const zoneRenderer = L.svg({ padding: 0.3 });  // hors du canevas « Densité », qui recolorerait le rectangle
+  const zoneStyle = { renderer: zoneRenderer, color: "#2f7aa0", weight: 2, dashArray: "6 4", fillColor: "#2f7aa0", fillOpacity: 0.08, interactive: false };
+  // Phase de capture : on intercepte avant Leaflet (déplacement de la carte, clic sur un tracé)
+  const stop = e => { if (selecting) { e.stopPropagation(); e.preventDefault(); } };
+  ["mousedown", "touchstart"].forEach(t => mapEl.addEventListener(t, e => {
+    if (selecting && !e.target.closest(".leaflet-control")) stop(e);
+  }, { capture: true, passive: false }));
+  mapEl.addEventListener("click", e => { if (selecting || swallowClick) { e.stopPropagation(); swallowClick = false; } }, true);
+  mapEl.addEventListener("pointerdown", e => {
+    if (!selecting || e.button !== 0 || e.target.closest(".leaflet-control")) return;
+    stop(e);
+    zoneStart = map.mouseEventToLatLng(e);
+    mapEl.setPointerCapture(e.pointerId);
+    if (zoneRect) zoneRect.remove();
+    zoneRect = L.rectangle(L.latLngBounds(zoneStart, zoneStart), zoneStyle).addTo(map);
+  }, true);
+  mapEl.addEventListener("pointermove", e => {
+    if (zoneStart) zoneRect.setBounds(L.latLngBounds(zoneStart, map.mouseEventToLatLng(e)));
+  }, true);
+  mapEl.addEventListener("pointerup", e => {
+    if (!zoneStart) return;
+    const a = map.latLngToContainerPoint(zoneStart), b = map.mouseEventToContainerPoint(e);
+    zoneStart = null;
+    swallowClick = true;
+    if (Math.abs(a.x - b.x) < 8 || Math.abs(a.y - b.y) < 8) { clearZone(); return; }  // simple clic
+    setSelecting(false);
+    showZone(zoneRect.getBounds());
+  }, true);
+
+  function inZone(coords, bounds) { return coords.some(c => bounds.contains(c)); }
+  function showZone(bounds) {
+    let count = 0, km = 0;
+    for (const line of byId.values()) {
+      if (!hidden.has(line.route.family) && inZone(line.route.coords, bounds)) { count++; km += line.route.km; }
+    }
+    const inside = trips.filter(t => t.stages.some(id => byId.has(id) && inZone(byId.get(id).route.coords, bounds)));
+    document.getElementById("zone-summary").textContent =
+      `${count} parcours (${Math.round(km).toLocaleString("fr-FR")} km), ` +
+      (inside.length ? `${inside.length} périple${inside.length > 1 ? "s" : ""} :` : "aucun périple.");
+    zoneList.innerHTML = inside.map(t => `
+      <li><label><input type="checkbox" name="j" value="${t.id}" checked>
+        <span><strong>${escapeHtml(t.title)}</strong><span class="muted">${t.dates}, ${t.days} jours, ${t.km} km</span></span>
+      </label></li>`).join("");
+    zoneForm.hidden = !inside.length;
+    zoneEmpty.hidden = !!inside.length;
+    if (!inside.length) {
+      document.getElementById("zone-summary").textContent +=
+        " Un livre se compose de périples : élargis la zone, ou rends-toi dans Périples pour en corriger un.";
+    }
+    zonePanel.hidden = false;
+    // Les périples de la zone ressortent sur la carte
+    if (inside.length && tripToggle && tripToggle.getAttribute("aria-pressed") !== "true") tripToggle.click();
+  }
+  zoneForm.addEventListener("submit", e => {
+    if (!zoneList.querySelector("input:checked")) { e.preventDefault(); document.getElementById("zone-summary").textContent = "Coche au moins un périple."; }
+  });
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

@@ -19,7 +19,7 @@
           </svg>
           <div class="journey-text">
             <h2><a href="{% url 'activities:journey' j.id %}">{{ j.name }}</a></h2>
-            <p class="muted">{{ j.title|capfirst }}, {{ item.dates }}</p>
+            <p class="muted">{{ j.title|capfirst }}, {{ item.dates }}{% if j.corrected %} · <span class="tag">corrigé</span>{% endif %}</p>
             <dl class="journey-figures">
               <div><dt>Étapes</dt><dd>{{ j.legs|length }}</dd></div>
               <div><dt>Distance</dt><dd>{{ j.distance_km|floatformat:"0g" }} km</dd></div>
@@ -36,5 +36,16 @@
       <p>Aucun périple repéré pour l'instant.</p>
       <p class="muted">Un périple, ce sont au moins deux activités étalées sur plus de 2 jours (3 jours calendaires ou plus), où chacune repart à moins de 5 km de l'arrivée de la précédente, moins de 42 heures plus tard, et qui t'emmènent à plus de 10 km de ton point de départ. Les boucles depuis chez toi et les trajets domicile-travail ne comptent pas.</p>
     </div>
+  {% endif %}
+
+  {% if hidden %}
+    <details class="hidden-journeys">
+      <summary>{{ hidden|length }} périple{{ hidden|pluralize }} masqué{{ hidden|pluralize }}</summary>
+      <ul>
+        {% for item in hidden %}
+          <li><a href="{% url 'activities:journey' item.journey.id %}">{{ item.journey.name }}</a> <span class="muted">{{ item.dates }}</span></li>
+        {% endfor %}
+      </ul>
+    </details>
   {% endif %}
 {% endblock %}
