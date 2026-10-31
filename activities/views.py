@@ -14,7 +14,7 @@ from django.views.decorators.http import require_POST
 
 from . import book, geo, journeys, places, polyline, sports, strava
 from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, StravaAccount
-from .sync import sync_activities, sync_photos
+from .sync import ensure_photos, sync_activities, sync_photos
 
 SESSION_STATE_KEY = "strava_oauth_state"
 
@@ -111,6 +111,18 @@ def strava_disconnect(request):
     return redirect("activities:home")
 
 
+def _load_photos(request, account, activities, limit=None):
+    """Photos à la demande : importe celles des activités affichées qui ne sont pas encore en base."""
+    kwargs = {"limit": limit} if limit else {}
+    _, remaining, error = ensure_photos(account, activities, **kwargs)
+    if error:
+        messages.info(request, "Strava limite le nombre de requêtes : certaines photos arriveront "
+                               "au prochain affichage, dans quelques minutes.")
+    elif remaining:
+        messages.info(request, f"Photos en cours de récupération : recharge la page pour les {remaining} "
+                               "étape(s) restante(s).")
+
+
 def _account_or_none(request):
     return getattr(request.user, "strava", None)
 
@@ -180,6 +192,7 @@ def activity_detail(request, strava_id):
     if account is None:
         return redirect("activities:home")
     activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
+    _load_photos(request, account, [activity])
     route = polyline.decode(activity.summary_polyline) if activity.summary_polyline else []
     return render(request, "activities/detail.html",
                   {"activity": activity, "route": route, "photos": activity.photos.all()})
@@ -303,6 +316,7 @@ def journey_detail(request, journey_id):
         messages.success(request, "Périple mis à jour.")
         return redirect("activities:journey", journey_id=journey_id)
     journey = _find_journey(account, journey_id, places.Budget(lookups=20))
+    _load_photos(request, account, journey.activities)
     colors = _stage_colors(len(journey.legs))
     stages = []
     for i, (leg, color) in enumerate(zip(journey.legs, colors)):
@@ -316,6 +330,7 @@ def journey_detail(request, journey_id):
             "duration": a.duration_display, "night_after": i in journey.nights,
             "transfer_after": journey.transfer_after(i),
             "coords": polyline.decode(a.summary_polyline),
+            "photos": [p.url for p in a.photos.all()],
         })
     nights = sum(1 for s in stages if s["night_after"])
     removed = [{"id": leg.activity.strava_id, "name": leg.activity.name, "label": leg.label,
@@ -407,6 +422,8 @@ def book_builder(request):
         _, problem = book.prepare(account, chosen)
         if problem:
             messages.info(request, problem)
+        else:
+            _load_photos(request, account, [a for j in chosen for a in j.activities], limit=60)
         return redirect("activities:book_detail", book_id=new.pk)
     preselected = {int(x) for x in request.GET.getlist("j") if x.isdigit()}
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
@@ -443,6 +460,7 @@ def book_detail(request, book_id):
     if not chosen:
         messages.error(request, "Les périples de ce livre n'existent plus (activités supprimées ?).")
         return redirect("activities:book")
+    _load_photos(request, account, [a for j in chosen for a in j.activities])
     stage_notes = {s.activity_id: s for s in book_obj.stages.all()}
     pool = book.photo_pool(chosen, book_obj.uploads.all())
     chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j), book_obj, stage_notes, pool)

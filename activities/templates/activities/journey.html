@@ -96,6 +96,12 @@
               <strong>{{ s.label|default:s.name }}</strong>
               <span>{{ s.date|capfirst }}{% if s.label %}, {{ s.name }}{% else %}, {{ s.sport|lower }}{% endif %}</span>
             </span>
+            {% if s.photos %}
+              <span class="photo-stack small" title="{{ s.photos|length }} photo{{ s.photos|pluralize }}">
+                {% for url in s.photos|slice:":3" %}<img src="{{ url }}" alt="" loading="lazy">{% endfor %}
+                {% if s.photos|length > 3 %}<span class="more">+{{ s.photos|length|add:"-3" }}</span>{% endif %}
+              </span>
+            {% else %}<span></span>{% endif %}
             <span class="stage-figs">{{ s.km|floatformat:1 }} km<small>{{ s.elevation }} m D+</small></span>
           </a>
           {% if s.transfer_after %}{% with t=s.transfer_after %}
