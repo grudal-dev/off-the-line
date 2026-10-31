@@ -422,8 +422,7 @@ def book_builder(request):
         _, problem = book.prepare(account, chosen)
         if problem:
             messages.info(request, problem)
-        else:
-            _load_photos(request, account, [a for j in chosen for a in j.activities], limit=60)
+        # Les photos sont récupérées ensuite par la page du livre, en arrière-plan (book_fetch_photos)
         return redirect("activities:book_detail", book_id=new.pk)
     preselected = {int(x) for x in request.GET.getlist("j") if x.isdigit()}
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
@@ -460,7 +459,7 @@ def book_detail(request, book_id):
     if not chosen:
         messages.error(request, "Les périples de ce livre n'existent plus (activités supprimées ?).")
         return redirect("activities:book")
-    _load_photos(request, account, [a for j in chosen for a in j.activities])
+    photos_pending = sum(1 for j in chosen for a in j.activities if not a.photos_synced_at)
     stage_notes = {s.activity_id: s for s in book_obj.stages.all()}
     pool = book.photo_pool(chosen, book_obj.uploads.all())
     chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j), book_obj, stage_notes, pool)
@@ -487,6 +486,7 @@ def book_detail(request, book_id):
     stages_info = [{"id": s["id"], "n": s["n"], "label": s["label"], "chapter": ci, "photos": s["photo_keys"]}
                    for ci, c in enumerate(chapters) for s in c["stages"]]
     return render(request, "activities/book.html", {
+        "photos_pending": photos_pending,
         "book": book_obj, "title": book_obj.title or "Mes périples", "chapters": chapters, "totals": totals,
         "maps": maps, "period": period, "cover_photo": cover_photo,
         "subtitle": book_obj.subtitle or f"{period[:1].upper()}{period[1:]}"
@@ -582,6 +582,26 @@ def book_update(request, book_id):
 
 
 MAX_UPLOAD_SIDE = 2400
+
+
+BOOK_PHOTO_BATCH = 8  # étapes vérifiées par requête du navigateur : la page reste réactive
+
+
+@require_POST
+@login_required
+def book_fetch_photos(request, book_id):
+    """Récupère sur Strava les photos manquantes des étapes du livre, par petits lots.
+
+    Appelée en boucle par la page du livre tant qu'il reste des étapes à vérifier.
+    """
+    from django.http import JsonResponse
+
+    book_obj, account = _book_or_404(request, book_id)
+    activities = [a for j in _book_journeys(account, book_obj) for a in j.activities]
+    imported, _, error = ensure_photos(account, activities, limit=BOOK_PHOTO_BATCH)
+    remaining = sum(1 for a in activities if not a.photos_synced_at)
+    return JsonResponse({"imported": imported, "remaining": remaining, "error": error,
+                         "rate_limited": bool(error and "Limite" in error)})
 
 
 @require_POST

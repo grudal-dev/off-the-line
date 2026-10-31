@@ -20,6 +20,7 @@
     {% endif %}
     <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
     <span id="save-status" class="muted" aria-live="polite"></span>
+    {% if photos_pending %}<span id="strava-photos" class="muted" aria-live="polite">Photos Strava : {{ photos_pending }} étape{{ photos_pending|pluralize }} à vérifier…</span>{% endif %}
     <button type="button" class="btn" id="print-btn">Enregistrer en PDF</button>
   </div>
   {% if edit %}
@@ -371,7 +372,7 @@
     if (credit) credit.innerHTML = SATELLITE.options.attribution;
 
     document.getElementById("print-btn").addEventListener("click", () => {
-      if ((pending || window.photosPending) && !confirm("Des cartes ou des photos sont encore en cours de chargement. Imprimer quand même ?")) return;
+      if ((pending || window.photosPending || window.stravaPhotosFetching) && !confirm("Des cartes ou des photos sont encore en cours de chargement. Imprimer quand même ?")) return;
       window.print();
     });
   })();
@@ -719,5 +720,65 @@
   })();
   </script>
   {% endif %}
+{% if photos_pending %}
+  <script>
+  // Photos Strava manquantes : récupérées par lots en arrière-plan, puis la page se recharge
+  // (en mode édition, un bouton le propose pour ne pas interrompre la saisie).
+  (() => {
+    const el = document.getElementById("strava-photos");
+    const url = "{% url 'activities:book_fetch_photos' book.pk %}";
+    let found = 0;
+    window.stravaPhotosFetching = true;
+    const plural = n => n > 1 ? "s" : "";
+    function done() {
+      window.stravaPhotosFetching = false;
+      if (!found) { el.hidden = true; return; }
+      if (!BOOK.edit) {
+        try { sessionStorage.setItem("otl-scroll", String(window.scrollY)); } catch (e) {}
+        location.reload();
+        return;
+      }
+      el.innerHTML = "";
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn ghost";
+      b.textContent = `Afficher ${found} nouvelle${plural(found)} photo${plural(found)}`;
+      b.addEventListener("click", () => location.reload());
+      el.appendChild(b);
+    }
+    async function step() {
+      let data;
+      try {
+        const r = await fetch(url, { method: "POST", headers: { "X-CSRFToken": BOOK.csrf } });
+        data = await r.json();
+      } catch (e) {
+        el.textContent = "Photos Strava : connexion perdue, nouvel essai dans 1 min…";
+        return setTimeout(step, 60000);
+      }
+      found += data.imported;
+      const left = `${data.remaining} étape${plural(data.remaining)} à vérifier`;
+      if (data.error) {
+        const why = data.rate_limited ? "quota Strava atteint" : "Strava ne répond pas";
+        el.textContent = `Photos : ${why}, nouvel essai dans 1 min (${left}, ${found} photo${plural(found)} trouvée${plural(found)})`;
+        el.title = data.error;
+        return setTimeout(step, 60000);
+      }
+      if (data.remaining) {
+        el.textContent = `Photos Strava : ${left}, ${found} photo${plural(found)} trouvée${plural(found)}…`;
+        return step();
+      }
+      done();
+    }
+    step();
+  })();
+  </script>
+{% endif %}
+  <script>
+  // Après un rechargement dû aux photos, on revient où on en était
+  (() => {
+    let y = null;
+    try { y = sessionStorage.getItem("otl-scroll"); sessionStorage.removeItem("otl-scroll"); } catch (e) {}
+    if (y) window.addEventListener("load", () => window.scrollTo(0, Number(y)));
+  })();
+  </script>
 </body>
 </html>
