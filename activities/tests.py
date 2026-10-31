@@ -356,11 +356,16 @@ class JourneyDetectionTests(TestCase):
     def test_two_rides_same_day_are_not_a_journey(self):
         self.assertEqual(self.detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 10, 14, FAVERGES, ALBERTVILLE)]), [])
 
+    def test_two_day_trip_is_not_a_journey(self):
+        # Strictement plus de 2 jours : un week-end (samedi → dimanche) ne suffit pas
+        self.assertEqual(self.detect([leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)]), [])
+
     def test_rest_day_is_allowed(self):
         found = self.detect([leg(1, 10, 8, ANNECY, FAVERGES, hours=6), leg(2, 12, 8, FAVERGES, ALBERTVILLE)])
         self.assertEqual(len(found), 1)
 
 
+@mock.patch("activities.journeys.MIN_DAYS", 2)  # fixtures en 2 jours : on teste autre chose que la durée
 class JourneyPagesTests(LoggedInTestCase):
     def setUp(self):
         super().setUp()
@@ -410,6 +415,7 @@ def fake_http(places=None, photos=None):
 PLACE_NAMES = {(45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}
 
 
+@mock.patch("activities.journeys.MIN_DAYS", 2)  # fixtures en 2 jours : on teste autre chose que la durée
 class PlaceNamingTests(TestCase):
     @mock.patch("activities.places.requests.get", side_effect=fake_http(PLACE_NAMES))
     def test_journey_and_stages_are_named_and_cached(self, get):
@@ -444,6 +450,7 @@ class PlaceNamingTests(TestCase):
             self.assertEqual(j.name, "2 jours à vélo")
 
 
+@mock.patch("activities.journeys.MIN_DAYS", 2)  # fixtures en 2 jours : on teste autre chose que la durée
 class BookTests(LoggedInTestCase):
     def setUp(self):
         super().setUp()
@@ -501,6 +508,7 @@ class BookTests(LoggedInTestCase):
 
 
 @override_settings(MEDIA_ROOT=__import__("tempfile").mkdtemp())
+@mock.patch("activities.journeys.MIN_DAYS", 2)  # fixtures en 2 jours : on teste autre chose que la durée
 class BookEditingTests(LoggedInTestCase):
     def setUp(self):
         super().setUp()
@@ -664,6 +672,7 @@ class PhotoLayoutTests(TestCase):
 NICE, MENTON, SANREMO = (43.70, 7.27), (43.775, 7.50), (43.815, 7.775)
 
 
+@mock.patch("activities.journeys.MIN_DAYS", 2)  # fixtures en 2 jours : on teste autre chose que la durée
 class TransferDetectionTests(TestCase):
     def detect(self, activities):
         from .journeys import detect
