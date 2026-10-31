@@ -111,16 +111,79 @@ def strava_disconnect(request):
     return redirect("activities:home")
 
 
-def _load_photos(request, account, activities, limit=None):
-    """Photos à la demande : importe celles des activités affichées qui ne sont pas encore en base."""
-    kwargs = {"limit": limit} if limit else {}
-    _, remaining, error = ensure_photos(account, activities, **kwargs)
-    if error:
-        messages.info(request, "Strava limite le nombre de requêtes : certaines photos arriveront "
-                               "au prochain affichage, dans quelques minutes.")
-    elif remaining:
-        messages.info(request, f"Photos en cours de récupération : recharge la page pour les {remaining} "
-                               "étape(s) restante(s).")
+# ---------- Chargement en arrière-plan ----------
+# Les pages s'affichent sans attendre Strava ni le géocodage ; le navigateur appelle
+# ensuite une adresse « …/completer/ » en boucle (static/activities/background.js) qui
+# traite un petit lot à chaque fois et renvoie {found, remaining, error, retry}.
+
+PHOTO_BATCH_BG = 6   # activités vérifiées sur Strava par appel
+NAMES_BATCH_BG = 8   # points géocodés par appel
+
+
+def _names_background(found):
+    missing = places.missing_points(found)
+    if not missing:
+        return None
+    return {"url": reverse("activities:journeys_complete"), "pending": len(missing), "what": "lieux"}
+
+
+def _journey_background(journey):
+    pending = sum(1 for a in journey.activities if not a.photos_synced_at) + len(places.missing_points([journey]))
+    if not pending:
+        return None
+    return {"url": reverse("activities:journey_complete", args=[journey.id]), "pending": pending,
+            "what": "photos et lieux"}
+
+
+def _complete(account, activities=(), journeys_to_name=(), photo_batch=None):
+    """Un lot de travail en arrière-plan : photos Strava puis noms de lieux."""
+    photo_batch = photo_batch or PHOTO_BATCH_BG
+    found, error, retry = 0, None, False
+    if activities:
+        imported, _, error = ensure_photos(account, activities, limit=photo_batch)
+        found += imported
+        retry = bool(error)  # quota ou réseau : on réessaiera dans une minute
+    remaining = sum(1 for a in activities if not a.photos_synced_at)
+    if journeys_to_name and not error:
+        names, names_left, failed = places.fill(places.missing_points(journeys_to_name),
+                                                places.Budget(lookups=NAMES_BATCH_BG, nominatim=1))
+        found += names
+        remaining += names_left
+        if failed:
+            error = "Noms de lieux indisponibles pour l'instant."
+    elif journeys_to_name:
+        remaining += len(places.missing_points(journeys_to_name))
+    return {"found": found, "remaining": remaining, "error": error, "retry": retry}
+
+
+@require_POST
+@login_required
+def activity_complete(request, strava_id):
+    from django.http import JsonResponse
+    account = _account_or_none(request)
+    activity = get_object_or_404(Activity, strava_id=strava_id, account__user=request.user)
+    return JsonResponse(_complete(account, [activity]))
+
+
+@require_POST
+@login_required
+def journey_complete(request, journey_id):
+    from django.http import JsonResponse
+    account = _account_or_none(request)
+    if account is None:
+        raise Http404
+    journey = _find_journey(account, journey_id)
+    return JsonResponse(_complete(account, journey.activities, [journey]))
+
+
+@require_POST
+@login_required
+def journeys_complete(request):
+    from django.http import JsonResponse
+    account = _account_or_none(request)
+    if account is None:
+        raise Http404
+    return JsonResponse(_complete(account, journeys_to_name=journeys.for_account(account)))
 
 
 def _account_or_none(request):
@@ -182,8 +245,7 @@ def _sync_photos_with_message(request, account):
     if remaining:
         messages.info(request, f"{remaining} activité(s) avec photos restent à importer : "
                                "relance la synchronisation dans quelques minutes.")
-    # Nomme les nouveaux périples pendant qu'on y est (lieux mis en cache)
-    journeys.for_account(account, places.Budget(lookups=60))
+    # Les noms de lieux des nouveaux périples arrivent ensuite en arrière-plan (page Périples)
 
 
 @login_required
@@ -192,10 +254,12 @@ def activity_detail(request, strava_id):
     if account is None:
         return redirect("activities:home")
     activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
-    _load_photos(request, account, [activity])
     route = polyline.decode(activity.summary_polyline) if activity.summary_polyline else []
+    background = None
+    if not activity.photos_synced_at:  # photos récupérées juste après l'affichage
+        background = {"url": reverse("activities:detail_complete", args=[strava_id]), "pending": 1, "what": "photos"}
     return render(request, "activities/detail.html",
-                  {"activity": activity, "route": route, "photos": activity.photos.all()})
+                  {"activity": activity, "route": route, "photos": activity.photos.all(), "background": background})
 
 
 @login_required
@@ -262,10 +326,11 @@ def journey_list(request):
     if account is None:
         return redirect("activities:home")
     # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
-    found = journeys.for_account(account, places.Budget(lookups=30))
+    found = journeys.for_account(account)
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j)} for j in found if not j.hidden]
     hidden = [{"journey": j, "dates": _date_range(j)} for j in found if j.hidden]
-    return render(request, "activities/journeys.html", {"items": items, "hidden": hidden})
+    return render(request, "activities/journeys.html",
+                  {"items": items, "hidden": hidden, "background": _names_background(found)})
 
 
 def _find_journey(account, journey_id, budget=None):
@@ -318,8 +383,7 @@ def journey_detail(request, journey_id):
         )
         messages.success(request, "Périple mis à jour.")
         return redirect("activities:journey", journey_id=journey_id)
-    journey = _find_journey(account, journey_id, places.Budget(lookups=20))
-    _load_photos(request, account, journey.activities)
+    journey = _find_journey(account, journey_id)
     colors = _stage_colors(len(journey.legs))
     stages = []
     for i, (leg, color) in enumerate(zip(journey.legs, colors)):
@@ -345,6 +409,7 @@ def journey_detail(request, journey_id):
     return render(request, "activities/journey.html", {
         "journey": journey, "dates": _date_range(journey), "stages": stages, "nights": nights,
         "removed": removed, "candidates": candidates,
+        "background": _journey_background(journey),
         "stages_json": [{k: s[k] for k in ("n", "id", "name", "label", "color", "coords", "night_after",
                                             "transfer_after")}
                         for s in stages],
@@ -412,7 +477,7 @@ def book_builder(request):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
-    found = journeys.for_account(account, places.Budget(lookups=30))
+    found = journeys.for_account(account)
     if request.method == "POST":
         wanted = {int(x) for x in request.POST.getlist("j") if x.isdigit()}
         chosen = sorted((j for j in found if j.id in wanted), key=lambda j: j.legs[0].start_at)
@@ -433,7 +498,8 @@ def book_builder(request):
     names = {j.id: j.name for j in found}
     books = [{"book": b, "names": [names.get(i, "Périple introuvable") for i in b.journey_ids]}
              for b in account.books.all()]
-    return render(request, "activities/book_builder.html", {"items": items, "books": books})
+    return render(request, "activities/book_builder.html",
+                  {"items": items, "books": books, "background": _names_background(found)})
 
 
 def _journey_thumb(j):
@@ -462,7 +528,9 @@ def book_detail(request, book_id):
     if not chosen:
         messages.error(request, "Les périples de ce livre n'existent plus (activités supprimées ?).")
         return redirect("activities:book")
-    photos_pending = sum(1 for j in chosen for a in j.activities if not a.photos_synced_at)
+    # Photos Strava et noms de lieux manquants : récupérés ensuite par la page (book_fetch_photos)
+    photos_pending = (sum(1 for j in chosen for a in j.activities if not a.photos_synced_at)
+                      + len(places.missing_points(chosen)))
     stage_notes = {s.activity_id: s for s in book_obj.stages.all()}
     pool = book.photo_pool(chosen, book_obj.uploads.all())
     chapters = [book.build(j, _stage_colors(len(j.legs)), _date_range(j), book_obj, stage_notes, pool)
@@ -600,11 +668,10 @@ def book_fetch_photos(request, book_id):
     from django.http import JsonResponse
 
     book_obj, account = _book_or_404(request, book_id)
-    activities = [a for j in _book_journeys(account, book_obj) for a in j.activities]
-    imported, _, error = ensure_photos(account, activities, limit=BOOK_PHOTO_BATCH)
-    remaining = sum(1 for a in activities if not a.photos_synced_at)
-    return JsonResponse({"imported": imported, "remaining": remaining, "error": error,
-                         "rate_limited": bool(error and "Limite" in error)})
+    chosen = _book_journeys(account, book_obj)
+    result = _complete(account, [a for j in chosen for a in j.activities], chosen, photo_batch=BOOK_PHOTO_BATCH)
+    return JsonResponse({"imported": result["found"], "remaining": result["remaining"], "error": result["error"],
+                         "rate_limited": result["retry"]})
 
 
 @require_POST

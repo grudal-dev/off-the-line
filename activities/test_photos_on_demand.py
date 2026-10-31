@@ -22,9 +22,11 @@ def strava_get(url, params=None, **kwargs):
 
 
 class PhotosOnDemandTests(LoggedInTestCase):
+    """Les pages s'affichent sans attendre Strava ; photos et lieux arrivent en arrière-plan."""
+
     def setUp(self):
         super().setUp()
-        self.photos_patcher.stop()  # ici, on teste le vrai chargement à la demande
+        self.photos_patcher.stop()  # ici, on teste le vrai chargement des photos
         for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE),
                   leg(3, 12, 8, ALBERTVILLE, MOUTIERS)):
             a.account = self.account
@@ -32,42 +34,89 @@ class PhotosOnDemandTests(LoggedInTestCase):
             a.photo_count = 2 if a.strava_id != 2 else 0  # Strava annonce 0 photo pour l'étape 2 (souvent faux)
             a.save()
         self.url = reverse("activities:journey", args=[1])
+        self.complete = reverse("activities:journey_complete", args=[1])
 
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
-    def test_opening_a_journey_imports_its_photos_once(self, get):
+    def test_journey_page_renders_without_strava_then_completes_in_background(self, get):
         page = self.client.get(self.url)
+        self.assertEqual(get.call_count, 0)  # affichage immédiat
+        self.assertContains(page, f'data-url="{self.complete}"')
+        data = self.client.post(self.complete).json()
         self.assertEqual(get.call_count, 3)  # chaque étape est vérifiée, même annoncée sans photo
-        self.assertEqual(ActivityPhoto.objects.count(), 6)
-        self.assertContains(page, "https://img.example.com/1-0.jpg")
-        self.assertContains(page, "https://img.example.com/2-0.jpg")  # le compteur Strava disait 0
+        self.assertEqual((data["found"], data["remaining"], data["error"]), (6, 0, None))
         self.assertEqual(Activity.objects.get(strava_id=2).photo_count, 2)
-        self.client.get(self.url)
+        page = self.client.get(self.url)
+        self.assertContains(page, "https://img.example.com/2-0.jpg")
+        self.assertNotContains(page, 'id="bg-task"')  # plus rien à récupérer
+        self.client.post(self.complete)
         self.assertEqual(get.call_count, 3)  # déjà vérifiées : aucun nouvel appel
 
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
-    def test_opening_an_activity_imports_its_photos(self, get):
-        page = self.client.get(reverse("activities:detail", args=[3]))
-        self.assertEqual(get.call_count, 1)
+    def test_activity_page(self, get):
+        url = reverse("activities:detail", args=[3])
+        self.assertContains(self.client.get(url), 'id="bg-task"')
+        self.assertEqual(get.call_count, 0)
+        self.assertEqual(self.client.post(reverse("activities:detail_complete", args=[3])).json()["found"], 2)
+        page = self.client.get(url)
         self.assertContains(page, "https://img.example.com/3-0.jpg")
+        self.assertNotContains(page, 'id="bg-task"')
 
     @mock.patch("activities.strava.requests.get")
-    def test_rate_limit_does_not_break_the_page(self, get):
+    def test_rate_limit_asks_to_retry(self, get):
         get.return_value = fake_response(status=429)
-        page = self.client.get(self.url, follow=True)
-        self.assertEqual(page.status_code, 200)
-        self.assertContains(page, "certaines photos arriveront")
+        data = self.client.post(self.complete).json()
+        self.assertTrue(data["retry"])
+        self.assertEqual(data["remaining"], 3 + 4)  # 3 étapes à vérifier + 4 lieux à nommer
         self.assertFalse(Activity.objects.filter(photos_synced_at__isnull=False).exists())
 
-    @mock.patch("activities.sync.ON_DEMAND_LIMIT", 1)
+    @mock.patch("activities.views.PHOTO_BATCH_BG", 1)
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
-    def test_limit_per_page_view(self, get):
-        page = self.client.get(self.url, follow=True)
-        self.assertEqual(get.call_count, 1)
-        self.assertContains(page, "recharge la page")
-        self.client.get(self.url)
-        self.assertEqual(get.call_count, 2)
-        self.client.get(self.url)
+    def test_small_batches(self, get):
+        self.assertEqual(self.client.post(self.complete).json()["remaining"], 2)
+        self.assertEqual(self.client.post(self.complete).json()["remaining"], 1)
+        self.assertEqual(self.client.post(self.complete).json()["remaining"], 0)
         self.assertEqual(get.call_count, 3)
+
+    def test_other_users_journey_is_404(self):
+        from django.contrib.auth import get_user_model
+        from .models import StravaAccount
+        from django.utils import timezone
+        other = get_user_model().objects.create(username="autre")
+        StravaAccount.objects.create(user=other, athlete_id=7, access_token="t", refresh_token="r",
+                                     expires_at=timezone.now())
+        self.client.force_login(other)
+        self.assertEqual(self.client.post(self.complete).status_code, 404)
+        self.assertEqual(self.client.post(reverse("activities:detail_complete", args=[1])).status_code, 404)
+
+
+class PlaceNamesInBackgroundTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE),
+                  leg(3, 12, 8, ALBERTVILLE, MOUTIERS)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.save()
+
+    def test_list_names_places_in_background(self):
+        names = {(45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville", (45.5, 6.5): "Moûtiers"}
+        with mock.patch("activities.places._geopf", side_effect=lambda p: names.get((round(p[0], 1), round(p[1], 1)), "")) as geo:
+            page = self.client.get(reverse("activities:journeys"))
+            self.assertEqual(geo.call_count, 0)
+            self.assertContains(page, 'data-url="/periples/completer/"')
+            data = self.client.post(reverse("activities:journeys_complete")).json()
+            self.assertEqual((data["found"], data["remaining"]), (4, 0))
+        page = self.client.get(reverse("activities:journeys"))
+        self.assertContains(page, "Annecy → Moûtiers")
+        self.assertNotContains(page, 'id="bg-task"')
+
+    def test_geocoding_down_stops_without_retry(self):
+        import requests
+        with mock.patch("activities.places._geopf", side_effect=requests.ConnectionError):
+            data = self.client.post(reverse("activities:journeys_complete")).json()
+        self.assertTrue(data["error"])
+        self.assertFalse(data["retry"])
+        self.assertEqual(data["remaining"], 4)
 
 
 class StravaPhotoCounterTests(LoggedInTestCase):
@@ -121,7 +170,7 @@ class BookPhotosTests(LoggedInTestCase):
     def test_page_renders_without_calling_strava_then_fetches_in_batches(self, get):
         page = self.client.get(self.page)
         self.assertEqual(get.call_count, 0)  # la page s'affiche tout de suite
-        self.assertContains(page, "3 étapes à vérifier")
+        self.assertContains(page, "à récupérer")
         self.assertContains(page, self.fetch)
         with mock.patch("activities.views.BOOK_PHOTO_BATCH", 2):
             first = self.client.post(self.fetch).json()
@@ -129,14 +178,14 @@ class BookPhotosTests(LoggedInTestCase):
             second = self.client.post(self.fetch).json()
             self.assertEqual((second["imported"], second["remaining"]), (2, 0))
         page = self.client.get(self.page)
-        self.assertNotContains(page, "à vérifier")
+        self.assertNotContains(page, "à récupérer")
         self.assertContains(page, "https://img.example.com/3-1.jpg")
 
     @mock.patch("activities.strava.requests.get")
     def test_rate_limit_is_reported_to_the_page(self, get):
         get.return_value = fake_response(status=429)
         data = self.client.post(self.fetch).json()
-        self.assertEqual((data["imported"], data["remaining"]), (0, 3))
+        self.assertEqual((data["imported"], data["remaining"]), (0, 3 + 4))  # étapes + lieux
         self.assertIn("Limite", data["error"])
 
     def test_other_users_book_is_404(self):

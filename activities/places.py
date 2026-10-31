@@ -113,3 +113,36 @@ def name_journeys(journeys, budget=None):
             leg.end_name = lookup(leg.end, budget, cache)
         j.start_name, j.end_name = j.legs[0].start_name, j.legs[-1].end_name
     return journeys
+
+
+def missing_points(journeys, cache=None):
+    """Points de départ/arrivée des étapes dont le nom n'est pas encore en cache (sans doublons)."""
+    cache = load_cache() if cache is None else cache
+    missing = {}
+    for j in journeys:
+        for leg in j.legs:
+            for point in (leg.start, leg.end):
+                key = _key(point)
+                if key not in cache and key not in missing:
+                    missing[key] = point
+    return list(missing.values())
+
+
+def fill(points, budget):
+    """Cherche le nom des points manquants dans la limite du budget (chargement en arrière-plan).
+
+    Renvoie (noms trouvés, points encore inconnus, échec réseau).
+    """
+    cache = load_cache()
+    found = 0
+    for point in points:
+        if budget.exhausted:
+            break
+        key = _key(point)
+        if key in cache:
+            continue
+        lookup(point, budget, cache)
+        if cache.get(key):
+            found += 1
+    remaining = sum(1 for p in points if _key(p) not in cache)
+    return found, remaining, bool(budget.failures and remaining)

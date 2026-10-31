@@ -1,6 +1,6 @@
-{% load static %}<link rel="stylesheet" href="{% static 'activities/vendor/leaflet/leaflet.css' %}">
-<script src="{% static 'activities/vendor/leaflet/leaflet.js' %}"></script>
+{% load static assets %}<link rel="stylesheet" href="{% asset 'activities/vendor/leaflet/leaflet.css' %}">
+<script src="{% asset 'activities/vendor/leaflet/leaflet.js' %}"></script>
 {{ basemap|json_script:"basemap-data" }}
 <script>const BASEMAP = JSON.parse(document.getElementById("basemap-data").textContent);</script>
-<script src="{% static 'activities/cities.js' %}"></script>
-<script src="{% static 'activities/basemaps.js' %}"></script>
+<script src="{% asset 'activities/cities.js' %}"></script>
+<script src="{% asset 'activities/basemaps.js' %}"></script>

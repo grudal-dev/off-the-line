@@ -37,6 +37,18 @@ pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses
 un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
 et `strava_*.json` est ignoré par git.
 
+### Chargement en arrière-plan
+
+Les pages s'affichent sans attendre Strava ni le géocodage. Ce qui manque (photos d'une activité ou d'un
+périple, noms de lieux des périples, photos et lieux d'un livre) est récupéré juste après par
+`static/activities/background.js`, qui appelle en boucle une adresse `…/completer/` traitant un petit lot à
+chaque fois (6 activités, 8 lieux). Un indicateur en bas à gauche montre l'avancement ; à la fin, la page se
+recharge à la même position (ou propose un bouton si une saisie est en cours). En cas de quota Strava, nouvel
+essai chaque minute ; si le géocodage est indisponible, on s'arrête et on réessaiera à la prochaine visite.
+
+Les scripts et feuilles de style sont inclus avec `{% asset %}` (date de modification en suffixe) pour que le
+navigateur ne garde pas une ancienne version après une mise à jour.
+
 ### Photos à la demande
 
 Les vidéos Strava, renvoyées avec les photos, sont ignorées (`sync.is_video`).
