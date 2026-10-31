@@ -204,19 +204,20 @@ def all_routes_map(request):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
+    # « account » doit être chargé (sinon une requête par activité) ; les tracés partent encodés
+    # (format Strava, 3 à 5 fois plus léger) et sont décodés par le navigateur, miniatures comprises.
     qs = account.activities.exclude(summary_polyline="").only(
-        "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance", "summary_polyline"
+        "account", "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance", "summary_polyline"
     ).prefetch_related("photos")
     routes, counts = [], {}
     for a in qs:
-        coords = polyline.decode(a.summary_polyline)
         fam = sports.family(a.sport_type)
         counts[fam] = counts.get(fam, 0) + 1
         routes.append({
             "id": a.strava_id, "name": a.name, "sport": sports.label(a.sport_type),
             "family": fam, "color": sports.FAMILIES[fam][1],
             "date": formats.date_format(a.start_date_local or a.start_date, "j F Y"),
-            "km": a.distance_km, "coords": coords, "thumb": geo.svg_path(coords, max_points=60),
+            "km": a.distance_km, "poly": a.summary_polyline,
             "photos": [p.url for p in a.photos.all()],
         })
     families = [
@@ -231,8 +232,10 @@ def all_routes_map(request):
          "days": j.days, "km": round(j.distance_km)}
         for j in journeys.for_account(account, include_hidden=False)
     ]
+    routes_data = [{k: r[k] for k in ("id", "name", "sport", "family", "color", "date", "km", "poly")} for r in routes]
     return render(request, "activities/map.html",
-                  {"routes": routes, "families": families, "total_km": total_km, "journeys": trips})
+                  {"routes": routes, "routes_data": routes_data, "families": families, "total_km": total_km,
+                   "journeys": trips})
 
 
 def _date_range(journey):
