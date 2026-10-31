@@ -20,5 +20,6 @@ urlpatterns = [
     path("livre/<int:book_id>/", views.book_detail, name="book_detail"),
     path("livre/<int:book_id>/modifier/", views.book_update, name="book_update"),
     path("livre/<int:book_id>/photos/", views.book_upload, name="book_upload"),
+    path("livre/<int:book_id>/photos-strava/", views.book_fetch_photos, name="book_fetch_photos"),
     path("livre/<int:book_id>/supprimer/", views.book_delete, name="book_delete"),
 ]

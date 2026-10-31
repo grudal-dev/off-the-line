@@ -39,6 +39,11 @@ et `strava_*.json` est ignoré par git.
 
 ### Photos à la demande
 
+Dans un livre, les photos manquantes de **toutes** les étapes sont récupérées en arrière-plan : la page
+s'affiche tout de suite, appelle `livre/<id>/photos-strava/` par lots de 8 étapes en montrant
+l'avancement dans la barre du haut, réessaie chaque minute si Strava limite les requêtes, puis se
+recharge (en mode Personnaliser, un bouton « Afficher les nouvelles photos » le propose).
+
 Les photos d'une activité sont récupérées sur Strava la première fois qu'on l'ouvre, qu'on ouvre un
 périple qui la contient, ou qu'on crée ou affiche un livre (`sync.ensure_photos`, au plus 20 appels par
 page, 60 à la création d'un livre). Elles sont ensuite en base : les affichages suivants ne coûtent

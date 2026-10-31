@@ -69,12 +69,6 @@ class PhotosOnDemandTests(LoggedInTestCase):
         self.client.get(self.url)
         self.assertEqual(get.call_count, 3)
 
-    @mock.patch("activities.strava.requests.get", side_effect=strava_get)
-    def test_book_view_fetches_missing_photos(self, get):
-        b = Book.objects.create(account=self.account, journey_ids=[1])
-        page = self.client.get(reverse("activities:book_detail", args=[b.pk]))
-        self.assertContains(page, "https://img.example.com/1-0.jpg")
-
 
 class StravaPhotoCounterTests(LoggedInTestCase):
     """Le compteur total_photo_count de la liste Strava vaut souvent 0 alors qu'il y a des photos."""
@@ -106,3 +100,47 @@ class StravaPhotoCounterTests(LoggedInTestCase):
         a.save()
         self.assertEqual(sync_photos(self.account), (0, 0))  # par défaut : on se fie au compteur
         self.assertEqual(sync_photos(self.account, everything=True), (2, 0))
+
+
+class BookPhotosTests(LoggedInTestCase):
+    """Le livre récupère en arrière-plan les photos de toutes ses étapes, par lots."""
+
+    def setUp(self):
+        super().setUp()
+        self.photos_patcher.stop()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE),
+                  leg(3, 12, 8, ALBERTVILLE, MOUTIERS)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.save()
+        self.book = Book.objects.create(account=self.account, journey_ids=[1])
+        self.page = reverse("activities:book_detail", args=[self.book.pk])
+        self.fetch = reverse("activities:book_fetch_photos", args=[self.book.pk])
+
+    @mock.patch("activities.strava.requests.get", side_effect=strava_get)
+    def test_page_renders_without_calling_strava_then_fetches_in_batches(self, get):
+        page = self.client.get(self.page)
+        self.assertEqual(get.call_count, 0)  # la page s'affiche tout de suite
+        self.assertContains(page, "3 étapes à vérifier")
+        self.assertContains(page, self.fetch)
+        with mock.patch("activities.views.BOOK_PHOTO_BATCH", 2):
+            first = self.client.post(self.fetch).json()
+            self.assertEqual((first["imported"], first["remaining"], first["error"]), (4, 1, None))
+            second = self.client.post(self.fetch).json()
+            self.assertEqual((second["imported"], second["remaining"]), (2, 0))
+        page = self.client.get(self.page)
+        self.assertNotContains(page, "à vérifier")
+        self.assertContains(page, "https://img.example.com/3-1.jpg")
+
+    @mock.patch("activities.strava.requests.get")
+    def test_rate_limit_is_reported_to_the_page(self, get):
+        get.return_value = fake_response(status=429)
+        data = self.client.post(self.fetch).json()
+        self.assertEqual((data["imported"], data["remaining"]), (0, 3))
+        self.assertIn("Limite", data["error"])
+
+    def test_other_users_book_is_404(self):
+        from django.contrib.auth import get_user_model
+        other = get_user_model().objects.create(username="autre")
+        self.client.force_login(other)
+        self.assertEqual(self.client.post(self.fetch).status_code, 404)
