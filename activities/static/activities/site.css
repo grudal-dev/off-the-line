@@ -418,20 +418,35 @@ details.advanced form { margin-top: .75rem; }
   padding: .4rem .8rem; border-radius: 999px; background: var(--ink); color: #fff; font-size: var(--t-small); pointer-events: none;
 }
 
-/* Villes sur les cartes (cities.js) : un point et le nom, détouré pour rester lisible sur tout fond */
-.city { position: absolute; display: flex; align-items: center; gap: 5px; transform: translate(-4px, -50%); white-space: nowrap; pointer-events: none; }
-.city.left { flex-direction: row-reverse; transform: translate(calc(-100% + 4px), -50%); }
-.city i { width: 7px; height: 7px; border-radius: 50%; background: #fff; border: 1.5px solid var(--ink, #1c2629); flex: none; }
-.city b {
-  font: 600 11px/1 var(--sans, system-ui, sans-serif); letter-spacing: .02em; color: #1c2629;
-  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px rgba(255,255,255,.9);
+/* Pays et villes sur les cartes (cities.js).
+   Détourage plein (8 ombres sans flou + un halo doux) : lisible sur les fonds chargés (Topo, satellite). */
+.city, .country { position: absolute; white-space: nowrap; pointer-events: none; }
+.city { display: flex; align-items: center; gap: 5px; transform: translate(-4.5px, -50%); }
+.city.left { flex-direction: row-reverse; transform: translate(calc(-100% + 4.5px), -50%); }
+.city i { width: 8px; height: 8px; border-radius: 50%; background: #fff; border: 2px solid #1c2629; flex: none; box-shadow: 0 0 0 1.5px #fff; }
+.city b, .country {
+  --halo: #fff;
+  text-shadow:
+    -1.5px -1.5px 0 var(--halo), 1.5px -1.5px 0 var(--halo), -1.5px 1.5px 0 var(--halo), 1.5px 1.5px 0 var(--halo),
+    0 -1.6px 0 var(--halo), 0 1.6px 0 var(--halo), -1.6px 0 0 var(--halo), 1.6px 0 0 var(--halo),
+    0 0 6px var(--halo);
 }
-.city.big b { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.city.big i { width: 8px; height: 8px; }
-.leaflet-container[data-theme="dark"] .city b, .leaflet-container[data-theme="photo"] .city b, .book-map .city b {
-  color: #fff; text-shadow: 0 0 2px #000, 0 0 3px rgba(0,0,0,.85), 0 1px 4px rgba(0,0,0,.7);
+.city b { font: 600 12.5px/1 var(--sans, system-ui, sans-serif); color: #1c2629; }
+.city.big b { font-size: 13.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.city.big i { width: 9px; height: 9px; }
+.country {
+  transform: translate(-50%, -50%);
+  font: 600 13px/1 var(--sans, system-ui, sans-serif); text-transform: uppercase; letter-spacing: .28em;
+  color: #6b5a3e;
 }
-.leaflet-container[data-theme="dark"] .city i, .leaflet-container[data-theme="photo"] .city i, .book-map .city i { border-color: #fff; background: #1c2629; }
+/* Fonds sombres et satellite : texte clair, détourage sombre */
+.leaflet-container[data-theme="dark"] :is(.city b, .country),
+.leaflet-container[data-theme="photo"] :is(.city b, .country),
+.book-map :is(.city b, .country) { --halo: rgba(12, 18, 20, .92); color: #fff; }
+.leaflet-container[data-theme="dark"] .country, .leaflet-container[data-theme="photo"] .country, .book-map .country { color: #f3e6c8; }
+.leaflet-container[data-theme="dark"] .city i, .leaflet-container[data-theme="photo"] .city i, .book-map .city i {
+  border-color: #fff; background: #1c2629; box-shadow: 0 0 0 1.5px rgba(12, 18, 20, .9);
+}
 
 /* Indicateur du chargement en arrière-plan (background.js) */
 .bg-status {

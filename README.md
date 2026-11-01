@@ -93,10 +93,10 @@ Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
 
 Les autres fonds du sélecteur (Topo OpenTopoMap, Plan IGN, Satellite Esri, relief Esri) ne demandent pas de clé.
 
-## Villes sur les cartes
+## Pays et villes sur les cartes
 
-Les cartes affichent quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
-option « Villes sur les cartes » dans la mise en page du livre). Données : Natural Earth, *populated places*
+Les cartes affichent le nom des pays (en vue large, sans les micro-États) et quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
+option « Villes sur les cartes » dans la mise en page du livre). Données : Natural Earth, *populated places* et *admin 0 countries*
 (domaine public), réduites à `activities/static/activities/cities.json` par `scripts/build_cities.py`, avec
 les noms en français. `activities/static/activities/cities.js` n'affiche que les villes adaptées au zoom
 (zoom minimum conseillé par Natural Earth), des plus importantes aux moins importantes, sans chevauchement,
