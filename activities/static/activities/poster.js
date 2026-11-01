@@ -948,6 +948,40 @@
     const inside = b => b.x0 >= X(m.x) + edge && b.x1 <= X(m.x + m.w) - edge && b.y0 >= X(m.y) + edge && b.y1 <= X(m.y + m.h) - edge;
     const placed = [];
     const free = b => !placed.some(p => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
+    // Segments du tracé à l'écran : le halo d'un nom posé dessus effacerait le trait
+    let segs = null;
+    function traceSegs() {
+      if (segs) return segs;
+      segs = [];
+      const lines = [...((sel && sel.routes) || []).map(r => r.pts), ...hl.flatMap(h => h.stages.map(st => st.pts))];
+      for (const pts of lines) {
+        if (!pts || pts.length < 4) continue;
+        const step = 2 * Math.max(1, Math.floor(pts.length / 2 / 400));
+        let prev = project(pts[0], pts[1]);
+        for (let i = step; i < pts.length; i += step) {
+          const cur = project(pts[i], pts[i + 1]);
+          segs.push([prev[0], prev[1], cur[0], cur[1]]);
+          prev = cur;
+        }
+        const n = pts.length - 2, last = project(pts[n], pts[n + 1]);
+        segs.push([prev[0], prev[1], last[0], last[1]]);
+      }
+      return segs;
+    }
+    // Un segment touche-t-il la boîte ? (Liang-Barsky)
+    function hits(b, [x1, y1, x2, y2]) {
+      if (Math.max(x1, x2) < b.x0 || Math.min(x1, x2) > b.x1 || Math.max(y1, y2) < b.y0 || Math.min(y1, y2) > b.y1) return false;
+      let t0 = 0, t1 = 1;
+      const dx = x2 - x1, dy = y2 - y1;
+      for (const [p, q] of [[-dx, x1 - b.x0], [dx, b.x1 - x1], [-dy, y1 - b.y0], [dy, b.y1 - y1]]) {
+        if (p === 0) { if (q < 0) return false; continue; }
+        const t = q / p;
+        if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+        else { if (t < t0) return false; if (t < t1) t1 = t; }
+      }
+      return true;
+    }
+    const onTrace = b => traceSegs().some(sg => hits(b, sg));
 
     function label(str, px, py, o) {
       ctx.font = fontString(o.weight, o.size, o.family);
@@ -957,15 +991,21 @@
       const r = o.dot ? o.size * 0.2 : 0;
       const gap = o.dot ? o.size * (o.hideDot ? 0.9 : 0.45) : 0;
       const sides = o.dot ? [1, -1] : [0];
-      for (const side of sides) {
+      // 1er passage : à l'écart du tracé ; sinon (villes-étapes, collées au tracé) posé dessus mais sans halo
+      const passes = o.keep ? [true, false] : [true];
+      for (const clear of passes) for (const side of sides) {
         const x0 = side > 0 ? px + gap : side < 0 ? px - gap - w : px - w / 2;
         const b = { x0: Math.min(x0, px - r) - o.size * 0.2, x1: Math.max(x0 + w, px + r) + o.size * 0.2, y0: py - o.size * 0.62, y1: py + o.size * 0.62 };
+        // Boîte du texte seul (sans le point, posé sur le tracé pour les étapes)
+        const tb = { x0: x0 - o.size * 0.15, x1: x0 + w + o.size * 0.15, y0: py - o.size * 0.55, y1: py + o.size * 0.55 };
         if (!inside(b) || !free(b) || (o.avoid && o.avoid(b))) continue;
+        const over = !o.noHalo && state.labelHalo && onTrace(tb);
+        if (clear && over) continue;
         placed.push(b);
         ctx.textAlign = "left"; ctx.textBaseline = "middle";
         // Texte calé sur le pixel et halo fin : des noms nets plutôt qu'entourés d'un flou épais
         const tx = Math.round(x0), ty = Math.round(py + o.size * 0.04);
-        if (state.labelHalo && !o.noHalo) {
+        if (state.labelHalo && !o.noHalo && !over) {
           ctx.lineJoin = "round"; ctx.miterLimit = 2; ctx.strokeStyle = state.bg; ctx.lineWidth = Math.max(1, o.size * 0.22);
           ctx.strokeText(txt, tx, ty);
         }
@@ -975,7 +1015,7 @@
         ctx.globalAlpha = 1;
         if (o.dot && !o.hideDot) {  // hideDot : le marqueur de départ/arrivée est déjà dessiné
           ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI);
-          if (state.labelHalo) { ctx.lineWidth = r * 0.9; ctx.stroke(); }
+          if (state.labelHalo && !over) { ctx.lineWidth = r * 0.9; ctx.stroke(); }
           ctx.fill();
         }
         return true;
@@ -1006,7 +1046,7 @@
     if (state.hlLabels) {
       for (const h of hl) {
         const p = h.stages[0].pts, [x, y] = project(p[0], p[1]);
-        label(h.trip.title, x, y, { size: size * 1.1, weight: 700, family: COND, color: state.hlColor, dot: true, upper: false });
+        label(h.trip.title, x, y, { size: size * 1.1, weight: 700, family: COND, color: state.hlColor, dot: true, upper: false, keep: true });
       }
     }
     const stops = state.cities && state.cityMode === "stops" && sel && sel.trip ? sel.trip.stops || [] : [];
@@ -1021,6 +1061,7 @@
         if (label(name, x, y, {
           size: ends ? size * 1.15 : size * 0.95, weight: ends && state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
           color: state.cityColor, dot: state.cityDots || (ends && state.endpoints), hideDot: ends && state.endpoints, upper: state.cityUpper,
+          keep: true,
         }) && !ends) count++;
       }
     }
