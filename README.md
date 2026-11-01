@@ -80,6 +80,24 @@ python manage.py sync_photos --all               # aussi les activités annoncé
 La commande enchaîne les lots et, quand Strava répond « quota atteint », attend la fenêtre de
 15 minutes suivante avant de reprendre. Elle peut être interrompue (Ctrl+C) et relancée sans rien perdre.
 
+## Organisation : Explorer et Mes créations
+
+Deux espaces seulement, et un seul bouton pour créer.
+
+- **Explorer** (`/carte/`, page d'accueil une fois connecté) : la carte de toutes les sorties, avec trois onglets
+  sous les totaux : **Voyages** (les périples détectés, mis en évidence sur la carte), **Sorties** et **Années**
+  (un clic filtre la carte). « Affichage » (densité ou couleurs par sport, sports affichés) et « Tracer une zone »
+  sont discrets.
+- **Créer** : sur un voyage, une sortie, une année ou une zone tracée, une seule question, Affiche ou Livre
+  (`/creer/`, vue `create`). Un livre compte au plus 150 sorties.
+- **Mes créations** (`/creations/`) : affiches et livres, les plus récents d'abord. Une affiche créée ainsi est
+  enregistrée en base (`Poster` : réglages, titre, miniature JPEG) et s'enregistre automatiquement à chaque
+  changement (`/affiche/<id>/enregistrer/`). L'éditeur n'affiche que Format, Style et Titre ; le reste est dans
+  « Plus de réglages ».
+- Menu du profil (avatar) : importer des fichiers, synchroniser Strava, toutes les activités, se déconnecter.
+- Les anciennes pages restent accessibles (`/activites/`, `/periples/`, `/affiche/` sans enregistrement) ;
+  `/livre/` renvoie vers Mes créations.
+
 ## Import de fichiers (sans Strava)
 
 « Importer mes fichiers » (accueil, ou « Importer des fichiers » dans Activités) accepte les fichiers **GPX, FIT

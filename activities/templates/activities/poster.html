@@ -7,12 +7,19 @@
   <div class="atlas poster-studio">
     <aside class="atlas-panel poster-panel">
       <div class="atlas-head">
-        <h1>Affiche</h1>
-        <p class="muted small-print">Compose ton affiche puis télécharge-la en image haute résolution, prête à imprimer.</p>
+        {% if creation %}
+          <a class="back" href="{% url 'activities:creations' %}">Mes créations</a>
+          <h1>{{ creation.title|default:"Affiche" }}</h1>
+          <p class="muted small-print" id="save-status" aria-live="polite">Enregistrée automatiquement.</p>
+        {% else %}
+          <h1>Affiche</h1>
+          <p class="muted small-print">Compose ton affiche puis télécharge-la en image haute résolution, prête à imprimer.</p>
+        {% endif %}
+        <p class="poster-summary" id="poster-summary" aria-live="polite"></p>
       </div>
-      <form class="poster-form" id="poster-form" autocomplete="off" onsubmit="return false">
+      <form class="poster-form" id="poster-form" autocomplete="off" onsubmit="return false">{% csrf_token %}
 
-        <fieldset>
+        <fieldset {% if creation %}hidden{% endif %}>
           <legend>Source</legend>
           <div class="view-switch" role="group" aria-label="Source">
             <button type="button" data-source="all">Mes sorties</button>
@@ -54,7 +61,6 @@
             <label class="sr-only" for="activity-select">Activité</label>
             <select class="field" id="activity-select" name="activity"></select>
           </div>
-          <p class="poster-summary" id="poster-summary" aria-live="polite"></p>
         </fieldset>
 
         <fieldset>
@@ -82,14 +88,6 @@
           <p class="poster-hint" id="orient-hint" hidden>
             <span></span> <button type="button" class="link-button" id="orient-btn"></button>
           </p>
-          <label>Résolution
-            <select class="field" name="dpi">
-              <option value="150">150 ppp (rapide, tirage courant)</option>
-              <option value="200">200 ppp</option>
-              <option value="300">300 ppp (imprimeur)</option>
-            </select>
-          </label>
-          <p class="muted small-print" id="pixel-size"></p>
         </fieldset>
 
         <fieldset>
@@ -102,6 +100,19 @@
             <button type="button" class="preset" data-preset="forest" style="--bg:#e7ece3;--fg:#2f5d3a">Forêt</button>
             <button type="button" class="preset" data-preset="satellite" style="--bg:#26302a;--fg:#ffd166">Satellite</button>
           </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Titre</legend>
+            <label class="sr-only" for="poster-title">Titre</label>
+            <input id="poster-title" class="field" type="text" name="title" maxlength="80" placeholder="Proposé d'après ta sélection">
+        </fieldset>
+
+        <details class="more-settings">
+          <summary>Plus de réglages</summary>
+
+        <fieldset>
+          <legend>Fond de carte</legend>
           <label>Fond de carte
             <select class="field" name="base" id="base-select">
               <option value="">Uni (couleur du fond)</option>
@@ -117,6 +128,7 @@
             <label>Texte <input type="color" name="ink"></label>
           </div>
         </fieldset>
+
 
         <fieldset>
           <legend>Tracés</legend>
@@ -254,11 +266,10 @@
             </select>
           </label>
           <div data-for-text>
-            <label>Titre <input class="field" type="text" name="title" maxlength="80"></label>
             <label>Sous-titre <input class="field" type="text" name="subtitle" maxlength="120"></label>
             <label>Chiffres <input class="field" type="text" name="stats" maxlength="120"></label>
             <label class="check"><input type="checkbox" name="profile"> Profil d'altitude (sinon D+ de chaque étape)</label>
-            <p class="muted small-print">Laisse un champ vide pour le texte proposé ; un espace seul l'efface.</p>
+            <p class="muted small-print">Laisse un champ vide pour le texte proposé ; un espace seul l'efface (le titre se règle plus haut).</p>
           </div>
         </fieldset>
 
@@ -277,6 +288,18 @@
             <input type="range" name="rotation" min="-180" max="180" step="1">
           </label>
         </fieldset>
+        <fieldset>
+          <legend>Impression</legend>
+          <label>Résolution
+            <select class="field" name="dpi">
+              <option value="150">150 ppp (rapide, tirage courant)</option>
+              <option value="200">200 ppp</option>
+              <option value="300">300 ppp (imprimeur)</option>
+            </select>
+          </label>
+          <p class="muted small-print" id="pixel-size"></p>
+        </fieldset>
+        </details>
       </form>
       <div class="poster-export">
         <button type="button" class="btn big" id="export-btn">Télécharger l'image</button>
@@ -297,6 +320,7 @@
   {{ journeys|json_script:"journeys-data" }}
   {{ families|json_script:"families-data" }}
   {{ initial|json_script:"initial-data" }}
+  {{ creation|json_script:"creation-data" }}
   {{ basemap|json_script:"basemap-data" }}
   {{ athlete|json_script:"athlete-data" }}
   {% else %}

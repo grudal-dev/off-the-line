@@ -5,77 +5,97 @@
 {% block content %}
   {% if routes %}
   <div class="atlas">
-    <aside class="atlas-panel">
+    <aside class="atlas-panel explorer">
       <div class="atlas-head">
-        <h1>Tous mes parcours</h1>
+        <h1 class="sr-only">Explorer</h1>
         <div class="totals" aria-live="polite">
-          <p><strong id="total-count">{{ routes|length }}</strong>parcours</p>
+          <p><strong id="total-count">{{ routes|length }}</strong>sorties</p>
           <p><strong id="total-km">{{ total_km|floatformat:"0g" }}</strong>kilomètres</p>
+          {% if journeys %}<p><strong>{{ journeys|length }}</strong>voyage{{ journeys|pluralize }}</p>{% endif %}
         </div>
-        <div class="view-switch" role="group" aria-label="Affichage des tracés">
-          <button type="button" data-mode="density" aria-pressed="true">Densité</button>
-          <button type="button" data-mode="sports" aria-pressed="false">Couleurs par sport</button>
+        <div class="view-switch explorer-tabs" role="tablist" aria-label="Que montrer">
+          {% if journeys %}<button type="button" role="tab" data-tab="voyages">Voyages</button>{% endif %}
+          <button type="button" role="tab" data-tab="sorties">Sorties</button>
+          <button type="button" role="tab" data-tab="annees">Années</button>
         </div>
-        <div class="density-legend" id="density-legend" aria-hidden="true">
-          <span>1 passage</span><span class="ramp" id="density-ramp"></span><span>souvent</span>
-        </div>
-        {% if families|length > 1 %}
-          <ul class="chips" aria-label="Sports affichés">
-            {% for f in families %}
-              <li><button type="button" class="chip" data-family="{{ f.key }}" aria-pressed="true">
-                <span class="dot" style="--c: {{ f.color }}"></span>{{ f.label }} <span class="muted">{{ f.count }}</span>
-              </button></li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-        {% if journeys %}
-          <div class="journey-toggle">
-            <button type="button" class="chip" id="journey-toggle" aria-pressed="false">
-              <span class="dot" style="--c: #6a1b9a"></span>Périples en évidence <span class="muted">{{ journeys|length }}</span>
-            </button>
-            <a href="{% url 'activities:journeys' %}">Voir les périples</a>
-          </div>
-        {% endif %}
-        <div class="zone-tool">
-          <button type="button" class="btn ghost" id="zone-btn" aria-pressed="false" aria-controls="zone-panel">Sélectionner une zone</button>
-          <div class="zone-panel" id="zone-panel" hidden aria-live="polite">
-            <h2>Zone sélectionnée</h2>
-            <p class="muted" id="zone-summary"></p>
-            <form method="post" action="{% url 'activities:book' %}" id="zone-form">{% csrf_token %}
-              <div class="zone-actions zone-check">
-                <button class="link-button" type="button" data-zone-check="1">Tout cocher</button>
-                <button class="link-button" type="button" data-zone-check="0">Tout décocher</button>
+        <div class="explorer-tools">
+          <button type="button" class="link-button" id="zone-btn" aria-pressed="false" aria-controls="zone-panel">Tracer une zone</button>
+          <details class="display-menu">
+            <summary>Affichage</summary>
+            <div class="display-menu-panel">
+              <div class="view-switch" role="group" aria-label="Affichage des tracés">
+                <button type="button" data-mode="density" aria-pressed="true">Densité</button>
+                <button type="button" data-mode="sports" aria-pressed="false">Couleurs par sport</button>
               </div>
-              <ul id="zone-activities"></ul>
-              <label>Titre
-                <input class="field" type="text" name="title" maxlength="120" placeholder="Facultatif : proposé d'après les lieux et les dates">
-              </label>
-              <div class="zone-actions">
-                <button class="btn" type="submit" formaction="{% url 'activities:poster' %}" data-zone-action="poster">Créer une affiche</button>
-                <button class="btn ghost" type="submit" formaction="{% url 'activities:book' %}" data-zone-action="book">Créer un livre</button>
-                <button class="link-button" type="button" id="zone-clear">Effacer la zone</button>
+              <div class="density-legend" id="density-legend" aria-hidden="true">
+                <span>1 passage</span><span class="ramp" id="density-ramp"></span><span>souvent</span>
               </div>
-            </form>
-            <div class="zone-actions" id="zone-empty" hidden>
-              <button class="link-button" type="button" id="zone-clear-empty">Effacer la zone</button>
+              {% if families|length > 1 %}
+                <ul class="chips" aria-label="Sports affichés">
+                  {% for f in families %}
+                    <li><button type="button" class="chip" data-family="{{ f.key }}" aria-pressed="true">
+                      <span class="dot" style="--c: {{ f.color }}"></span>{{ f.label }} <span class="muted">{{ f.count }}</span>
+                    </button></li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
             </div>
+          </details>
+        </div>
+        <div class="zone-panel" id="zone-panel" hidden aria-live="polite">
+          <h2>Zone tracée</h2>
+          <p class="muted" id="zone-summary"></p>
+          <form id="zone-form">
+            <div class="zone-actions zone-check">
+              <button class="link-button" type="button" data-zone-check="1">Tout cocher</button>
+              <button class="link-button" type="button" data-zone-check="0">Tout décocher</button>
+            </div>
+            <ul id="zone-activities"></ul>
+            <div class="zone-actions">
+              <button class="btn" type="button" id="zone-create" data-zone-action="create">Créer</button>
+              <button class="link-button" type="button" id="zone-clear">Effacer la zone</button>
+            </div>
+          </form>
+          <div class="zone-actions" id="zone-empty" hidden>
+            <button class="link-button" type="button" id="zone-clear-empty">Effacer la zone</button>
           </div>
         </div>
       </div>
-      <ul class="route-list" id="route-list">
+
+      {% if journeys %}
+      <ul class="explorer-list" id="trip-list" data-list="voyages">
+        {% for t in journeys %}
+          <li class="explorer-row" data-trip="{{ t.id }}">
+            <button type="button" class="explorer-main" data-focus-trip="{{ t.id }}">
+              <strong>{{ t.title }}</strong>
+              <span class="muted">{{ t.dates }} · {{ t.days }} jours · {{ t.km }} km</span>
+            </button>
+            <button type="button" class="btn small ghost" data-create='{"journey": {{ t.id }}, "name": "{{ t.title|escapejs }}"}'>Créer</button>
+          </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      <ul class="route-list" id="route-list" data-list="sorties">
         {% for r in routes %}
-          <li data-family="{{ r.family }}">
+          <li data-family="{{ r.family }}" data-year="{{ r.day|slice:":4" }}">
             <a class="route-item" href="{% url 'activities:detail' r.id %}" data-route="{{ r.id }}">
               <svg class="thumb" viewBox="0 0 100 100" style="--c: {{ r.color }}" aria-hidden="true"><path data-thumb="{{ r.id }}"/></svg>
-              <span><strong>{{ r.name }}</strong><span>{{ r.sport }}, {{ r.date }}</span></span>
-              {% if r.photos %}
-                <span class="photo-stack small">
-                  {% for url in r.photos|slice:":2" %}<img src="{{ url }}" alt="" loading="lazy">{% endfor %}
-                  {% if r.photos|length > 2 %}<span class="more">+{{ r.photos|length|add:"-2" }}</span>{% endif %}
-                </span>
-              {% else %}<span></span>{% endif %}
-              <span class="km">{{ r.km|floatformat:1 }} km</span>
+              <span><strong>{{ r.name }}</strong><span>{{ r.sport }}, {{ r.date }}, {{ r.km|floatformat:1 }} km</span></span>
             </a>
+            <button type="button" class="btn small ghost" data-create='{"activity": {{ r.id }}, "name": "{{ r.name|escapejs }}"}'>Créer</button>
+          </li>
+        {% endfor %}
+      </ul>
+
+      <ul class="explorer-list" id="year-list" data-list="annees">
+        {% for y in years %}
+          <li class="explorer-row" data-year-row="{{ y.year }}">
+            <button type="button" class="explorer-main" data-focus-year="{{ y.year }}">
+              <strong>{{ y.year }}</strong>
+              <span class="muted">{{ y.count }} sortie{{ y.count|pluralize }} · {{ y.km|floatformat:"0g" }} km</span>
+            </button>
+            <button type="button" class="btn small ghost" data-create='{"year": "{{ y.year }}", "name": "Mes sorties {{ y.year }}", "count": {{ y.count }}}'>Créer</button>
           </li>
         {% endfor %}
       </ul>
@@ -84,6 +104,24 @@
       <div id="map" role="img" aria-label="Carte de tous les parcours"></div>
     </div>
   </div>
+  <dialog class="create-dialog" id="create-dialog" aria-labelledby="create-title">
+    <form method="post" action="{% url 'activities:create' %}" id="create-form">{% csrf_token %}
+      <p class="muted create-kicker">Créer à partir de</p>
+      <h2 id="create-title"></h2>
+      <div id="create-fields"></div>
+      <div class="create-choices">
+        <button type="submit" name="kind" value="affiche" class="create-choice">
+          <span class="create-icon poster-icon" aria-hidden="true"></span>
+          <strong>Affiche</strong><span class="muted">Une image à encadrer</span>
+        </button>
+        <button type="submit" name="kind" value="livre" class="create-choice" id="create-book">
+          <span class="create-icon book-icon" aria-hidden="true"></span>
+          <strong>Livre</strong><span class="muted" id="create-book-note">Le récit, étape par étape</span>
+        </button>
+      </div>
+      <button type="button" class="link-button create-cancel" id="create-cancel">Annuler</button>
+    </form>
+  </dialog>
   {{ routes_data|json_script:"routes-data" }}
   {{ journeys|json_script:"journeys-data" }}
   {% else %}
@@ -99,6 +137,7 @@
 <script>
 (() => {
   const routes = JSON.parse(document.getElementById("routes-data").textContent);
+  const MAX_BOOK = 150;  // un livre compte au plus 150 sorties (une page par étape)
   // Tracés encodés (format Strava) : décodés ici plutôt que côté serveur, page bien plus légère
   function decode(str) {
     const out = [];
@@ -260,12 +299,63 @@
       }).addTo(tripLayer);
     }
   }
-  const tripToggle = document.getElementById("journey-toggle");
-  if (tripToggle) tripToggle.addEventListener("click", () => {
-    const on = tripToggle.getAttribute("aria-pressed") !== "true";
-    tripToggle.setAttribute("aria-pressed", on);
-    on ? tripLayer.addTo(map) : tripLayer.remove();
-  });
+  const tripBounds = new Map(trips.map(t => {
+    const lines = t.stages.map(id => byId.get(id)).filter(Boolean);
+    return [t.id, lines.length ? L.featureGroup(lines.map(l => L.polyline(l.route.coords))).getBounds() : null];
+  }));
+
+  // Onglets : Voyages (les périples ressortent sur la carte), Sorties, Années
+  const tabs = [...document.querySelectorAll(".explorer-tabs [data-tab]")];
+  let year = null;
+  function showTab(name) {
+    tabs.forEach(t => t.setAttribute("aria-selected", t.dataset.tab === name));
+    document.querySelectorAll("[data-list]").forEach(l => { l.hidden = l.dataset.list !== name; });
+    name === "voyages" ? tripLayer.addTo(map) : tripLayer.remove();
+    if (name !== "annees" && year) setYear(null);
+    try { localStorage.setItem("otl-explorer-tab", name); } catch (e) {}
+  }
+  tabs.forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+  let firstTab = tabs[0].dataset.tab;
+  try { const saved = localStorage.getItem("otl-explorer-tab"); if (tabs.some(t => t.dataset.tab === saved)) firstTab = saved; } catch (e) {}
+
+  document.querySelectorAll("[data-focus-trip]").forEach(b => b.addEventListener("click", () => {
+    const bounds = tripBounds.get(Number(b.dataset.focusTrip));
+    document.querySelectorAll("#trip-list .explorer-row").forEach(r => r.classList.toggle("is-active", r === b.parentElement));
+    if (bounds) map.flyToBounds(bounds, { padding: [40, 40], duration: 0.7 });
+  }));
+
+  // Une année : seules ses sorties restent sur la carte (un second clic les remet toutes)
+  function setYear(y) {
+    year = year === y ? null : y;
+    document.querySelectorAll("#year-list .explorer-row").forEach(r => r.classList.toggle("is-active", r.dataset.yearRow === year));
+    refreshLines(true);
+  }
+  document.querySelectorAll("[data-focus-year]").forEach(b => b.addEventListener("click", () => setYear(b.dataset.focusYear)));
+
+  // Le bouton « Créer » : une seule question, affiche ou livre
+  const dialog = document.getElementById("create-dialog");
+  const fields = document.getElementById("create-fields");
+  const bookBtn = document.getElementById("create-book"), bookNote = document.getElementById("create-book-note");
+  function openCreate(spec) {
+    document.getElementById("create-title").textContent = spec.name;
+    fields.innerHTML = "";
+    const add = (name, value) => { const i = document.createElement("input"); i.type = "hidden"; i.name = name; i.value = value; fields.appendChild(i); };
+    if (spec.journey !== undefined) add("journey", spec.journey);
+    if (spec.activity !== undefined) add("activity", spec.activity);
+    if (spec.year !== undefined) add("year", spec.year);
+    (spec.ids || []).forEach(id => add("a", id));
+    const n = spec.count || (spec.ids ? spec.ids.length : 0);
+    const tooMany = !spec.journey && n > MAX_BOOK;
+    bookBtn.disabled = tooMany;
+    bookNote.textContent = tooMany ? `${MAX_BOOK} sorties au plus (ici ${n})` : "Le récit, étape par étape";
+    dialog.showModal();
+  }
+  document.querySelectorAll("[data-create]").forEach(b => b.addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();
+    openCreate(JSON.parse(b.dataset.create));
+  }));
+  document.getElementById("create-cancel").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });
 
   document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
     mode = b.dataset.mode;
@@ -307,25 +397,29 @@
     map.flyToBounds(byId.get(id).getBounds(), { padding: [40, 40], duration: 0.6 });
   });
 
-  // Filtre par famille de sport
+  // Filtres : familles de sport (menu Affichage) et année (onglet Années)
   const hidden = new Set();
+  function refreshLines(fly) {
+    let count = 0, km = 0;
+    for (const [id, line] of byId) {
+      const show = !hidden.has(line.route.family) && (!year || line.route.day.startsWith(year));
+      if (show) { count++; km += line.route.km; group.addLayer(line); } else group.removeLayer(line);
+    }
+    list.querySelectorAll("li[data-family]").forEach(li => { li.hidden = hidden.has(li.dataset.family) || (!!year && li.dataset.year !== year); });
+    document.getElementById("total-count").textContent = count;
+    document.getElementById("total-km").textContent = Math.round(km).toLocaleString("fr-FR");
+    if (renderer._map && renderer._ctx) renderer._redraw();
+    if (fly && count) map.flyToBounds(group.getBounds(), { padding: [30, 30], duration: 0.6 });
+  }
   document.querySelectorAll("[data-family].chip").forEach(chip => chip.addEventListener("click", () => {
     const fam = chip.dataset.family;
     hidden.has(fam) ? hidden.delete(fam) : hidden.add(fam);
     chip.setAttribute("aria-pressed", !hidden.has(fam));
-    let count = 0, km = 0;
-    for (const [id, line] of byId) {
-      const show = !hidden.has(line.route.family);
-      if (show) { count++; km += line.route.km; group.addLayer(line); } else group.removeLayer(line);
-    }
-    list.querySelectorAll("li[data-family]").forEach(li => { li.hidden = hidden.has(li.dataset.family); });
-    document.getElementById("total-count").textContent = count;
-    document.getElementById("total-km").textContent = Math.round(km).toLocaleString("fr-FR");
-    if (renderer._map && renderer._ctx) renderer._redraw();
-    if (count) map.flyToBounds(group.getBounds(), { padding: [30, 30], duration: 0.6 });
+    refreshLines(true);
   }));
 
   map.fitBounds(group.getBounds(), { padding: [30, 30] });
+  showTab(firstTab);
 
   // Sélection d'une zone : on trace un rectangle, les activités qui y passent (sports affichés)
   // sont listées, toutes cochées, pour en faire une affiche ou un livre (formulaire envoyé à l'une
@@ -392,7 +486,6 @@
   }, true);
 
   function inZone(coords, bounds) { return coords.some(c => bounds.contains(c)); }
-  const MAX_BOOK = 150;
   function zoneSummary() {
     const boxes = [...zoneList.querySelectorAll("input")], on = boxes.filter(b => b.checked);
     const km = on.reduce((t, b) => t + byId.get(+b.value).route.km, 0);
@@ -400,8 +493,7 @@
       ? `${on.length} activité${on.length > 1 ? "s" : ""} sur ${boxes.length} cochée${on.length > 1 ? "s" : ""}, ${Math.round(km).toLocaleString("fr-FR")} km.`
         + (on.length > MAX_BOOK ? ` Un livre en compte au plus ${MAX_BOOK}.` : "")
       : "Aucune activité dans cette zone (avec les sports affichés).";
-    zoneForm.querySelectorAll("[data-zone-action]").forEach(b => { b.disabled = !on.length; });
-    zoneForm.querySelector('[data-zone-action="book"]').disabled = !on.length || on.length > MAX_BOOK;
+    document.getElementById("zone-create").disabled = !on.length;
   }
   function showZone(bounds) {
     const inside = [...byId.values()]
@@ -418,6 +510,11 @@
     zonePanel.hidden = false;
   }
   zoneList.addEventListener("change", zoneSummary);
+  document.getElementById("zone-create").addEventListener("click", () => {
+    const ids = [...zoneList.querySelectorAll("input:checked")].map(i => Number(i.value));
+    if (ids.length === 1) openCreate({ activity: ids[0], name: byId.get(ids[0]).route.name });
+    else openCreate({ ids, name: `${ids.length} sorties dans la zone` });
+  });
   zoneForm.querySelectorAll("[data-zone-check]").forEach(b => b.addEventListener("click", () => {
     zoneList.querySelectorAll("input").forEach(i => { i.checked = b.dataset.zoneCheck === "1"; });
     zoneSummary();

@@ -11,7 +11,7 @@
 </head>
 <body class="book{% if edit %} editing{% endif %}">
   <div class="book-toolbar" role="toolbar" aria-label="Livre">
-    <a href="{% url 'activities:book' %}">Mes livres</a>
+    <a href="{% url 'activities:creations' %}">Mes créations</a>
     {% if edit %}
       <a class="btn" href="?">Terminer</a>
       <span class="edit-hint">Clique sur un texte pour le modifier. Enregistrement automatique.</span>

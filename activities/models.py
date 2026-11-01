@@ -225,3 +225,20 @@ class BookPhoto(models.Model):
     @property
     def key(self):
         return f"u:{self.pk}"
+
+
+class Poster(models.Model):
+    """Affiche enregistrée (« Mes créations ») : ses réglages, son titre et une miniature."""
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="posters")
+    title = models.CharField(max_length=200, blank=True)
+    settings = models.JSONField(default=dict, blank=True)
+    thumbnail = models.TextField(blank=True, help_text="image JPEG en data URL, quelques dizaines de Ko")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.title or f"Affiche {self.pk}"
