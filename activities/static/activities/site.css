@@ -444,3 +444,50 @@ details.advanced form { margin-top: .75rem; }
 .bg-spinner { width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; animation: bg-spin .8s linear infinite; flex: none; }
 @keyframes bg-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .bg-spinner { animation: none; } }
+
+/* Affiche ------------------------------------------------------------ */
+.poster-panel { overflow: hidden; }
+.poster-panel .atlas-head { padding-bottom: .5rem; }
+.poster-panel .atlas-head .small-print { margin: 0; }
+.poster-form { flex: 1; overflow-y: auto; padding: 0 1.25rem; font-size: var(--t-small); }
+.poster-form fieldset { border: 0; border-bottom: 1px solid var(--contour-soft); margin: 0; padding: .9rem 0; display: grid; gap: .6rem; }
+.poster-form legend { float: left; width: 100%; padding: 0; margin-bottom: .1rem; font-family: var(--cond); font-weight: 700; font-size: 1.2rem; }
+.poster-form label { display: grid; gap: .25rem; font-weight: 500; }
+.poster-form label.check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
+.poster-form .field { width: 100%; padding: .4rem .5rem; }
+.poster-form output { font-weight: 400; color: var(--slate); }
+.poster-form .view-switch { margin: 0; justify-self: start; }
+.poster-form .view-switch button:disabled { opacity: .45; cursor: not-allowed; }
+.poster-form [hidden] { display: none !important; }
+.poster-row { display: flex; gap: .6rem; align-items: end; flex-wrap: wrap; }
+.poster-row > label { flex: 1; min-width: 7rem; }
+.poster-row .btn { padding: .45rem .8rem; font-size: var(--t-small); }
+.poster-row .btn.square { width: 2.3rem; padding-inline: 0; font-size: 1.1rem; line-height: 1; }
+.colors label, label.colors { display: flex !important; align-items: center; justify-content: space-between; gap: .5rem; }
+.poster-form input[type=color] { width: 2.6rem; height: 1.9rem; padding: 2px; border: 1px solid var(--contour); border-radius: 6px; background: #fff; cursor: pointer; }
+.poster-form input[type=range] { width: 100%; accent-color: var(--route); }
+.poster-summary { margin: 0; color: var(--slate); }
+.year-picks { display: flex; flex-wrap: wrap; gap: .3rem; }
+.year-picks button { font: inherit; font-size: .8rem; padding: .15rem .55rem; border-radius: 999px; border: 1px solid var(--contour-soft); background: var(--paper); color: var(--slate); cursor: pointer; }
+.year-picks button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
+.preset {
+  font: inherit; font-size: .8rem; font-weight: 600; padding: .5rem .3rem; border-radius: 6px; cursor: pointer;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--contour-soft);
+}
+.preset:hover { outline: 2px solid var(--contour); }
+.poster-export { padding: .9rem 1.25rem 1rem; border-top: 1px solid var(--contour-soft); display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
+.poster-export .btn { flex: 1; }
+.poster-export .small-print { margin: 0; flex-basis: 100%; }
+.poster-stage {
+  position: relative; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: 2rem;
+  background: radial-gradient(circle at 50% 40%, #e9ece6, #cfd4cc);
+}
+#poster-canvas { box-shadow: 0 1px 2px rgba(0,0,0,.15), 0 12px 40px rgba(28,38,41,.28); cursor: grab; touch-action: none; }
+#poster-canvas.is-dragging { cursor: grabbing; }
+@media (max-width: 800px) {
+  .poster-studio { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
+  .poster-stage { order: -1; padding: 1rem; }
+  .poster-panel { overflow: visible; }
+  .poster-form { overflow: visible; }
+}

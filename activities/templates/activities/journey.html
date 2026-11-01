@@ -17,6 +17,7 @@
       <div class="journey-actions">
         <button type="button" class="btn ghost" id="replay">Rejouer le parcours</button>
         <a class="btn ghost" href="{% url 'activities:book' %}?j={{ journey.id }}">Créer un livre</a>
+        <a class="btn ghost" href="{% url 'activities:poster' %}?periple={{ journey.id }}">Créer une affiche</a>
       </div>
       <details class="journey-edit">
         <summary>Renommer et raconter</summary>

@@ -167,6 +167,26 @@ Les photos ajoutées sont stockées dans `media/` (`DJANGO_MEDIA_ROOT`). Django 
 mode DEBUG : en production, il faut les servir par le serveur web ou un stockage externe. Descriptions et profils d'altitude sont récupérés sur Strava à la première génération
 (deux requêtes par étape) puis mis en cache.
 
+## Affiche
+
+L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à partir de toutes les sorties
+(filtrées par sport et par dates, raccourcis par année), d'un périple ou d'une activité. On choisit :
+
+- le **format** (A4 à A1, 30 × 40, 40 × 50, 50 × 70, carré 30 × 30), le sens et la résolution (150, 200 ou 300 ppp) ;
+- le **style** : thèmes prêts à l'emploi, fond uni ou fond de carte (relief en option), couleurs du fond et du texte ;
+- les **tracés** : une couleur, par sport, dégradé dans le temps ou densité ; épaisseur (en mm), opacité, halo,
+  points de départ et d'arrivée ; les transferts d'un périple sont en pointillés ;
+- le **cadre** : filet fin, double filet, cadre épais ou passe-partout, avec sa marge et ses couleurs ;
+- les **textes** (en haut, en bas ou aucun) : titre, sous-titre et chiffres proposés, modifiables ;
+- le **cadrage** : glisser l'aperçu pour déplacer, molette ou pincement pour zoomer, rotation.
+
+L'aperçu et l'image finale sont dessinés par la même fonction (`static/activities/poster.js`), en millimètres :
+ce qu'on voit est ce qui sera imprimé. La résolution est inscrite dans le PNG (bloc `pHYs`) pour que
+l'imprimeur retrouve la bonne taille. Les réglages sont mémorisés dans le navigateur. Les fonds de carte
+sont chargés en CORS ; si un fournisseur refuse, l'image est quand même produite et un message l'indique.
+Les liens « Créer une affiche » des pages périple et activité ouvrent l'affiche sur cette source
+(`/affiche/?periple=<id>` ou `?activite=<id>`).
+
 ## Structure
 
 - `config/` : réglages du projet Django

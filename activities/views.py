@@ -302,6 +302,49 @@ def all_routes_map(request):
                    "journeys": trips})
 
 
+@login_required
+def poster(request):
+    """Affiche : image à imprimer (PNG haute résolution) composée dans le navigateur.
+
+    Le serveur fournit les tracés encodés et les périples ; le choix de la source, le format,
+    les couleurs, le cadre et le cadrage sont faits et dessinés par static/activities/poster.js.
+    """
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    qs = account.activities.exclude(summary_polyline="").only(
+        "account", "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
+        "total_elevation_gain", "summary_polyline"
+    ).order_by("start_date")
+    routes, counts = [], {}
+    for a in qs:
+        fam = sports.family(a.sport_type)
+        counts[fam] = counts.get(fam, 0) + 1
+        routes.append({
+            "id": a.strava_id, "name": a.name, "family": fam,
+            "day": (a.start_date_local or a.start_date).date().isoformat(),
+            "km": a.distance_km, "elev": round(a.total_elevation_gain), "poly": a.summary_polyline,
+        })
+    families = [{"key": key, "label": label, "color": color, "count": counts[key]}
+                for key, (label, color) in sports.FAMILIES.items() if key in counts]
+    trips = [
+        {"id": j.id, "title": j.name, "dates": _date_range(j),
+         "stages": [a.strava_id for a in j.activities], "transfers": j.transfers}
+        for j in sorted(journeys.for_account(account, include_hidden=False),
+                        key=lambda j: j.legs[0].start_at, reverse=True)
+    ]
+    initial = {}
+    for param, key, known in (("periple", "journey", {t["id"] for t in trips}),
+                              ("activite", "activity", {r["id"] for r in routes})):
+        value = request.GET.get(param, "")
+        if value.isdigit() and int(value) in known:
+            initial = {"source": key, "id": int(value)}
+    return render(request, "activities/poster.html", {
+        "routes": routes, "families": families, "journeys": trips, "initial": initial,
+        "athlete": account.firstname,
+    })
+
+
 def _date_range(journey):
     first, last = journey.first_day, journey.last_day
     if first.year != last.year:
