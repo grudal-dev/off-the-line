@@ -95,7 +95,7 @@ Les autres fonds du sélecteur (Topo OpenTopoMap, Plan IGN, Satellite Esri, reli
 
 ## Pays et villes sur les cartes
 
-Les cartes affichent le nom des pays (en vue large, sans les micro-États) et quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
+Les cartes affichent le nom des pays (en vue large à leur position habituelle, sans les micro-États ; en vue rapprochée, le ou les pays de la zone visible, d'après les villes à l'écran) et quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
 option « Villes sur les cartes » dans la mise en page du livre). Données : Natural Earth, *populated places* et *admin 0 countries*
 (domaine public), réduites à `activities/static/activities/cities.json` par `scripts/build_cities.py`, avec
 les noms en français. `activities/static/activities/cities.js` n'affiche que les villes adaptées au zoom

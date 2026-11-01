@@ -436,8 +436,8 @@ details.advanced form { margin-top: .75rem; }
 .city.big i { width: 9px; height: 9px; }
 .country {
   transform: translate(-50%, -50%);
-  font: 600 13px/1 var(--sans, system-ui, sans-serif); text-transform: uppercase; letter-spacing: .28em;
-  color: #6b5a3e;
+  font: 700 13.5px/1 var(--sans, system-ui, sans-serif); text-transform: uppercase; letter-spacing: .28em;
+  color: #57472c;
 }
 /* Fonds sombres et satellite : texte clair, détourage sombre */
 .leaflet-container[data-theme="dark"] :is(.city b, .country),
