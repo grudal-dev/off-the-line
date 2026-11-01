@@ -1,8 +1,9 @@
 /* Pays et grandes villes sur les cartes, façon carnet de voyage.
 
    Données : cities.json (Natural Earth, domaine public), généré par scripts/build_cities.py.
-   - Pays : nom en capitales espacées, sans point, à la position d'étiquette conseillée, seulement
-     dans la plage de zoom où Natural Earth l'affiche (on ne voit plus « FRANCE » en pleine rue).
+   - Pays : nom en capitales espacées, sans point. En vue large, à la position d'étiquette conseillée
+     par Natural Earth ; en vue rapprochée (où ce point est souvent hors de l'écran), le nom du ou des
+     pays de la zone visible est posé au milieu des villes de ce pays présentes à l'écran.
    - Villes : un point et le nom ; seulement celles adaptées au zoom, des plus importantes aux
      moins importantes.
    Une étiquette qui en chevaucherait une autre (ou une pastille du parcours) n'est pas posée :
@@ -59,10 +60,12 @@
         return [q.x - 15, q.y - 15, q.x + 15, q.y + 15];
       });
 
+      const shownCountries = new Set();
       if (withCountries) {
         let shown = 0;
-        for (const [name, lat, lng, minZoom, maxZoom] of places.countries) {
+        for (const [i, [name, lat, lng, minZoom, maxZoom, big]] of places.countries.entries()) {
           if (shown >= 12) break;
+          if (!big) continue;
           if (minZoom > zoom - 1) break;  // triés par zoom minimum ; un cran plus sobre que Natural Earth
           if (zoom > maxZoom || !bounds.contains([lat, lng])) continue;
           const p = map.latLngToContainerPoint([lat, lng]);
@@ -71,6 +74,7 @@
           if (box[0] < 0 || box[2] > size.x || overlaps(box, placed, 10, 6)) continue;
           placed.push(box);
           shown++;
+          shownCountries.add(i);
           add(lat, lng, `<span class="country">${escapeHtml(name)}</span>`);
         }
       }
@@ -90,6 +94,36 @@
         placed.push(box);
         count++;
         add(lat, lng, `<span class="city${big ? " big" : ""}${right ? "" : " left"}"><i></i><b>${escapeHtml(name)}</b></span>`);
+      }
+
+      // Vue rapprochée : nommer les pays de la zone visible (au plus 3), d'après les villes à l'écran
+      if (withCountries && zoom >= 6) {
+        const view = map.getBounds();
+        const groups = new Map();
+        for (const c of places.cities) {
+          const k = c[6];
+          if (k == null || k < 0 || shownCountries.has(k) || !view.contains([c[1], c[2]])) continue;
+          const g = groups.get(k) || { lat: 0, lng: 0, n: 0 };
+          g.lat += c[1]; g.lng += c[2]; g.n++;
+          groups.set(k, g);
+        }
+        const best = [...groups.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 3);
+        for (const [k, g] of best) {
+          const name = places.countries[k][0];
+          const c = map.latLngToContainerPoint([g.lat / g.n, g.lng / g.n]);
+          const w = name.length * 12.5 + 8, h = 18;
+          // Sous les villes de préférence, sinon au-dessus ; toujours dans la carte
+          for (const dy of [30, -30, 56, -56, 82]) {
+            const x = Math.min(Math.max(c.x, w / 2 + 8), size.x - w / 2 - 8);
+            const y = Math.min(Math.max(c.y + dy, h + 8), size.y - h - 8);
+            const box = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
+            if (overlaps(box, placed, 10, 6)) continue;
+            placed.push(box);
+            const ll = map.containerPointToLatLng([x, y]);
+            add(ll.lat, ll.lng, `<span class="country">${escapeHtml(name)}</span>`);
+            break;
+          }
+        }
       }
     }
 
