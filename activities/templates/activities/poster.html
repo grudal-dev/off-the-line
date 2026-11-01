@@ -1,5 +1,5 @@
 {% extends "activities/base.html" %}
-{% load assets %}
+{% load assets static %}
 {% block title %}Affiche · Off the line{% endblock %}
 {% block main_class %}full{% endblock %}
 {% block content %}
@@ -127,6 +127,72 @@
         </fieldset>
 
         <fieldset>
+          <legend>Repères</legend>
+          <label class="check"><input type="checkbox" name="countries"> Frontières des pays</label>
+          <label class="check"><input type="checkbox" name="regions"> Régions et départements</label>
+          <label class="check"><input type="checkbox" name="coast"> Côtes</label>
+          <div class="sub-options" data-for-borders>
+            <div class="poster-row">
+              <label data-dash="countries">Trait des pays
+                <select class="field" name="borderStyle">
+                  <option value="dash">Tirets</option>
+                  <option value="dot">Pointillés</option>
+                  <option value="solid">Continu</option>
+                </select>
+              </label>
+              <label data-dash="regions">Trait des régions
+                <select class="field" name="regionStyle">
+                  <option value="dash">Tirets</option>
+                  <option value="dot">Pointillés</option>
+                  <option value="solid">Continu</option>
+                </select>
+              </label>
+            </div>
+            <label>Épaisseur <output data-out="borderWidth"></output>
+              <input type="range" name="borderWidth" min="0.1" max="1.5" step="0.05">
+            </label>
+            <label>Opacité <output data-out="borderOpacity"></output>
+              <input type="range" name="borderOpacity" min="0.1" max="1" step="0.05">
+            </label>
+            <label class="colors">Couleur <input type="color" name="borderColor"></label>
+          </div>
+          <label class="check"><input type="checkbox" name="cities"> Grandes villes</label>
+          <div class="sub-options" data-for-cities>
+            <label>Nombre maximum <output data-out="cityCount"></output>
+              <input type="range" name="cityCount" min="1" max="40" step="1">
+            </label>
+            <label>Taille du texte <output data-out="citySize"></output>
+              <input type="range" name="citySize" min="1.5" max="10" step="0.1">
+            </label>
+            <label class="colors">Couleur <input type="color" name="cityColor"></label>
+            <label class="check"><input type="checkbox" name="cityUpper"> Majuscules</label>
+            <label class="check"><input type="checkbox" name="cityDots"> Point sur la ville</label>
+          </div>
+          <label class="check" data-for-labels><input type="checkbox" name="labelHalo"> Contour des noms (couleur du fond)</label>
+          <p class="muted small-print">Données Natural Earth. Les villes affichées dépendent du cadrage : les plus grandes d'abord, sans chevauchement.</p>
+        </fieldset>
+
+        {% if journeys %}
+        <fieldset data-for-source="all">
+          <legend>Périples en évidence</legend>
+          <label class="check"><input type="checkbox" name="hl"> Mettre les périples en évidence</label>
+          <div class="sub-options" data-for-hl>
+            <label class="colors">Couleur <input type="color" name="hlColor"></label>
+            <label>Épaisseur <output data-out="hlWidth"></output>
+              <input type="range" name="hlWidth" min="1" max="6" step="0.25">
+            </label>
+            <label class="check"><input type="checkbox" name="hlCasing"> Liseré (couleur du fond)</label>
+            <label class="check"><input type="checkbox" name="hlLabels"> Noms des périples</label>
+            <div class="hl-head">
+              <span>Périples affichés</span>
+              <span><button type="button" class="link-button" data-hl-all="1">Tous</button> · <button type="button" class="link-button" data-hl-all="0">Aucun</button></span>
+            </div>
+            <ul class="hl-trips" id="hl-trips"></ul>
+          </div>
+        </fieldset>
+        {% endif %}
+
+        <fieldset>
           <legend>Cadre</legend>
           <label>Style
             <select class="field" name="frame">
@@ -181,7 +247,11 @@
       </div>
     </aside>
     <div class="poster-stage" id="poster-stage">
-      <canvas id="poster-canvas" role="img" aria-label="Aperçu de l'affiche"></canvas>
+      <canvas id="poster-canvas" role="img" aria-label="Aperçu de l'affiche"
+              data-cities="{% static 'activities/cities.json' %}"
+              data-countries="{% static 'activities/borders-countries.json' %}"
+              data-regions="{% static 'activities/borders-regions.json' %}"
+              data-coast="{% static 'activities/borders-coast.json' %}"></canvas>
     </div>
   </div>
   {{ routes|json_script:"routes-data" }}

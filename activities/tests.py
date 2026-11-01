@@ -882,6 +882,16 @@ class PosterTests(LoggedInTestCase):
         self.assertEqual(routes[0]["elev"], 150)
         self.assertEqual(response.context["initial"], {})
 
+    def test_landmark_options_and_data(self):
+        from django.contrib.staticfiles import finders
+        response = self.client.get(reverse("activities:poster"))
+        for name in ("countries", "regions", "coast"):
+            self.assertContains(response, f'name="{name}"')
+            self.assertContains(response, f"activities/borders-{name}.json")
+            self.assertTrue(finders.find(f"activities/borders-{name}.json"))
+        self.assertContains(response, 'name="cities"')
+        self.assertNotContains(response, 'name="hl"')  # aucun périple : pas d'option de mise en évidence
+
     def test_preselected_activity(self):
         response = self.client.get(reverse("activities:poster"), {"activite": "101"})
         self.assertEqual(response.context["initial"], {"source": "activity", "id": 101})
