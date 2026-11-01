@@ -1,0 +1,28 @@
+# Blueprint Render : New → Blueprint → choisir ce dépôt
+services:
+  - type: web
+    name: off-the-line
+    runtime: python
+    plan: starter            # le plan gratuit n'accepte pas de disque persistant
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DB_PATH
+        value: /data/db.sqlite3
+      - key: DJANGO_MEDIA_ROOT
+        value: /data/media
+      - key: STRAVA_CLIENT_ID
+        sync: false
+      - key: STRAVA_CLIENT_SECRET
+        sync: false
+      - key: CARTO_API_KEY
+        sync: false

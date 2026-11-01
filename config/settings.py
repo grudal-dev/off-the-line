@@ -33,6 +33,19 @@ ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,12
 # Adresse publique du site (ex. https://off-the-line.up.railway.app), pour les formulaires en HTTPS
 CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o]
 
+# Domaine public fourni automatiquement par l'hébergeur (Render ou Railway)
+PUBLIC_HOST = os.environ.get("RENDER_EXTERNAL_HOSTNAME") or os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+if PUBLIC_HOST:
+    ALLOWED_HOSTS.append(PUBLIC_HOST)
+    CSRF_TRUSTED_ORIGINS.append(f"https://{PUBLIC_HOST}")
+
+# Strava API — https://www.strava.com/settings/api
+STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
+STRAVA_REDIRECT_URI = os.environ.get("STRAVA_REDIRECT_URI") or (
+    f"https://{PUBLIC_HOST}/strava/callback/" if PUBLIC_HOST else "http://localhost:8000/strava/callback/"
+)
+
 # En production (DEBUG=False), derrière le proxy HTTPS de l'hébergeur
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -40,11 +53,6 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 3600
-
-# Strava API — https://www.strava.com/settings/api
-STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
-STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
-STRAVA_REDIRECT_URI = os.environ.get("STRAVA_REDIRECT_URI", "http://localhost:8000/strava/callback/")
 
 # Fond de carte CARTO (clé gratuite : https://carto.com/basemaps/apikey)
 CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")
