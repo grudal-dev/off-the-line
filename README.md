@@ -185,7 +185,12 @@ L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à 
 - les **repères** : frontières des pays, régions et départements, côtes (trait, épaisseur, opacité, couleur) et
   grandes villes (nombre, taille, couleur, majuscules, point, contour), placées sans chevauchement ;
 - les **périples en évidence** (avec « Mes sorties ») : couleur, épaisseur, liseré, noms, choix des périples ;
+- la **recherche** dans les noms des activités (« Mes sorties », et liste de « Une activité ») : sans accents
+  ni majuscules, tous les mots doivent y figurer, et elle se combine aux sports et aux dates ;
 - le **cadre** : filet fin, double filet, cadre épais ou passe-partout, avec sa marge et ses couleurs ;
+- la **marque Off the line**, reprise du logo (la ligne droite et le parcours qui en sort) : « Coupure » (dans
+  le filet du bas), « Échappée » (le cadre quitte sa ligne, par défaut), « Signature » (dans la marge, avec
+  le format et l'année), « Tampon » (sceau dans le coin), ou aucune ;
 - les **textes** (en haut, en bas ou aucun) : titre, sous-titre et chiffres proposés, modifiables ;
 - le **cadrage** : glisser l'aperçu pour déplacer, molette ou pincement pour zoomer, rotation.
 

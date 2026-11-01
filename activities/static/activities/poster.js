@@ -39,7 +39,7 @@
     satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
-    source: "all", hidden: [], from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
+    source: "all", hidden: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
     format: "A3", orientation: "portrait", dpi: "200",
     ...PRESETS.paper, relief: false,
     mode: "single", width: 0.6, opacity: 0.85, endpoints: false,
@@ -49,7 +49,7 @@
     countries: false, regions: false, coast: false,
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "dash", regionStyle: "dot", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
-    labelHalo: true,
+    labelHalo: true, brand: "escape",
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
   };
 
@@ -100,6 +100,12 @@
   const longDate = d => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(d + "T12:00"));
   const shortDate = d => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long" }).format(new Date(d + "T12:00"));
 
+  // Recherche dans les noms : sans accents ni majuscules, tous les mots doivent y être
+  const fold = str => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const searchWords = q => fold(q).split(/\s+/).filter(Boolean);
+  for (const r of ROUTES) r.folded = fold(r.name);
+  const matches = (r, words) => words.every(w => r.folded.includes(w));
+
   function selection() {
     if (state.source === "journey") {
       const trip = TRIPS.find(t => t.id === state.journey);
@@ -116,9 +122,10 @@
       const wanted = new Set(state.selection);
       return { routes: ROUTES.filter(r => wanted.has(r.id)), transfers: [] };  // ROUTES est trié par date
     }
-    const hidden = new Set(state.hidden);
+    const hidden = new Set(state.hidden), words = searchWords(state.q);
     return {
-      routes: ROUTES.filter(r => !hidden.has(r.family) && (!state.from || r.day >= state.from) && (!state.to || r.day <= state.to)),
+      routes: ROUTES.filter(r => !hidden.has(r.family) && (!state.from || r.day >= state.from) && (!state.to || r.day <= state.to)
+                                 && matches(r, words)),
       transfers: [],
     };
   }
@@ -445,6 +452,132 @@
     if (state.frame === "mat") rect(o, 0.35 * k);
   }
 
+
+  // --- Marque « Off the line » ----------------------------------------------
+  // Le motif du logo : une ligne droite (pointillés) et le parcours réel qui en sort.
+  const GLYPH_LINE = [96, 400, 416, 112];
+  const GLYPH_PATH = new Path2D("M96 400 C 150 352, 120 300, 190 286 S 250 330, 292 262 S 250 170, 330 166 S 392 150, 416 112");
+  function drawGlyph(ctx, x, y, size, color, bg) {
+    // x, y : coin haut gauche ; size : côté en pixels
+    const k = size / 390;  // le motif occupe 62…452 × 78…434 dans le logo 512 × 512
+    ctx.save();
+    ctx.translate(x - 62 * k, y - 78 * k);
+    ctx.scale(k, k);
+    ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.globalAlpha = 0.5; ctx.lineWidth = 18; ctx.setLineDash([2, 38]);
+    ctx.beginPath(); ctx.moveTo(GLYPH_LINE[0], GLYPH_LINE[1]); ctx.lineTo(GLYPH_LINE[2], GLYPH_LINE[3]); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = 34;
+    ctx.stroke(GLYPH_PATH);
+    // départ : un anneau ; arrivée : un point plein
+    for (const [cx, cy, hole] of [[96, 400, true], [416, 112, false]]) {
+      ctx.beginPath(); ctx.arc(cx, cy, 34, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+      if (hole) { ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.fillStyle = bg; ctx.fill(); }
+    }
+    ctx.restore();
+  }
+  const BRAND = "OFF THE LINE";
+
+  function drawBrand(ctx, lay, ppm) {
+    let v = state.brand;
+    if (!v || v === "none") return;
+    if (state.frame === "none" && (v === "gap" || v === "escape")) v = "signature";  // pas de filet à couper
+    const X = mm => mm * ppm, k = lay.k, o = lay.outer;
+    const outside = state.frame === "mat" ? state.matColor : state.bg;
+    const ink = state.frameColor;
+    const bottom = X(o.y + o.h), right = X(o.x + o.w), left = X(o.x);
+    const margin = X(o.x);  // marge extérieure (identique sur les 4 côtés)
+    ctx.save();
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.textBaseline = "middle";
+
+    if (v === "gap") {
+      // 1. Coupure : le filet du bas s'interrompt pour laisser passer la marque
+      const size = X(2.4 * k);
+      ctx.font = fontString(600, size, COND);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${size * 0.35}px`;
+      const tw = ctx.measureText(BRAND).width, gw = size * 1.15, pad = size * 0.9;
+      const w = gw + size * 0.5 + tw + pad * 2, cx = X(o.x + o.w / 2);
+      if (state.frame === "bold") {
+        // dans le cadre épais : texte en réserve
+        const t = X(7 * k), yc = bottom - t / 2;
+        ctx.fillStyle = state.bg;
+        drawGlyph(ctx, cx - w / 2 + pad, yc - gw / 2, gw, state.bg, ink);
+        ctx.textAlign = "left"; ctx.fillText(BRAND, cx - w / 2 + pad + gw + size * 0.5, yc);
+      } else {
+        const extra = state.frame === "double" ? X(2.2 * k) : 0;
+        ctx.fillStyle = outside;
+        ctx.fillRect(cx - w / 2, bottom - X(1.2 * k) - extra, w, X(2.4 * k) + extra);
+        ctx.fillStyle = ink;
+        drawGlyph(ctx, cx - w / 2 + pad, bottom - gw / 2 - extra / 2, gw, ink, outside);
+        ctx.textAlign = "left"; ctx.fillText(BRAND, cx - w / 2 + pad + gw + size * 0.5, bottom - extra / 2);
+      }
+    }
+
+    if (v === "escape") {
+      // 2. Échappée : le filet du bas quitte sa ligne, comme le parcours du logo
+      const lw = Math.max(1, X(0.5 * k));
+      const x2 = right - X(14 * k), x1 = x2 - X(26 * k), dip = Math.min(X(6 * k), margin * 0.55);
+      ctx.fillStyle = outside;
+      ctx.fillRect(x1, bottom - lw * 2, x2 - x1, lw * 4);
+      ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.lineCap = "round";
+      // la ligne « attendue », en pointillés
+      ctx.globalAlpha = 0.45; ctx.setLineDash([0.001, lw * 3.2]); ctx.lineWidth = lw * 1.2;
+      ctx.beginPath(); ctx.moveTo(x1, bottom); ctx.lineTo(x2, bottom); ctx.stroke();
+      // le parcours réel
+      ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = lw * 1.6;
+      const w = x2 - x1;
+      ctx.beginPath(); ctx.moveTo(x1, bottom);
+      ctx.bezierCurveTo(x1 + w * 0.15, bottom + dip * 0.9, x1 + w * 0.3, bottom + dip * 0.2, x1 + w * 0.45, bottom + dip * 0.55);
+      ctx.bezierCurveTo(x1 + w * 0.6, bottom + dip * 0.95, x1 + w * 0.78, bottom + dip * 0.7, x2, bottom);
+      ctx.stroke();
+      for (const [x, filled] of [[x1, false], [x2, true]]) {
+        ctx.beginPath(); ctx.arc(x, bottom, lw * 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = ink; ctx.fill();
+        if (!filled) { ctx.beginPath(); ctx.arc(x, bottom, lw * 1, 0, Math.PI * 2); ctx.fillStyle = outside; ctx.fill(); }
+      }
+      const size = X(2.1 * k);
+      ctx.font = fontString(600, size, COND);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${size * 0.3}px`;
+      ctx.fillStyle = ink; ctx.textAlign = "right";
+      ctx.fillText(BRAND, x1 - size * 1.2, bottom + Math.min(dip * 0.6, margin * 0.4));
+    }
+
+    if (v === "signature") {
+      // 3. Signature d'atelier, dans la marge du bas
+      const size = X(2.1 * k), y = bottom + Math.min(margin / 2, X(6 * k));
+      ctx.fillStyle = ink; ctx.globalAlpha = 0.85;
+      drawGlyph(ctx, left, y - size * 0.75, size * 1.5, ink, outside);
+      ctx.font = fontString(600, size, COND);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${size * 0.3}px`;
+      ctx.textAlign = "left"; ctx.fillText(BRAND, left + size * 2.1, y);
+      ctx.font = fontString(500, size * 0.95, SANS);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${size * 0.1}px`;
+      ctx.textAlign = "right";
+      ctx.fillText(`${state.format.replace("x", " × ")} · ${new Date().getFullYear()}`, right, y);
+    }
+
+    if (v === "stamp") {
+      // 4. Tampon rond, posé à cheval sur le coin du cadre
+      const r = X(9 * k), cx = right - X(4 * k), cy = bottom - X(4 * k);
+      ctx.fillStyle = outside; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, X(0.35 * k));
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = Math.max(1, X(0.2 * k));
+      ctx.beginPath(); ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2); ctx.stroke();
+      const txt = "OFF THE LINE · HORS DES SENTIERS · ", size = r * 0.2;
+      ctx.font = fontString(600, size, COND); ctx.fillStyle = ink; ctx.textAlign = "center";
+      const chars = [...txt], step = (Math.PI * 2) / chars.length;
+      chars.forEach((c, i) => {
+        const a = -Math.PI / 2 + i * step;
+        ctx.save(); ctx.translate(cx + Math.cos(a) * r * 0.81, cy + Math.sin(a) * r * 0.81); ctx.rotate(a + Math.PI / 2);
+        ctx.fillText(c, 0, 0); ctx.restore();
+      });
+      const g = r * 0.8;
+      drawGlyph(ctx, cx - g / 2, cy - g / 2, g, ink, outside);
+    }
+    ctx.restore();
+  }
+
   function drawAttribution(ctx, lay, ppm, defs) {
     if (!defs.length) return;
     const txt = defs.map(d => d.def.options.attribution || "").join(" · ").replace(/<[^>]+>/g, "").replace(/&copy;/g, "©").replace(/&mdash;/g, "—").replace(/&amp;/g, "&");
@@ -678,6 +811,7 @@
     }
     drawText(ctx, lay, texts, ppm);
     drawFrame(ctx, lay, ppm);
+    drawBrand(ctx, lay, ppm);
     return { sel, auto, lay, defs };
   }
 
@@ -774,9 +908,20 @@
   for (const l of LAYERS) baseSelect.insertAdjacentHTML("beforeend", `<option value="${l.key}">${l.label}</option>`);
 
   const activitySelect = document.getElementById("activity-select");
+  const activitySearch = document.getElementById("activity-search");
   const dateFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" });
-  activitySelect.innerHTML = ROUTES.slice().reverse().map(r =>
-    `<option value="${r.id}">${dateFmt.format(new Date(r.day + "T12:00"))} · ${escapeHtml(r.name)} (${nf1.format(r.km)} km)</option>`).join("");
+  const newestFirst = ROUTES.slice().reverse();
+  // La liste est reconstruite à chaque frappe (Safari ignore les <option hidden>)
+  function fillActivities() {
+    const words = searchWords(activitySearch.value);
+    const found = newestFirst.filter(r => matches(r, words));
+    activitySelect.innerHTML = found.length
+      ? found.map(r => `<option value="${r.id}">${dateFmt.format(new Date(r.day + "T12:00"))} · ${escapeHtml(r.name)} (${nf1.format(r.km)} km)</option>`).join("")
+      : `<option value="" disabled>Aucune activité ne correspond</option>`;
+    if (found.length && !found.some(r => r.id === state.activity)) set({ activity: found[0].id });
+    else activitySelect.value = found.length ? state.activity : "";
+  }
+  activitySearch.addEventListener("input", fillActivities);
 
   const years = [...new Set(ROUTES.map(r => r.day.slice(0, 4)))].sort().reverse();
   const yearBox = document.getElementById("year-picks");
@@ -791,7 +936,7 @@
   const NUMERIC = new Set(["width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
   const CHECKS = new Set(["relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
                           "labelHalo", "hl", "hlCasing", "hlLabels"]);
-  const RESHAPE = new Set(["from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
+  const RESHAPE = new Set(["q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
     for (const el of form.elements) {
       if (!el.name || !(el.name in state)) continue;
@@ -1002,6 +1147,7 @@
     document.fonts.load(`700 40px "Barlow Condensed"`), document.fonts.load(`600 40px "Barlow Condensed"`),
     document.fonts.load(`500 40px "Barlow"`), document.fonts.load(`400 40px "Barlow"`),
   ]).catch(() => null);
+  fillActivities();
   syncFields();
   fonts.then(redraw);
   redraw();

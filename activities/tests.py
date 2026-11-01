@@ -890,6 +890,11 @@ class PosterTests(LoggedInTestCase):
             self.assertContains(response, f"activities/borders-{name}.json")
             self.assertTrue(finders.find(f"activities/borders-{name}.json"))
         self.assertContains(response, 'name="cities"')
+        self.assertContains(response, 'name="brand"')
+        for value in ("none", "gap", "escape", "signature", "stamp"):
+            self.assertContains(response, f'<option value="{value}">')
+        self.assertContains(response, 'name="q"')
+        self.assertContains(response, 'id="activity-search"')
         self.assertNotContains(response, 'name="hl"')  # aucun périple : pas d'option de mise en évidence
 
     def test_preselected_activity(self):
