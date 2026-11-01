@@ -200,6 +200,34 @@ que si l'option est cochée. Les villes réutilisent `cities.json`.
 Les liens « Créer une affiche » des pages périple et activité ouvrent l'affiche sur cette source
 (`/affiche/?periple=<id>` ou `?activite=<id>`).
 
+## Mise en ligne (Railway)
+
+Le dépôt est prêt pour [Railway](https://railway.com) (`railway.json`) : Gunicorn sert le site,
+WhiteNoise les fichiers statiques, et SQLite + les photos des livres vivent sur un disque persistant.
+Au démarrage, `migrate` et `collectstatic` sont lancés automatiquement.
+
+1. Sur Railway : **New Project → Deploy from GitHub repo** → `off-the-line` (plan Hobby).
+2. Dans le service : **Settings → Networking → Generate Domain** (ex. `off-the-line.up.railway.app`).
+3. Clic droit sur le service → **Attach Volume**, point de montage `/data`.
+4. Onglet **Variables** :
+
+   | Variable | Valeur |
+   |---|---|
+   | `DJANGO_DEBUG` | `False` |
+   | `DJANGO_SECRET_KEY` | une longue chaîne aléatoire (`python -c "import secrets; print(secrets.token_urlsafe(50))"`) |
+   | `DJANGO_ALLOWED_HOSTS` | `off-the-line.up.railway.app` |
+   | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://off-the-line.up.railway.app` |
+   | `DJANGO_DB_PATH` | `/data/db.sqlite3` |
+   | `DJANGO_MEDIA_ROOT` | `/data/media` |
+   | `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | ceux de https://www.strava.com/settings/api |
+   | `STRAVA_REDIRECT_URI` | `https://off-the-line.up.railway.app/strava/callback/` |
+   | `CARTO_API_KEY` | facultatif |
+
+5. Sur https://www.strava.com/settings/api : **Authorization Callback Domain** = `off-the-line.up.railway.app`
+   (sans `https://`), et passer l'application à 10 athlètes.
+
+Les comptes existants peuvent être recréés simplement en se reconnectant avec Strava sur le site en ligne.
+
 ## Structure
 
 - `config/` : réglages du projet Django
