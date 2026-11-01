@@ -202,6 +202,10 @@ L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à 
 - le **profil d'altitude** dans le bandeau (périple, zone, activité) : altitudes enchaînées si toutes les
   étapes en ont un (récupérés à la création d'un livre), sinon le D+ de chaque étape en barres.
 
+Option « **Pays traversés, façon atlas** » (périple, zone, activité) : les pays traversés sont légèrement
+éclaircis et leur nom (en français, d'après Natural Earth) est écrit en grandes capitales espacées et
+discrètes, à sa place habituelle ou, si elle est hors cadre ou occupée, à côté du parcours sans le couvrir.
+
 Les chiffres proposés comptent les **jours** et les **pays traversés** (au moins deux), d'après les contours
 simplifiés de Natural Earth 1:110 M (`countries-shapes.json`, généré par `scripts/build_countries.py`) : un pays
 ne compte qu'au-delà de 15 km parcourus. Les polices Barlow n'ayant ni l'espace fine du format français des
