@@ -9,6 +9,11 @@ OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a
 EOX = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg"
 EOX_CREDIT = ('Sentinel-2 cloudless – <a href="https://s2maps.eu">s2maps.eu</a> by EOX IT Services GmbH '
               '(Contains modified Copernicus Sentinel data 2016)')
+# Le millésime 2016 est terne et sombre : on l'éclaircit à l'affichage (carte, affiche, livre).
+EOX_FILTER = "brightness(1.3) contrast(1.1) saturate(1.2)"
+# Photos aériennes de l'IGN (BD ORTHO®) : Licence Ouverte Etalab 2.0, vendable avec attribution.
+# Très nettes et lumineuses, mais seulement en France (métropole et outre-mer).
+IGN_ORTHO_CREDIT = '&copy; <a href="https://www.ign.fr/">IGN</a> – BD ORTHO® (Licence Ouverte Etalab 2.0)'
 
 
 def basemap(request):
@@ -42,7 +47,11 @@ def basemap(request):
          "url": ESRI.format(path="World_Imagery"),
          "options": {"maxZoom": 19, "maxNativeZoom": 18, "attribution": "Imagery &copy; Esri, Maxar, Earthstar Geographics"}},
         {"key": "eox", "label": "Satellite libre", "theme": "photo",
-         "url": EOX, "options": {"maxZoom": 19, "maxNativeZoom": 14, "attribution": EOX_CREDIT}},
+         "url": EOX, "filter": EOX_FILTER,
+         "options": {"maxZoom": 19, "maxNativeZoom": 14, "attribution": EOX_CREDIT}},
+        {"key": "ign_ortho", "label": "Photo IGN (France)", "theme": "photo",
+         "url": IGN.format(layer="ORTHOIMAGERY.ORTHOPHOTOS", fmt="image/jpeg"),
+         "options": {"maxZoom": 19, "attribution": IGN_ORTHO_CREDIT}},
         {"key": "light", "label": "Clair", "theme": "light", **light},
         {"key": "dark", "label": "Nuit", "theme": "dark", **dark},
     ]

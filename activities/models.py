@@ -181,7 +181,7 @@ class Book(models.Model):
 
     DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False,
                        "cities": True, "imagery": "satellite"}
-    IMAGERY = {"satellite", "eox"}  # Esri (usage personnel) ou Sentinel-2 2016 d'EOX (libre, vendable)
+    IMAGERY = {"satellite", "eox", "ign_ortho"}  # Esri (usage personnel), Sentinel-2 2016 d'EOX ou photos IGN (libres, vendables)
 
     class Meta:
         ordering = ["-updated_at"]

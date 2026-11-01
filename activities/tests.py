@@ -1025,12 +1025,21 @@ class FreeImageryTests(LoggedInTestCase):
         self.assertIn("Copernicus Sentinel data 2016", layers["eox"]["options"]["attribution"])
         self.assertFalse(layers["eox"].get("personal"))
         self.assertTrue(layers["satellite"]["personal"])
+        self.assertIn("brightness", layers["eox"]["filter"])  # millésime 2016 éclairci
+
+    def test_ign_ortho_layer_is_free(self):
+        from django.test import RequestFactory
+        from .context_processors import basemap
+        layers = {layer["key"]: layer for layer in basemap(RequestFactory().get("/"))["basemap"]["layers"]}
+        self.assertIn("ORTHOIMAGERY.ORTHOPHOTOS", layers["ign_ortho"]["url"])
+        self.assertIn("Etalab", layers["ign_ortho"]["options"]["attribution"])
+        self.assertFalse(layers["ign_ortho"].get("personal"))
 
     def test_book_imagery_option(self):
         from .models import Book
         b = Book.objects.create(account=self.account, journey_ids=[1])
         url = reverse("activities:book_update", args=[b.pk])
-        for value, expected in (("eox", "eox"), ("google", "eox"), ("satellite", "satellite")):
+        for value, expected in (("eox", "eox"), ("google", "eox"), ("ign_ortho", "ign_ortho"), ("satellite", "satellite")):
             r = self.client.post(url, {"field": "options", "value": {"imagery": value}}, content_type="application/json")
             self.assertTrue(r.json()["ok"])
             b.refresh_from_db()

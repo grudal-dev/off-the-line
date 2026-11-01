@@ -1066,9 +1066,11 @@
     const defs = layerDefs();
     // Fond atténué : couleurs adoucies puis voile de la couleur du fond, pour que le tracé ressorte
     const mute = defs.length ? Math.min(90, Math.max(0, +state.mute || 0)) / 100 : 0;
-    if (mute && "filter" in ctx) ctx.filter = `saturate(${(1 - mute * 0.8).toFixed(2)})`;
+    const muteFilter = mute ? `saturate(${(1 - mute * 0.8).toFixed(2)})` : "";
     for (const { def, alpha } of defs) {
       ctx.globalAlpha = alpha;
+      // Filtre propre au fond (ex. Sentinel-2 éclairci), comme sur la carte
+      if ("filter" in ctx) ctx.filter = [def.filter, muteFilter].filter(Boolean).join(" ") || "none";
       for (const t of tilePlan(def, view, mapPx, maxTiles)) {
         const tl = tile(t.url);
         if (tl.ok) ctx.drawImage(tl.img, t.x, t.y, t.size + 0.6, t.size + 0.6);
