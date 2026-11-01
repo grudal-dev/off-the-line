@@ -50,7 +50,7 @@
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "dash", regionStyle: "dot", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
-    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true,
+    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: false,
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
   };
 
@@ -143,11 +143,20 @@
   let world = null, worldLoading = null;
   function loadWorld() {
     if (!worldLoading) {
-      worldLoading = fetch(canvas.dataset.countryShapes).then(r => r.json()).then(data => {
+      const json = url => fetch(url).then(r => r.json());
+      worldLoading = Promise.all([json(canvas.dataset.countryShapes), json(canvas.dataset.cities).catch(() => ({}))]).then(([data, names]) => {
         world = (data.countries || []).map(([name, w, s, e, n, rings]) => {
           const [x0, y1] = mercator(s, w), [x1, y0] = mercator(n, e);
-          return { name, box: [x0, y0, x1, y1], rings: rings.split(" ").map(r => decode(r, 1e4)) };
+          return { name, fr: name, box: [x0, y0, x1, y1], rings: rings.split(" ").map(r => decode(r, 1e4)),
+                   label: [(x0 + x1) / 2, (y0 + y1) / 2] };
         });
+        // Nom français et position du nom (Natural Earth, comme les cartes) : le point d'étiquette dans le contour
+        // Les pays importants d'abord (zoom minimal le plus petit) : le point de Monaco tombe dans la France
+        const rows = (names.countries || []).slice().sort((a, b) => a[3] - b[3]);
+        for (const [fr, lat, lng] of rows) {
+          const [x, y] = mercator(lat, lng), c = countryAt(x, y);
+          if (c && !c.named) { c.fr = fr; c.label = [x, y]; c.named = true; }
+        }
         countryCache.clear();
         redraw();
       }).catch(() => { world = []; });
@@ -168,7 +177,7 @@
       if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
       let inside = false;
       for (const r of c.rings) if (inRing(x, y, r)) inside = !inside;  // les trous (lacs, enclaves) se compensent
-      if (inside) return c.name;
+      if (inside) return c;
     }
     return null;
   }
@@ -179,22 +188,25 @@
     if (countryCache.has(key)) return countryCache.get(key);
     const total = routes.reduce((t, r) => t + r.pts.length / 2, 0);
     const every = Math.max(1, Math.floor(total / 4000));  // assez de points, sans bloquer l'aperçu
-    const km = new Map();
+    const km = new Map(), sums = new Map();
     for (const r of routes) {
       const p = r.pts;
       let prev = null;
       for (let i = 0; i < p.length; i += 2 * every) {
         const name = countryAt(p[i], p[i + 1]);
-        if (prev && name) {
+        if (prev && name) {  // name : le pays (objet), clé de la Map
           // longueur du segment : 40 075 km par unité « monde », réduite selon la latitude
           const lat = inverseMercator(p[i], p[i + 1])[0];
           const d = Math.hypot(p[i] - prev[0], p[i + 1] - prev[1]) * 40075 * Math.cos(lat * Math.PI / 180);
           km.set(name, (km.get(name) || 0) + d);
+          const m = sums.get(name) || [0, 0, 0];
+          m[0] += p[i]; m[1] += p[i + 1]; m[2]++; sums.set(name, m);
         }
         prev = [p[i], p[i + 1]];
       }
     }
-    const found = [...km].filter(([, d]) => d >= MIN_COUNTRY_KM).map(([name]) => name);
+    const found = [...km].filter(([, d]) => d >= MIN_COUNTRY_KM).map(([country]) => country);  // dans l'ordre du voyage
+    found.along = new Map(found.map(c => { const m = sums.get(c); return [c, [m[0] / m[2], m[1] / m[2]]]; }));
     countryCache.set(key, found);
     return found;
   }
@@ -873,8 +885,8 @@
     return order;
   }
 
-  function drawLabels(ctx, lay, view, ppm, hl, onLoad, sel) {
-    if (!state.cities && !(hl.length && state.hlLabels)) return;
+  function drawLabels(ctx, lay, view, ppm, hl, onLoad, sel, atlas = []) {
+    if (!state.cities && !atlas.length && !(hl.length && state.hlLabels)) return;
     const m = lay.map, X = v => v * ppm;
     const mapPx = { w: X(m.w), h: X(m.h) }, s = mapPx.w / view.span;
     const th = state.rotation * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
@@ -891,7 +903,7 @@
 
     function label(str, px, py, o) {
       ctx.font = fontString(o.weight, o.size, o.family);
-      if ("letterSpacing" in ctx) ctx.letterSpacing = `${o.upper ? o.size * 0.08 : 0}px`;
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${o.upper ? o.size * (o.spacing ?? 0.08) : 0}px`;
       const txt = o.upper ? str.toUpperCase() : str;
       const w = ctx.measureText(txt).width;
       const r = o.dot ? o.size * 0.2 : 0;
@@ -900,15 +912,17 @@
       for (const side of sides) {
         const x0 = side > 0 ? px + gap : side < 0 ? px - gap - w : px - w / 2;
         const b = { x0: Math.min(x0, px - r) - o.size * 0.2, x1: Math.max(x0 + w, px + r) + o.size * 0.2, y0: py - o.size * 0.62, y1: py + o.size * 0.62 };
-        if (!inside(b) || !free(b)) continue;
+        if (!inside(b) || !free(b) || (o.avoid && o.avoid(b))) continue;
         placed.push(b);
         ctx.textAlign = "left"; ctx.textBaseline = "middle";
-        if (state.labelHalo) {
+        if (state.labelHalo && !o.noHalo) {
           ctx.lineJoin = "round"; ctx.strokeStyle = state.bg; ctx.lineWidth = o.size * 0.32;
           ctx.strokeText(txt, x0, py + o.size * 0.04);
         }
         ctx.fillStyle = o.color;
+        ctx.globalAlpha = o.alpha ?? 1;
         ctx.fillText(txt, x0, py + o.size * 0.04);
+        ctx.globalAlpha = 1;
         if (o.dot && !o.hideDot) {  // hideDot : le marqueur de départ/arrivée est déjà dessiné
           ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI);
           if (state.labelHalo) { ctx.lineWidth = r * 0.9; ctx.stroke(); }
@@ -921,6 +935,24 @@
 
     ctx.save();
     ctx.beginPath(); ctx.rect(X(m.x), X(m.y), mapPx.w, mapPx.h); ctx.clip();
+    // Atlas : nom des pays traversés, en grandes capitales espacées et discrètes, sans couvrir le tracé
+    if (atlas.length) {
+      const trace = [];
+      for (const r of sel.routes) {
+        const step = Math.max(2, 2 * Math.floor(r.pts.length / 2 / 60));
+        for (let i = 0; i < r.pts.length; i += step) trace.push(project(r.pts[i], r.pts[i + 1]));
+      }
+      const avoid = b => trace.some(([x, y]) => x > b.x0 && x < b.x1 && y > b.y0 - size * 0.4 && y < b.y1 + size * 0.4);
+      const o = { size: size * 1.7, weight: 600, family: COND, color: state.ink, upper: true, spacing: 0.42,
+                  alpha: 0.42, noHalo: true, dot: false, avoid };
+      for (const c of atlas) {
+        // Point d'étiquette du pays, puis de part et d'autre du parcours dans ce pays, de plus en plus loin
+        const [lx, ly] = project(...c.label), [ax, ay] = project(...atlas.along.get(c));
+        const tries = [[lx, ly]];
+        for (const d of [2.6, 4, 5.5, 7.5]) tries.push([ax - d * size, ay], [ax + d * size, ay], [ax, ay - d * size], [ax, ay + d * size]);
+        tries.some(([x, y]) => label(c.fr, x, y, o));
+      }
+    }
     if (state.hlLabels) {
       for (const h of hl) {
         const p = h.stages[0].pts, [x, y] = project(p[0], p[1]);
@@ -1002,12 +1034,22 @@
       ctx.fillRect(-big, -big, 2 * big, 2 * big);
     }
     ctx.globalAlpha = 1;
+    const atlas = state.atlas && state.source !== "all" ? countriesOf(sel.routes) || [] : [];
+    if (atlas.length) {
+      // Pays traversés éclaircis : un voile de la couleur du texte, très léger
+      ctx.save();
+      ctx.globalAlpha = 0.09; ctx.fillStyle = state.ink;
+      ctx.beginPath();
+      for (const c of atlas) for (const r of c.rings) { tracePath(ctx, r, view, s); ctx.closePath(); }
+      ctx.fill("evenodd");
+      ctx.restore();
+    }
     drawBorders(ctx, view, s, ppm, mapPx, onTileLoad);
     drawTracks(ctx, sel, view, s, ppm);
     const hl = highlighted(sel);
     drawHighlights(ctx, hl, view, s, ppm);
     ctx.restore();
-    try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad, sel); } catch (err) { console.error(err); ctx.restore(); }
+    try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad, sel, atlas); } catch (err) { console.error(err); ctx.restore(); }
     drawAttribution(ctx, lay, ppm, defs);
 
     if (!sel.routes.length) {
@@ -1141,7 +1183,7 @@
   });
 
   const NUMERIC = new Set(["mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
-  const CHECKS = new Set(["casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+  const CHECKS = new Set(["atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
                           "labelHalo", "hl", "hlCasing", "hlLabels"]);
   const RESHAPE = new Set(["air", "profile", "q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
@@ -1258,6 +1300,7 @@
     field("endpoints").closest("label").hidden = state.source === "all";
     field("stageDots").closest("label").hidden = state.source === "all";
     field("profile").closest("label").hidden = state.source === "all";
+    field("atlas").closest("label").hidden = state.source === "all";
     document.getElementById("mute-wrap").hidden = !state.base;
     refreshOrientHint(sel, auto);
     document.querySelectorAll("[data-family].chip").forEach(c => c.setAttribute("aria-pressed", !state.hidden.includes(c.dataset.family)));

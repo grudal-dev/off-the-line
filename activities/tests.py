@@ -1001,7 +1001,7 @@ class PosterJourneyDataTests(LoggedInTestCase):
         self.assertLessEqual(len(route["prof"]), 41)
         self.assertEqual(route["prof"][0], 400)
         self.assertContains(response, "countries-shapes.json")
-        for name in ("mute", "casing", "stageDots", "cityMode", "profile", "air"):
+        for name in ("mute", "casing", "stageDots", "cityMode", "profile", "air", "atlas"):
             self.assertContains(response, f'name="{name}"')
 
     def test_country_shapes_file(self):
