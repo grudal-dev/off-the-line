@@ -50,6 +50,7 @@
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "dash", regionStyle: "dot", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
+    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true,
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
   };
 
@@ -95,8 +96,14 @@
   }
 
   // --- Sélection et textes proposés ---------------------------------------
-  const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
-  const nf1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+  // Les polices Barlow n'ont pas l'espace fine insécable (U+202F) du format français : « 3613 » au lieu
+  // de « 3 613 ». On la remplace par une espace insécable ordinaire, présente dans la police.
+  const frNumber = opts => {
+    const f = new Intl.NumberFormat("fr-FR", opts);
+    return { format: v => f.format(v).replace(/\u202f/g, "\u00a0") };
+  };
+  const nf = frNumber({ maximumFractionDigits: 0 });
+  const nf1 = frNumber({ maximumFractionDigits: 1 });
   const longDate = d => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" }).format(new Date(d + "T12:00"));
   const shortDate = d => new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long" }).format(new Date(d + "T12:00"));
 
@@ -130,6 +137,70 @@
     };
   }
 
+  // --- Pays traversés : contours simplifiés des pays (Natural Earth 1:110 M, countries-shapes.json) ---
+  // Un pays ne compte qu'au-delà de 15 km parcourus : à cette échelle, les contours sont approximatifs.
+  const MIN_COUNTRY_KM = 15;
+  let world = null, worldLoading = null;
+  function loadWorld() {
+    if (!worldLoading) {
+      worldLoading = fetch(canvas.dataset.countryShapes).then(r => r.json()).then(data => {
+        world = (data.countries || []).map(([name, w, s, e, n, rings]) => {
+          const [x0, y1] = mercator(s, w), [x1, y0] = mercator(n, e);
+          return { name, box: [x0, y0, x1, y1], rings: rings.split(" ").map(r => decode(r, 1e4)) };
+        });
+        countryCache.clear();
+        redraw();
+      }).catch(() => { world = []; });
+    }
+    return world;
+  }
+  function inRing(x, y, p) {
+    let inside = false;
+    for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+      const xi = p[i], yi = p[i + 1], xj = p[j], yj = p[j + 1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function countryAt(x, y) {
+    for (const c of world) {
+      const b = c.box;
+      if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+      let inside = false;
+      for (const r of c.rings) if (inRing(x, y, r)) inside = !inside;  // les trous (lacs, enclaves) se compensent
+      if (inside) return c.name;
+    }
+    return null;
+  }
+  const countryCache = new Map();
+  function countriesOf(routes) {
+    if (!routes.length || !loadWorld() || !world.length) return null;
+    const key = routes.map(r => r.id).join();
+    if (countryCache.has(key)) return countryCache.get(key);
+    const total = routes.reduce((t, r) => t + r.pts.length / 2, 0);
+    const every = Math.max(1, Math.floor(total / 4000));  // assez de points, sans bloquer l'aperçu
+    const km = new Map();
+    for (const r of routes) {
+      const p = r.pts;
+      let prev = null;
+      for (let i = 0; i < p.length; i += 2 * every) {
+        const name = countryAt(p[i], p[i + 1]);
+        if (prev && name) {
+          // longueur du segment : 40 075 km par unité « monde », réduite selon la latitude
+          const lat = inverseMercator(p[i], p[i + 1])[0];
+          const d = Math.hypot(p[i] - prev[0], p[i + 1] - prev[1]) * 40075 * Math.cos(lat * Math.PI / 180);
+          km.set(name, (km.get(name) || 0) + d);
+        }
+        prev = [p[i], p[i + 1]];
+      }
+    }
+    const found = [...km].filter(([, d]) => d >= MIN_COUNTRY_KM).map(([name]) => name);
+    countryCache.set(key, found);
+    return found;
+  }
+  const inverseMercator = (x, y) => [Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI, x * 360 - 180];
+  const plural = (n, word) => `${nf.format(n)} ${word}${n > 1 ? "s" : ""}`;
+
   function autoTexts(sel) {
     const rs = sel.routes;
     const km = rs.reduce((a, r) => a + r.km, 0), elev = rs.reduce((a, r) => a + r.elev, 0);
@@ -139,10 +210,13 @@
       if (!r) return { title: "", subtitle: "", stats: "" };
       return { title: r.name, subtitle: longDate(r.day), stats: `${nf1.format(r.km)} km${dplus}` };
     }
+    const countries = state.source === "all" ? null : countriesOf(rs);
+    const pays = countries && countries.length > 1 ? ` · ${countries.length} pays` : "";
+    const days = new Set(rs.map(r => r.day)).size;
     if (state.source === "journey" && sel.trip) {
       return {
         title: sel.trip.title, subtitle: sel.trip.dates.replace(/^du /, "Du "),
-        stats: `${rs.length} étape${rs.length > 1 ? "s" : ""} · ${nf.format(km)} km${dplus}`,
+        stats: `${plural(sel.trip.days || days, "jour")}${pays} · ${nf.format(km)} km${dplus}`,
       };
     }
     const fams = [...new Set(rs.map(r => r.family))];
@@ -152,7 +226,7 @@
         : first.slice(0, 4) === last.slice(0, 4) ? `Du ${shortDate(first)} au ${longDate(last)}`
         : `${first.slice(0, 4)} – ${last.slice(0, 4)}`;
       return { title: ATHLETE ? `Les parcours de ${ATHLETE}` : "Mes parcours", subtitle,
-               stats: `${nf.format(rs.length)} sortie${rs.length > 1 ? "s" : ""} · ${nf.format(km)} km${dplus}` };
+               stats: `${plural(rs.length, "sortie")}${pays} · ${nf.format(km)} km${dplus}` };
     }
     let title = fams.length === 1 && FAMILY[fams[0]] ? FAMILY[fams[0]].label : (ATHLETE ? `Les parcours de ${ATHLETE}` : "Mes parcours");
     let subtitle = "";
@@ -182,7 +256,24 @@
     return state.orientation === "landscape" ? [Math.max(w, h), Math.min(w, h)] : [Math.min(w, h), Math.max(w, h)];
   }
 
-  function layout(texts) {
+  // Profil du bandeau : altitudes enchaînées si toutes les étapes en ont un, sinon le D+ de chaque étape
+  function profileData(sel) {
+    const rs = sel.routes;
+    if (state.source === "all" || !rs.length || rs.length > 400) return null;  // « Mes sorties » : pas de sens
+    if (rs.every(r => r.prof && r.prof.length > 1)) {
+      const pts = [];
+      let x0 = 0;
+      for (const r of rs) {
+        r.prof.forEach((alt, i) => pts.push([x0 + r.km * i / (r.prof.length - 1), alt]));
+        x0 += r.km;
+      }
+      return { kind: "line", pts, total: x0 };
+    }
+    if (rs.length < 2 || !rs.some(r => r.elev)) return null;
+    return { kind: "bars", bars: rs.map(r => [r.km, r.elev]), total: rs.reduce((t, r) => t + r.km, 0) };
+  }
+
+  function layout(texts, sel) {
     const [W, H] = paper();
     const k = Math.min(W, H) / 297;  // les épaisseurs suivent la taille de l'affiche
     const m = Math.min(+state.margin, Math.min(W, H) / 4);
@@ -200,6 +291,8 @@
       if (texts.title) h += sizes.title;
       if (texts.subtitle) h += sizes.subtitle * 1.6;
       if (texts.stats) h += sizes.stats * 2.6;
+      const prof = state.profile && sel ? profileData(sel) : null;
+      if (prof) { h += title * 0.85; sizes.prof = prof; }
       h = Math.min(h, content.h * 0.35);
       band = { x: content.x, w: content.w, h, sizes, pad, y: state.textPos === "top" ? content.y : content.y + content.h - h };
       map = { x: content.x, w: content.w, h: content.h - h, y: state.textPos === "top" ? content.y + h : content.y };
@@ -220,7 +313,7 @@
       }
     }
     if (!isFinite(u0)) return { cx: 0.5, cy: 0.5, span: 1 };
-    const keep = 0.86;  // un peu d'air autour des tracés
+    const keep = 1 - Math.min(50, Math.max(2, +state.air || 10)) / 100;  // air autour des tracés (total des deux côtés)
     const ratio = lay.map.w / lay.map.h;
     const span = Math.max((u1 - u0) / keep, (v1 - v0) * ratio / keep, 2e-5);
     const uc = (u0 + u1) / 2, vc = (v0 + v1) / 2;
@@ -310,6 +403,12 @@
     const lw = Math.max(0.5, state.width * ppm);
     const routes = sel.routes, n = routes.length;
     ctx.lineCap = "round"; ctx.lineJoin = "round";
+    if (state.casing && state.mode !== "density") {
+      // Liseré : un trait plus large de la couleur du fond sous les tracés
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = state.bg; ctx.lineWidth = lw + Math.max(1.5, lw * 1.6);
+      ctx.beginPath(); for (const r of routes) tracePath(ctx, r.pts, view, s); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     if (state.glow) {
       ctx.globalAlpha = Math.min(0.5, state.opacity * 0.14);
       ctx.lineWidth = lw * 5;
@@ -335,6 +434,17 @@
         ctx.stroke();
       }
       ctx.restore();
+    }
+    if (state.stageDots && n > 1 && state.source !== "all") {
+      // Un point à chaque fin d'étape (sauf la dernière : c'est l'arrivée)
+      const rad = Math.max(lw * 1.05, 0.55 * ppm);
+      routes.slice(0, -1).forEach((r, i) => {
+        const p = r.pts, x = (p[p.length - 2] - view.cx) * s, y = (p[p.length - 1] - view.cy) * s;
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, 2 * Math.PI);
+        ctx.fillStyle = state.bg; ctx.fill();
+        ctx.lineWidth = Math.max(0.8, rad * 0.5); ctx.strokeStyle = state.mode === "density" ? state.color : routeColor(r, i, n);
+        ctx.stroke();
+      });
     }
     if (state.endpoints && routes.length && state.source !== "all") {
       const first = routes[0].pts, last = routes[routes.length - 1].pts;
@@ -401,6 +511,33 @@
     return px;
   }
 
+  // Les polices Barlow n'ont pas de flèche (→) : on la dessine, à l'épaisseur du titre
+  function fillTextWithArrows(ctx, txt, cx, y, size) {
+    const parts = txt.split(/\s*→\s*/);
+    if (parts.length < 2) { ctx.fillText(txt, cx, y); return; }
+    const arrow = size * 0.62, gap = size * 0.28;
+    const widths = parts.map(t => ctx.measureText(t).width);
+    const total = widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * (arrow + 2 * gap);
+    let x = cx - total / 2;
+    const align = ctx.textAlign;
+    ctx.textAlign = "left";
+    parts.forEach((t, i) => {
+      ctx.fillText(t, x, y);
+      x += widths[i];
+      if (i === parts.length - 1) return;
+      const ay = y - size * 0.33, t2 = size * 0.075;
+      ctx.save();
+      ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = t2 * 1.6; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(x + gap, ay); ctx.lineTo(x + gap + arrow, ay);
+      ctx.moveTo(x + gap + arrow - size * 0.2, ay - size * 0.18); ctx.lineTo(x + gap + arrow, ay); ctx.lineTo(x + gap + arrow - size * 0.2, ay + size * 0.18);
+      ctx.stroke();
+      ctx.restore();
+      x += arrow + 2 * gap;
+    });
+    ctx.textAlign = align;
+  }
+
   function drawText(ctx, lay, texts, ppm) {
     const b = lay.band;
     if (!b) return;
@@ -412,15 +549,43 @@
     if (texts.title) {
       const size = fitText(ctx, texts.title.toUpperCase(), 700, X(b.sizes.title), COND, maxW, 0.06);
       y += size * 0.86;
-      ctx.fillText(texts.title.toUpperCase(), cx, y);
+      fillTextWithArrows(ctx, texts.title.toUpperCase(), cx, y, size);
       y += X(b.sizes.title) * 0.14;
     }
     if (texts.subtitle) {
       const size = fitText(ctx, texts.subtitle, 500, X(b.sizes.subtitle), SANS, maxW, 0.02);
       y += size * 1.35;
       ctx.globalAlpha = 0.85;
-      ctx.fillText(texts.subtitle, cx, y);
+      fillTextWithArrows(ctx, texts.subtitle, cx, y, size);
       ctx.globalAlpha = 1;
+    }
+    const prof = b.sizes.prof;
+    if (prof) {
+      const ph = X(b.sizes.title * 0.55), pw = X(b.w * 0.62), px = cx - pw / 2;
+      y += X(b.sizes.title * 0.3);
+      ctx.save();
+      ctx.fillStyle = ctx.strokeStyle = state.ink;
+      if (prof.kind === "line") {
+        const alts = prof.pts.map(p => p[1]), lo = Math.min(...alts), hi = Math.max(...alts, lo + 50);
+        const P = ([d, a]) => [px + pw * d / prof.total, y + ph - ph * (a - lo) / (hi - lo)];
+        ctx.beginPath(); ctx.moveTo(px, y + ph);
+        for (const p of prof.pts) ctx.lineTo(...P(p));
+        ctx.lineTo(px + pw, y + ph); ctx.closePath();
+        ctx.globalAlpha = 0.16; ctx.fill();
+        ctx.beginPath(); prof.pts.forEach((p, i) => ctx[i ? "lineTo" : "moveTo"](...P(p)));
+        ctx.globalAlpha = 0.75; ctx.lineWidth = Math.max(1, X(0.35 * lay.k)); ctx.lineJoin = "round"; ctx.stroke();
+      } else {
+        const hi = Math.max(...prof.bars.map(b => b[1]), 1), gap = Math.min(X(0.6 * lay.k), pw / prof.bars.length * 0.25);
+        let x = px;
+        ctx.globalAlpha = 0.45;
+        for (const [km, elev] of prof.bars) {
+          const w = pw * km / prof.total, h = Math.max(X(0.3 * lay.k), ph * elev / hi);
+          ctx.fillRect(x + gap / 2, y + ph - h, Math.max(0.5, w - gap), h);
+          x += w;
+        }
+      }
+      ctx.restore();
+      y += ph;
     }
     if (texts.stats) {
       const size = X(b.sizes.stats);
@@ -598,7 +763,7 @@
     const sel = selection();
     const auto = autoTexts(sel);
     const texts = { title: text("title", auto), subtitle: text("subtitle", auto), stats: text("stats", auto) };
-    const lay = layout(texts);
+    const lay = layout(texts, sel);
     if (!state.view || !state.manual) state.view = fit(sel, lay);
     return { sel, auto, texts, lay };
   }
@@ -690,7 +855,25 @@
 
   // Étiquettes (périples puis villes), toujours horizontales même si la carte tourne,
   // sans chevauchement et sans déborder de la carte.
-  function drawLabels(ctx, lay, view, ppm, hl, onLoad) {
+  // Ordre d'affichage des lieux d'étape : départ, arrivée, puis le milieu, les quarts…
+  function stopOrder(n) {
+    if (n <= 2) return [...Array(n).keys()];
+    const order = [0, n - 1], seen = new Set(order);
+    let parts = [[0, n - 1]];
+    while (parts.length) {
+      const next = [];
+      for (const [a, b] of parts) {
+        const mid = Math.floor((a + b) / 2);
+        if (mid > a && mid < b && !seen.has(mid)) { seen.add(mid); order.push(mid); }
+        if (mid - a > 1) next.push([a, mid]);
+        if (b - mid > 1) next.push([mid, b]);
+      }
+      parts = next;
+    }
+    return order;
+  }
+
+  function drawLabels(ctx, lay, view, ppm, hl, onLoad, sel) {
     if (!state.cities && !(hl.length && state.hlLabels)) return;
     const m = lay.map, X = v => v * ppm;
     const mapPx = { w: X(m.w), h: X(m.h) }, s = mapPx.w / view.span;
@@ -712,7 +895,7 @@
       const txt = o.upper ? str.toUpperCase() : str;
       const w = ctx.measureText(txt).width;
       const r = o.dot ? o.size * 0.2 : 0;
-      const gap = o.dot ? o.size * 0.45 : 0;
+      const gap = o.dot ? o.size * (o.hideDot ? 0.9 : 0.45) : 0;
       const sides = o.dot ? [1, -1] : [0];
       for (const side of sides) {
         const x0 = side > 0 ? px + gap : side < 0 ? px - gap - w : px - w / 2;
@@ -726,7 +909,7 @@
         }
         ctx.fillStyle = o.color;
         ctx.fillText(txt, x0, py + o.size * 0.04);
-        if (o.dot) {
+        if (o.dot && !o.hideDot) {  // hideDot : le marqueur de départ/arrivée est déjà dessiné
           ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI);
           if (state.labelHalo) { ctx.lineWidth = r * 0.9; ctx.stroke(); }
           ctx.fill();
@@ -744,7 +927,22 @@
         label(h.trip.title, x, y, { size: size * 1.1, weight: 700, family: COND, color: state.hlColor, dot: true, upper: false });
       }
     }
-    const rows = state.cities ? geoData("cities", onLoad) : null;
+    const stops = state.cities && state.cityMode === "stops" && sel && sel.trip ? sel.trip.stops || [] : [];
+    if (stops.length) {
+      // Villes-étapes : départ et arrivée en évidence, puis des étapes réparties sur le parcours
+      let count = 0;
+      for (const i of stopOrder(stops.length)) {
+        const ends = i === 0 || i === stops.length - 1;
+        if (!ends && count >= state.cityCount) break;
+        const [lat, lng, name] = stops[i];
+        const [x, y] = project(...mercator(lat, lng));
+        if (label(name, x, y, {
+          size: ends ? size * 1.15 : size * 0.92, weight: ends ? 700 : 500, family: state.cityUpper ? COND : SANS,
+          color: state.cityColor, dot: state.cityDots || (ends && state.endpoints), hideDot: ends && state.endpoints, upper: state.cityUpper,
+        }) && !ends) count++;
+      }
+    }
+    const rows = state.cities && !stops.length ? geoData("cities", onLoad) : null;
     if (rows) {
       const box = viewBox(view, mapPx, s);
       let count = 0;
@@ -786,6 +984,9 @@
     ctx.translate(X(m.x) + mapPx.w / 2, X(m.y) + mapPx.h / 2);
     ctx.rotate(state.rotation * Math.PI / 180);
     const defs = layerDefs();
+    // Fond atténué : couleurs adoucies puis voile de la couleur du fond, pour que le tracé ressorte
+    const mute = defs.length ? Math.min(90, Math.max(0, +state.mute || 0)) / 100 : 0;
+    if (mute && "filter" in ctx) ctx.filter = `saturate(${(1 - mute * 0.8).toFixed(2)})`;
     for (const { def, alpha } of defs) {
       ctx.globalAlpha = alpha;
       for (const t of tilePlan(def, view, mapPx, maxTiles)) {
@@ -794,13 +995,19 @@
         else if (!tl.failed && onTileLoad) tl.promise.then(onTileLoad);
       }
     }
+    if ("filter" in ctx) ctx.filter = "none";
+    if (mute) {
+      const big = Math.hypot(mapPx.w, mapPx.h);
+      ctx.globalAlpha = mute * 0.75; ctx.fillStyle = state.bg;
+      ctx.fillRect(-big, -big, 2 * big, 2 * big);
+    }
     ctx.globalAlpha = 1;
     drawBorders(ctx, view, s, ppm, mapPx, onTileLoad);
     drawTracks(ctx, sel, view, s, ppm);
     const hl = highlighted(sel);
     drawHighlights(ctx, hl, view, s, ppm);
     ctx.restore();
-    try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad); } catch (err) { console.error(err); ctx.restore(); }
+    try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad, sel); } catch (err) { console.error(err); ctx.restore(); }
     drawAttribution(ctx, lay, ppm, defs);
 
     if (!sel.routes.length) {
@@ -933,10 +1140,10 @@
     set({ from: y ? `${y}-01-01` : "", to: y ? `${y}-12-31` : "" }, true);
   });
 
-  const NUMERIC = new Set(["width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
-  const CHECKS = new Set(["relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+  const NUMERIC = new Set(["mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
+  const CHECKS = new Set(["casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
                           "labelHalo", "hl", "hlCasing", "hlLabels"]);
-  const RESHAPE = new Set(["q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
+  const RESHAPE = new Set(["air", "profile", "q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
     for (const el of form.elements) {
       if (!el.name || !(el.name in state)) continue;
@@ -1009,6 +1216,36 @@
     }));
   }
 
+  // Conseil d'orientation : un tracé large remplit mal une affiche en hauteur (et inversement)
+  const orientHint = document.getElementById("orient-hint");
+  function refreshOrientHint(sel, auto) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const r of sel.routes) for (let i = 0; i < r.pts.length; i += 2) {
+      const x = r.pts[i], y = r.pts[i + 1];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    const shape = (x1 - x0) / Math.max(1e-9, y1 - y0);
+    // Part de la carte remplie par le tracé, dans chaque sens (bandeau de texte compris)
+    const texts = { title: text("title", auto), subtitle: text("subtitle", auto), stats: text("stats", auto) };
+    const fill = orientation => {
+      const saved = state.orientation;
+      state.orientation = orientation;
+      const m = layout(texts, sel).map;
+      state.orientation = saved;
+      const ratio = m.w / m.h;
+      return Math.min(shape / ratio, ratio / shape);
+    };
+    const other = state.orientation === "portrait" ? "landscape" : "portrait";
+    const better = isFinite(shape) && sel.routes.length && state.rotation === 0 && fill(other) > fill(state.orientation) * 1.25;
+    orientHint.hidden = !better;
+    if (!better) return;
+    orientHint.querySelector("span").textContent = "Ce tracé remplirait mieux l'affiche";
+    const btn = document.getElementById("orient-btn");
+    btn.textContent = other === "landscape" ? "en paysage" : "en portrait";
+    btn.dataset.want = other;
+  }
+  document.getElementById("orient-btn").addEventListener("click", e => set({ orientation: e.target.dataset.want }, true));
+
   function refreshPanel({ sel, auto }) {
     document.querySelectorAll("[data-source]").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === state.source));
     const selBtn = document.querySelector('[data-source="selection"]');
@@ -1019,6 +1256,10 @@
     document.querySelectorAll("[data-for-text]").forEach(el => { el.hidden = state.textPos === "none"; });
     document.getElementById("relief-wrap").hidden = !state.base || !BASEMAP.hillshade;
     field("endpoints").closest("label").hidden = state.source === "all";
+    field("stageDots").closest("label").hidden = state.source === "all";
+    field("profile").closest("label").hidden = state.source === "all";
+    document.getElementById("mute-wrap").hidden = !state.base;
+    refreshOrientHint(sel, auto);
     document.querySelectorAll("[data-family].chip").forEach(c => c.setAttribute("aria-pressed", !state.hidden.includes(c.dataset.family)));
     yearBox.querySelectorAll("[data-year]").forEach(b => {
       const y = b.dataset.year;
@@ -1030,6 +1271,8 @@
     out("opacity", `${Math.round(state.opacity * 100)} %`);
     out("margin", `${state.margin} mm`);
     out("rotation", `${state.rotation}°`);
+    out("mute", `${state.mute} %`);
+    out("air", `${state.air} %`);
     out("borderWidth", `${nf1.format(state.borderWidth)} mm`);
     out("borderOpacity", `${Math.round(state.borderOpacity * 100)} %`);
     out("cityCount", state.cityCount);
