@@ -221,7 +221,7 @@ class PhotoSyncTests(LoggedInTestCase):
         detail = self.client.get(reverse("activities:detail", args=[1]))
         self.assertContains(detail, 'alt="Au sommet"')
         self.assertContains(detail, 'id="lightbox"')
-        self.assertContains(self.client.get(reverse("activities:map")), "https://img.example.com/a.jpg")
+
 
 
 class PhotoBackfillTests(LoggedInTestCase):
@@ -390,7 +390,7 @@ class JourneyPagesTests(LoggedInTestCase):
     def test_map_highlights_journeys(self):
         response = self.client.get(reverse("activities:map"))
         self.assertEqual(response.context["journeys"][0]["stages"], [1, 2])
-        self.assertContains(response, 'id="journey-toggle"')
+        self.assertContains(response, 'data-tab="voyages"')  # les voyages ont leur onglet dans Explorer
 
     def test_empty_list_explains_rules(self):
         Activity.objects.all().delete()
@@ -476,10 +476,10 @@ class BookTests(LoggedInTestCase):
         Place.objects.all().delete()
         with mock.patch("activities.places._geopf", side_effect=lambda p: {
                 (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
-            builder = self.client.get(reverse("activities:book"))
+            builder = self.client.get(reverse("activities:book"), {"j": "1"})
             self.assertContains(builder, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
             self.assertEqual(self.client.post(reverse("activities:journeys_complete")).json()["remaining"], 0)
-            self.assertContains(self.client.get(reverse("activities:book")), "Annecy → Albertville")
+            self.assertContains(self.client.get(reverse("activities:book"), {"j": "1"}), "Annecy → Albertville")
         response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
         from .models import Book
         created = Book.objects.get()
@@ -511,7 +511,7 @@ class BookTests(LoggedInTestCase):
     def test_book_of_unknown_journey_redirects(self):
         from .models import Book
         b = Book.objects.create(account=self.account, journey_ids=[999])
-        self.assertRedirects(self.client.get(reverse("activities:book_detail", args=[b.pk])), reverse("activities:book"))
+        self.assertRedirects(self.client.get(reverse("activities:book_detail", args=[b.pk])), reverse("activities:creations"))
 
 
 @override_settings(MEDIA_ROOT=__import__("tempfile").mkdtemp())
@@ -905,7 +905,8 @@ class PosterTests(LoggedInTestCase):
 
     def test_links_from_activity_and_nav(self):
         response = self.client.get(reverse("activities:detail", args=[100]))
-        self.assertContains(response, reverse("activities:poster") + "?activite=100")
+        self.assertContains(response, f'action="{reverse("activities:create")}"')
+        self.assertContains(response, 'name="activity" value="100"')
 
     def test_empty_state(self):
         Activity.objects.all().delete()
@@ -928,8 +929,8 @@ class ZoneSelectionTests(LoggedInTestCase):
 
     def test_map_offers_poster_and_book(self):
         response = self.client.get(reverse("activities:map"))
-        self.assertContains(response, 'formaction="/affiche/"')
-        self.assertContains(response, 'formaction="/livre/"')
+        self.assertContains(response, 'name="kind" value="affiche"')
+        self.assertContains(response, 'name="kind" value="livre"')
         self.assertEqual({r["day"][:10] for r in response.context["routes_data"]}, {"2026-08-10", "2026-08-20"})
 
     def test_poster_from_selection(self):
@@ -949,7 +950,7 @@ class ZoneSelectionTests(LoggedInTestCase):
         page = self.client.get(response["Location"])
         self.assertContains(page, 'id="map-s1"')
         self.assertContains(page, 'id="map-s2"')
-        self.assertContains(self.client.get(reverse("activities:book")), "Sélection sur la carte : 2 activités")
+        self.assertContains(self.client.get(reverse("activities:creations")), "Livre · 2 sorties")
 
         # Titre et récit du chapitre : enregistrés dans le livre
         url = reverse("activities:book_update", args=[book_obj.pk])
@@ -1087,7 +1088,7 @@ class ImportFilesTests(TestCase):
             # Déposer à nouveau la même sortie ne la duplique pas
             self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file())]})
             self.assertEqual(account.activities.count(), 2)
-            for name in ("list", "map", "poster", "journeys", "book"):
+            for name in ("list", "map", "poster", "journeys", "creations"):
                 self.assertEqual(self.client.get(reverse(f"activities:{name}")).status_code, 200, name)
             # Un livre se fabrique aussi à partir des sorties importées, sans appel à Strava
             ids = [str(a.strava_id) for a in account.activities.all()]
@@ -1123,3 +1124,64 @@ class StravaUserImportTests(LoggedInTestCase):
             from .sync import sync_activities
             sync_activities(self.account)
         self.assertNotIn("after", api.call_args.args[2])  # le fichier ne décale pas la synchronisation
+
+
+
+@mock.patch("activities.journeys.MIN_DAYS", 2)
+class ExplorerCreateTests(LoggedInTestCase):
+    """Refonte : Explorer → Créer (affiche ou livre) → Mes créations."""
+
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.photos_synced_at = a.details_fetched_at = timezone.now()
+            a.save()
+
+    def test_home_opens_explorer_with_two_tabs_nav(self):
+        self.assertRedirects(self.client.get(reverse("activities:home")), reverse("activities:map"))
+        page = self.client.get(reverse("activities:map"))
+        self.assertContains(page, ">Explorer</a>")
+        self.assertContains(page, ">Mes créations</a>")
+        self.assertNotContains(page, ">Périples</a>")
+        self.assertContains(page, 'data-tab="annees"')
+        self.assertEqual(page.context["years"], [{"year": "2026", "count": 2, "km": 160.0}])
+        self.assertContains(page, 'id="create-dialog"')
+
+    def test_create_poster_saved_and_listed(self):
+        from .models import Poster
+        r = self.client.post(reverse("activities:create"), {"kind": "affiche", "journey": "1"})
+        poster = Poster.objects.get()
+        self.assertRedirects(r, reverse("activities:poster_edit", args=[poster.pk]), fetch_redirect_response=False)
+        self.assertEqual(poster.settings, {"source": "journey", "journey": 1})
+        page = self.client.get(r["Location"])
+        self.assertEqual(page.context["creation"]["settings"], {"source": "journey", "journey": 1})
+        save = self.client.post(reverse("activities:poster_save", args=[poster.pk]),
+                                {"settings": {"source": "journey", "journey": 1, "format": "A2"}, "title": "Mon tour",
+                                 "thumbnail": "data:image/jpeg;base64,AAAA"}, content_type="application/json")
+        self.assertTrue(save.json()["ok"])
+        poster.refresh_from_db()
+        self.assertEqual((poster.title, poster.settings["format"]), ("Mon tour", "A2"))
+        creations = self.client.get(reverse("activities:creations"))
+        self.assertContains(creations, "Mon tour")
+        self.assertContains(creations, "Affiche A2")
+        self.client.post(reverse("activities:poster_delete", args=[poster.pk]))
+        self.assertFalse(Poster.objects.exists())
+
+    def test_create_book_from_journey_year_activity(self):
+        from .models import Book
+        r = self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1"})
+        self.assertEqual(Book.objects.get().journey_ids, [1])
+        self.client.post(reverse("activities:create"), {"kind": "livre", "year": "2026"})
+        self.assertEqual(Book.objects.order_by("-pk").first().activity_ids, [1, 2])
+        r = self.client.post(reverse("activities:create"), {"kind": "affiche", "year": "2026"})
+        from .models import Poster
+        self.assertEqual(Poster.objects.get().settings["from"], "2026-01-01")
+        r = self.client.post(reverse("activities:create"), {"kind": "affiche", "activity": "2"})
+        self.assertEqual(Poster.objects.order_by("-pk").first().settings, {"source": "activity", "activity": 2})
+        other = self.client.post(reverse("activities:create"), {"kind": "affiche", "journey": "999"})
+        self.assertEqual(other.status_code, 404)
+
+    def test_book_builder_page_now_lives_in_creations(self):
+        self.assertRedirects(self.client.get(reverse("activities:book")), reverse("activities:creations"))

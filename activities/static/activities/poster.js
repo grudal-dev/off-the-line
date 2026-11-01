@@ -14,6 +14,8 @@
   const TRIPS = read("journeys-data");
   const FAMILIES = read("families-data");
   const INITIAL = read("initial-data");
+  // Affiche de « Mes créations » : réglages venus du serveur et enregistrés au fil de l'eau
+  const CREATION = read("creation-data");
   const BASEMAP = read("basemap-data");
   const ATHLETE = read("athlete-data");
   const FAMILY = Object.fromEntries(FAMILIES.map(f => [f.key, f]));
@@ -78,8 +80,9 @@
 
   // --- État (mémorisé dans le navigateur) ---------------------------------
   let state = { ...DEFAULTS };
-  try { Object.assign(state, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch (e) { /* ignoré */ }
-  if (INITIAL.source) {
+  if (CREATION) Object.assign(state, CREATION.settings || {});
+  else try { Object.assign(state, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch (e) { /* ignoré */ }
+  if (!CREATION && INITIAL.source) {
     state.source = INITIAL.source;
     state[INITIAL.source] = INITIAL.id;
     Object.assign(state, { title: INITIAL.title || "", subtitle: "", stats: "", view: null, manual: false });
@@ -92,7 +95,41 @@
   if (!TRIPS.some(t => t.id === state.journey)) state.journey = TRIPS[0] ? TRIPS[0].id : null;
   if (state.source === "journey" && state.journey === null) state.source = "all";
   function save() {
+    if (CREATION) return saveCreation();
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* stockage indisponible */ }
+  }
+  // Enregistrement sur le serveur, une seconde après le dernier changement, avec une miniature
+  let saveTimer = 0, lastSaved = "";
+  function saveCreation() {
+    // Les tuiles du fond arrivent après le premier dessin : la miniature est refaite quand elles sont là
+    const loaded = [...tiles.values()].filter(t => t.ok).length;
+    const body = JSON.stringify(state) + "|" + loaded;
+    if (body === lastSaved) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      const status = document.getElementById("save-status");
+      const [W, H] = paper();
+      const thumb = document.createElement("canvas");
+      thumb.width = 360; thumb.height = Math.round(360 * H / W);
+      let thumbnail = null, title = "";
+      try {
+        const out = render(thumb.getContext("2d"), null, 60);
+        title = text("title", out.auto);
+        thumbnail = thumb.toDataURL("image/jpeg", 0.78);
+      } catch (e) { /* fond de carte sans CORS : pas de miniature */ }
+      try {
+        const csrf = document.querySelector("[name=csrfmiddlewaretoken]");
+        const r = await fetch(CREATION.save, {
+          method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": csrf ? csrf.value : "" },
+          body: JSON.stringify({ settings: state, title, thumbnail }),
+        });
+        if (!r.ok) throw new Error(r.status);
+        lastSaved = body;
+        if (status) status.textContent = "Enregistrée automatiquement.";
+      } catch (e) {
+        if (status) status.textContent = "Enregistrement impossible pour l'instant, nouvel essai au prochain changement.";
+      }
+    }, 1000);
   }
 
   // --- Sélection et textes proposés ---------------------------------------
@@ -1235,7 +1272,8 @@
     set(p);
   }));
   document.getElementById("reset-btn").addEventListener("click", () => {
-    state = { ...DEFAULTS, source: state.source, journey: state.journey, activity: state.activity };
+    const keep = ["source", "journey", "activity", "selection", "from", "to", "hidden", "q"];
+    state = { ...DEFAULTS, ...Object.fromEntries(keep.map(k => [k, state[k]])) };
     syncFields();
     redraw();
   });

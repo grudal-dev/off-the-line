@@ -120,7 +120,8 @@ class MapZoneTests(LoggedInTestCase):
     def test_map_has_zone_tool_and_journey_figures(self):
         response = self.client.get(reverse("activities:map"))
         self.assertContains(response, 'id="zone-btn"')
-        self.assertContains(response, f'action="{reverse("activities:book")}"')
+        self.assertContains(response, 'id="zone-create"')
+        self.assertContains(response, f'action="{reverse("activities:create")}"')
         trip = response.context["journeys"][0]
         self.assertEqual((trip["days"], trip["stages"]), (3, [1, 2, 3]))
 

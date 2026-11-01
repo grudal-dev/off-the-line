@@ -18,25 +18,28 @@
       <span>Off the line</span>
     </a>
     {% if user.is_authenticated and user.strava %}
+      {# Deux espaces seulement : ce qu'on a fait (Explorer) et ce qu'on en a tiré (Mes créations) #}
       <nav class="site-nav" aria-label="Navigation principale">
-        <a href="{% url 'activities:list' %}" {% if url_name == "list" or url_name == "detail" %}aria-current="page"{% endif %}>Activités</a>
-        <a href="{% url 'activities:map' %}" {% if url_name == "map" %}aria-current="page"{% endif %}>Carte</a>
-        <a href="{% url 'activities:journeys' %}" {% if url_name == "journeys" or url_name == "journey" %}aria-current="page"{% endif %}>Périples</a>
-        <a href="{% url 'activities:book' %}" {% if url_name == "book" %}aria-current="page"{% endif %}>Livre</a>
-        <a href="{% url 'activities:poster' %}" {% if url_name == "poster" %}aria-current="page"{% endif %}>Affiche</a>
+        <a href="{% url 'activities:map' %}" {% if url_name in "map list detail journeys journey" %}aria-current="page"{% endif %}>Explorer</a>
+        <a href="{% url 'activities:creations' %}" {% if url_name in "creations poster poster_edit book book_detail" %}aria-current="page"{% endif %}>Mes créations</a>
       </nav>
-      <div class="user">
-        {% if user.strava.is_local %}
-          {# Pas de déconnexion : sans compte Strava, ce navigateur est la seule façon de retrouver ses sorties #}
-          <a href="{% url 'activities:import' %}" {% if url_name == "import" %}aria-current="page"{% endif %}>Importer</a>
-        {% else %}
-          {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% endif %}
-          <span>{{ user.strava.firstname }}</span>
-          <form method="post" action="{% url 'activities:logout' %}">{% csrf_token %}
-            <button class="link-button" type="submit">Se déconnecter</button>
-          </form>
-        {% endif %}
-      </div>
+      <details class="user-menu">
+        <summary aria-label="Mon compte">
+          {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% else %}<span class="avatar" aria-hidden="true">{{ user.strava.firstname|default:"?"|first|upper }}</span>{% endif %}
+        </summary>
+        <div class="user-menu-panel">
+          {% if user.strava.firstname %}<p class="muted">{{ user.strava.firstname }} {{ user.strava.lastname }}</p>{% endif %}
+          <a href="{% url 'activities:import' %}">Importer des fichiers</a>
+          {% if not user.strava.is_local %}
+            <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}<button class="link-button" type="submit">Synchroniser Strava</button></form>
+          {% endif %}
+          <a href="{% url 'activities:list' %}">Toutes mes activités</a>
+          {% if not user.strava.is_local %}
+            {# Sans compte Strava, pas de déconnexion : ce navigateur est la seule façon de retrouver ses sorties #}
+            <form method="post" action="{% url 'activities:logout' %}">{% csrf_token %}<button class="link-button" type="submit">Se déconnecter</button></form>
+          {% endif %}
+        </div>
+      </details>
     {% endif %}
   </header>
   {% endwith %}
