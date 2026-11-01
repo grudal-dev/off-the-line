@@ -168,6 +168,10 @@ STORAGES = {
 MEDIA_URL = "media/"
 MEDIA_ROOT = Path(os.environ.get("DJANGO_MEDIA_ROOT", BASE_DIR / "media"))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 30 * 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FILES = 300  # import de sorties : plusieurs fichiers d'un coup
+
+# Les comptes sans Strava sont liés au navigateur par le cookie de session : on le garde un an
+SESSION_COOKIE_AGE = 365 * 24 * 3600
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

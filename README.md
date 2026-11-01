@@ -80,6 +80,29 @@ python manage.py sync_photos --all               # aussi les activités annoncé
 La commande enchaîne les lots et, quand Strava répond « quota atteint », attend la fenêtre de
 15 minutes suivante avant de reprendre. Elle peut être interrompue (Ctrl+C) et relancée sans rien perdre.
 
+## Import de fichiers (sans Strava)
+
+« Importer mes fichiers » (accueil, ou « Importer des fichiers » dans Activités) accepte les fichiers **GPX, FIT
+et TCX**, seuls ou dans une archive **ZIP** (aussi `.gz`) : export d'une activité ou de tout l'historique depuis
+Garmin Connect, Komoot, Coros, Suunto, Wahoo, ou l'archive de ses données Strava. Une seule zone de dépôt, et
+l'aide « Où trouver mes fichiers ? » repliée. Garmin ne peut pas être connecté directement : son programme
+développeurs n'accepte plus de nouvelles demandes.
+
+- **Sans compte** : le premier dépôt crée un compte « sans Strava » lié au navigateur (cookie de session d'un an,
+  `StravaAccount.is_local`). Pas de déconnexion pour lui (il perdrait ses sorties) ; « Supprimer toutes mes
+  données » (Activités → Options avancées) efface tout.
+- **Avec Strava** : les sorties importées s'ajoutent à celles de Strava.
+- Les activités lues dans un fichier ont un **identifiant négatif** (sous 2^53 pour que le navigateur le lise
+  sans arrondi) ; les adresses acceptent ces identifiants (convertisseur `sid`). Elles ont déjà leur profil
+  d'altitude et ne déclenchent **aucun appel à Strava** (photos et détails marqués comme récupérés). Une sortie
+  déposée deux fois (même départ, même distance) n'est pas dupliquée.
+- Lecture : `activities/tracks.py` (distance, D+ avec seuil de 3 m, temps en mouvement, sport, tracé de
+  600 points au plus, profil). L'heure locale est celle de Paris en Europe de l'Ouest et centrale, sinon
+  déduite de la longitude. Les fichiers FIT sont lus avec `fitdecode`.
+
+Ces fichiers viennent de l'utilisateur lui-même : ils ne relèvent pas du contrat API Strava, ce qui permet de
+proposer des affiches et livres payants sans dépendre de l'accord de Strava.
+
 ## Carte
 
 Deux affichages : « Densité » (les tracés s'additionnent et sont recolorés selon le nombre de
@@ -217,7 +240,8 @@ discrètes, à sa place habituelle ou, si elle est hors cadre ou occupée, à c�
 
 Les chiffres proposés comptent les **jours** et les **pays traversés** (au moins deux), d'après les contours
 simplifiés de Natural Earth 1:110 M (`countries-shapes.json`, généré par `scripts/build_countries.py`) : un pays
-ne compte qu'au-delà de 15 km parcourus. Les polices Barlow n'ayant ni l'espace fine du format français des
+ne compte qu'au-delà de 15 km parcourus, sans compter les points qui ont un autre pays à moins de 8 km (ces
+contours se trompent de quelques kilomètres près des frontières ; la mer ne gêne pas). Les polices Barlow n'ayant ni l'espace fine du format français des
 nombres ni la flèche « → », la première est remplacée par une espace insécable et la seconde est dessinée.
 
 L'aperçu et l'image finale sont dessinés par la même fonction (`static/activities/poster.js`), en millimètres :

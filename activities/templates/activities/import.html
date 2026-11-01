@@ -1,0 +1,66 @@
+{% extends "activities/base.html" %}
+{% block title %}Importer mes sorties · Off the line{% endblock %}
+{% block content %}
+  <div class="import">
+    <h1>Importer mes sorties</h1>
+    <p class="muted">Dépose les fichiers de tes sorties : une seule, plusieurs, ou une archive complète. Ta montre ou ton application les enregistre déjà.</p>
+
+    <form method="post" enctype="multipart/form-data" id="import-form">{% csrf_token %}
+      <label class="dropzone" id="dropzone">
+        <input type="file" name="files" id="import-files" multiple accept=".gpx,.fit,.tcx,.zip,.gz">
+        <strong>Dépose tes fichiers ici</strong>
+        <span>ou clique pour les choisir</span>
+        <span class="muted small-print">GPX, FIT, TCX, ou un ZIP qui en contient</span>
+        <span class="dropzone-count" id="import-count" aria-live="polite"></span>
+      </label>
+      <button class="btn big" type="submit" id="import-submit" disabled>Importer</button>
+    </form>
+
+    <details class="import-help">
+      <summary>Où trouver mes fichiers ?</summary>
+      <dl>
+        <dt>Garmin</dt>
+        <dd>Sur Garmin Connect (site web), ouvre une activité, roue dentée ⚙, « Exporter au format GPX ». Pour tout l'historique : Compte, Gestion des données, « Exporter vos données », puis dépose le ZIP reçu par e-mail.</dd>
+        <dt>Strava</dt>
+        <dd>Ouvre une activité, menu « … », « Exporter au format GPX ». Pour tout l'historique : Paramètres, Mon compte, « Télécharger ou supprimer votre compte », puis dépose le ZIP reçu.</dd>
+        <dt>Komoot, Coros, Suunto, Wahoo…</dt>
+        <dd>Chaque activité se télécharge au format GPX depuis l'application ou le site.</dd>
+      </dl>
+    </details>
+
+    {% if not account %}
+      <p class="muted small-print">Pas besoin de compte : tes sorties restent liées à ce navigateur. Tu pourras les effacer à tout moment.</p>
+    {% elif account.is_local %}
+      <p class="muted small-print">Les nouvelles sorties s'ajoutent aux précédentes ; une sortie déjà importée n'est pas dupliquée.</p>
+    {% else %}
+      <p class="muted small-print">Les sorties importées s'ajoutent à celles de Strava ; une sortie déjà présente n'est pas dupliquée.</p>
+    {% endif %}
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const input = document.getElementById("import-files");
+  const zone = document.getElementById("dropzone");
+  const count = document.getElementById("import-count");
+  const submit = document.getElementById("import-submit");
+  const show = () => {
+    const n = input.files.length;
+    count.textContent = n ? `${n} fichier${n > 1 ? "s" : ""} prêt${n > 1 ? "s" : ""}` : "";
+    submit.disabled = !n;
+    zone.classList.toggle("has-files", !!n);
+  };
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(t => zone.addEventListener(t, e => { e.preventDefault(); zone.classList.add("is-over"); }));
+  ["dragleave", "drop"].forEach(t => zone.addEventListener(t, () => zone.classList.remove("is-over")));
+  zone.addEventListener("drop", e => {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files.length) { input.files = e.dataTransfer.files; show(); }
+  });
+  document.getElementById("import-form").addEventListener("submit", () => {
+    submit.disabled = true;
+    submit.textContent = "Import en cours…";
+  });
+})();
+</script>
+{% endblock %}

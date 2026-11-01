@@ -181,6 +181,17 @@
     }
     return null;
   }
+  // Près d'une frontière terrestre, ces contours simplifiés se trompent de quelques kilomètres : un point
+  // qui a un autre pays à moins de BORDER_KM ne compte pas (la mer, elle, ne gêne pas : côtes comprises)
+  function nearOtherCountry(x, y, c, unitsPerKm) {
+    const r = BORDER_KM * unitsPerKm;
+    for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r], [r * 0.7, r * 0.7], [-r * 0.7, r * 0.7], [r * 0.7, -r * 0.7], [-r * 0.7, -r * 0.7]]) {
+      const other = countryAt(x + dx, y + dy);
+      if (other && other !== c) return true;
+    }
+    return false;
+  }
+  const BORDER_KM = 8;
   const countryCache = new Map();
   function countriesOf(routes) {
     if (!routes.length || !loadWorld() || !world.length) return null;
@@ -194,10 +205,10 @@
       let prev = null;
       for (let i = 0; i < p.length; i += 2 * every) {
         const name = countryAt(p[i], p[i + 1]);
-        if (prev && name) {  // name : le pays (objet), clé de la Map
-          // longueur du segment : 40 075 km par unité « monde », réduite selon la latitude
-          const lat = inverseMercator(p[i], p[i + 1])[0];
-          const d = Math.hypot(p[i] - prev[0], p[i + 1] - prev[1]) * 40075 * Math.cos(lat * Math.PI / 180);
+        // longueur : 40 075 km par unité « monde », réduite selon la latitude
+        const lat = inverseMercator(p[i], p[i + 1])[0], kmPerUnit = 40075 * Math.cos(lat * Math.PI / 180);
+        if (prev && name && !nearOtherCountry(p[i], p[i + 1], name, 1 / kmPerUnit)) {  // name : le pays (objet)
+          const d = Math.hypot(p[i] - prev[0], p[i + 1] - prev[1]) * kmPerUnit;
           km.set(name, (km.get(name) || 0) + d);
           const m = sums.get(name) || [0, 0, 0];
           m[0] += p[i]; m[1] += p[i + 1]; m[2]++; sums.set(name, m);

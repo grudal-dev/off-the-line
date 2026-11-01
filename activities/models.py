@@ -18,11 +18,16 @@ class StravaAccount(models.Model):
     refresh_token = models.CharField(max_length=255)
     expires_at = models.DateTimeField()
     scope = models.CharField(max_length=255, blank=True)
+    # Compte sans Strava : créé au premier dépôt de fichiers (GPX, FIT…), lié au navigateur.
+    # Aucun appel à l'API Strava n'est fait pour lui (pas de jetons).
+    is_local = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
+        if self.is_local:
+            return f"Compte sans Strava {self.pk}"
         return f"{self.firstname} {self.lastname} (Strava {self.athlete_id})".strip()
 
     @property
@@ -32,7 +37,8 @@ class StravaAccount(models.Model):
 
 
 class Activity(models.Model):
-    """Activité Strava enregistrée localement (synchronisée depuis l'API)."""
+    """Activité enregistrée localement : synchronisée depuis l'API Strava, ou lue dans un fichier
+    déposé par l'utilisateur (GPX, FIT, TCX). Ces dernières ont un identifiant négatif."""
 
     account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="activities")
     strava_id = models.BigIntegerField(unique=True)
@@ -64,6 +70,10 @@ class Activity(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.start_date:%Y-%m-%d})"
+
+    @property
+    def from_file(self):
+        return self.strava_id < 0
 
     @property
     def distance_km(self):

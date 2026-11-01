@@ -1034,3 +1034,92 @@ class FreeImageryTests(LoggedInTestCase):
             self.assertTrue(r.json()["ok"])
             b.refresh_from_db()
             self.assertEqual(b.option("imagery"), expected)
+
+
+SMALL_FIT = "DCDiUmsBAAAuRklUQAAAAAADAAEAAQKEBASGAAQBAOhtskJAAAAUAAT9BIYABIUBBIUCAoQA6G2yQjXxrCCeFY0EiBMABm6yQmpOrSBuoY0EoRMAJG6yQp+rrSA9LY4EuhMAQm6yQtQIriAMuY4E0xMAYG6yQglmriDcRI8E7BMAfm6yQj7DriCr0I8EBRQAnG6yQnMgryB7XJAEHhQAum6yQqh9ryBK6JAENxQA2G6yQt3aryAZdJEEUBQA9m6yQhI4sCDp/5EEaRQAFG+yQkeVsCC4i5IEghQAMm+yQnzysCCHF5MEmxQAUG+yQrFPsSBXo5MEtBQAbm+yQuassSAmL5QEzRQAjG+yQhoKsiD2upQE5hQAqm+yQk9nsiDFRpUE/xQAyG+yQoTEsiCU0pUEGBUA5m+yQrkhsyBkXpYEMRUABHCyQu5+syAz6pYEShUAInCyQiPcsyADdpcEYxVAAAASAAMCBIYFAQAGAQAA6G2yQgIuyzI="
+
+
+def gpx_file(name="Col de la Forclaz", day=14, kind="cycling", n=40):
+    pts = "".join(
+        f'<trkpt lat="{45.90 + i * 0.001:.6f}" lon="{6.12 + i * 0.0015:.6f}"><ele>{400 + i * 4}</ele>'
+        f'<time>2025-06-{day:02d}T06:{i // 2:02d}:{(i % 2) * 30:02d}Z</time></trkpt>' for i in range(n))
+    return (f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>{name}</name>'
+            f'<type>{kind}</type><trkseg>{pts}</trkseg></trk></gpx>').encode()
+
+
+class TrackFileTests(TestCase):
+    def test_gpx_fit_zip_and_rejects(self):
+        import base64, io, zipfile
+        from . import tracks
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("DI_CONNECT/123_ACTIVITY.fit", base64.b64decode(SMALL_FIT))
+        found, skipped = tracks.read_files([
+            ("forclaz.gpx", gpx_file()), ("export.zip", archive.getvalue()), ("notes.txt", b"x"),
+            ("plan.gpx", b'<gpx xmlns="http://www.topografix.com/GPX/1/1"><rte><rtept lat="45" lon="6"/><rtept lat="45.1" lon="6"/></rte></gpx>'),
+        ])
+        gpx, fit = found
+        self.assertEqual((gpx["name"], gpx["sport_type"]), ("Col de la Forclaz", "Ride"))
+        self.assertAlmostEqual(gpx["distance"], 6.4e3, delta=300)
+        self.assertGreater(gpx["total_elevation_gain"], 140)
+        self.assertEqual(gpx["start_date_local"].hour, 8)  # 6 h UTC = 8 h à Annecy (heure d'été)
+        from . import polyline
+        self.assertEqual(polyline.decode(gpx["summary_polyline"])[0], [45.9, 6.12])
+        self.assertEqual(gpx["raw"]["source"], "file")
+        self.assertEqual((fit["name"], fit["sport_type"]), ("Sortie gravel du 16/06/2025", "GravelRide"))
+        self.assertEqual([s[0] for s in skipped], ["notes.txt", "plan.gpx"])
+
+
+class ImportFilesTests(TestCase):
+    def test_visitor_imports_without_strava_then_deletes(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile as F
+        home = self.client.get(reverse("activities:home"))
+        self.assertContains(home, reverse("activities:import"))
+        self.assertContains(self.client.get(reverse("activities:import")), 'name="files"')
+
+        with mock.patch("activities.strava.requests") as http:
+            r = self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file()), F("b.gpx", gpx_file("Lac", 15))]})
+            self.assertRedirects(r, reverse("activities:map"), fetch_redirect_response=False)
+            account = StravaAccount.objects.get()
+            self.assertTrue(account.is_local)
+            self.assertEqual(account.activities.count(), 2)
+            self.assertTrue(all(a.from_file and a.photos_synced_at for a in account.activities.all()))
+            # Déposer à nouveau la même sortie ne la duplique pas
+            self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file())]})
+            self.assertEqual(account.activities.count(), 2)
+            for name in ("list", "map", "poster", "journeys", "book"):
+                self.assertEqual(self.client.get(reverse(f"activities:{name}")).status_code, 200, name)
+            # Un livre se fabrique aussi à partir des sorties importées, sans appel à Strava
+            ids = [str(a.strava_id) for a in account.activities.all()]
+            r = self.client.post(reverse("activities:book"), {"a": ids})
+            self.assertEqual(r.status_code, 302)
+            self.assertEqual(self.client.get(r["Location"]).status_code, 200)
+            page = self.client.get(reverse("activities:list"))
+            self.assertNotContains(page, "Synchroniser avec Strava")
+            self.assertNotContains(page, "Se déconnecter")
+            detail = self.client.get(reverse("activities:detail", args=[account.activities.first().strava_id]))
+            self.assertNotContains(detail, "Voir sur Strava")
+            http.get.assert_not_called()
+            http.post.assert_not_called()
+
+        self.client.post(reverse("activities:disconnect"))
+        self.assertFalse(StravaAccount.objects.exists())
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_nothing_readable(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile as F
+        r = self.client.post(reverse("activities:import"), {"files": [F("notes.txt", b"hello")]}, follow=True)
+        self.assertContains(r, "Aucune activité avec un tracé GPS")
+        self.assertFalse(StravaAccount.objects.exists())
+
+
+class StravaUserImportTests(LoggedInTestCase):
+    def test_files_added_to_strava_account_and_sync_ignores_them(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile as F
+        self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file())]})
+        self.assertEqual(self.account.activities.filter(strava_id__lt=0).count(), 1)
+        self.assertEqual(StravaAccount.objects.count(), 1)
+        with mock.patch("activities.strava.api_get", return_value=[]) as api:
+            from .sync import sync_activities
+            sync_activities(self.account)
+        self.assertNotIn("after", api.call_args.args[2])  # le fichier ne décale pas la synchronisation

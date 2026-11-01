@@ -5,11 +5,16 @@
   <div class="page-head">
     <div>
       <h1>Mes activités</h1>
-      <p class="muted">{{ total }} activité{{ total|pluralize }} importée{{ total|pluralize }} depuis Strava</p>
+      <p class="muted">{{ total }} activité{{ total|pluralize }}{% if account.is_local %} importée{{ total|pluralize }} depuis tes fichiers{% else %} importée{{ total|pluralize }}{% endif %}</p>
     </div>
-    <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
-      <button class="btn" type="submit">Synchroniser avec Strava</button>
-    </form>
+    <div class="page-actions">
+      {% if not account.is_local %}
+        <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+          <button class="btn" type="submit">Synchroniser avec Strava</button>
+        </form>
+      {% endif %}
+      <a class="btn {% if not account.is_local %}ghost{% endif %}" href="{% url 'activities:import' %}">Importer des fichiers</a>
+    </div>
   </div>
 
   {% if sports|length > 1 %}
@@ -64,21 +69,32 @@
     {% endif %}
   {% else %}
     <div class="empty-state">
-      <p>Aucune activité pour l'instant. Lance une synchronisation pour importer tes sorties Strava.</p>
-      <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
-        <button class="btn" type="submit">Synchroniser avec Strava</button>
-      </form>
+      {% if account.is_local %}
+        <p>Aucune activité pour l'instant.</p>
+        <a class="btn" href="{% url 'activities:import' %}">Importer des fichiers</a>
+      {% else %}
+        <p>Aucune activité pour l'instant. Lance une synchronisation pour importer tes sorties Strava.</p>
+        <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+          <button class="btn" type="submit">Synchroniser avec Strava</button>
+        </form>
+      {% endif %}
     </div>
   {% endif %}
 
   <details class="advanced">
     <summary>Options avancées</summary>
-    <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
-      <input type="hidden" name="full" value="1">
-      <button class="btn ghost" type="submit">Tout réimporter depuis Strava</button>
-    </form>
-    <form method="post" action="{% url 'activities:disconnect' %}">{% csrf_token %}
-      <button class="btn ghost" type="submit">Retirer l'accès Strava et supprimer mes données</button>
-    </form>
+    {% if account.is_local %}
+      <form method="post" action="{% url 'activities:disconnect' %}" onsubmit="return confirm('Supprimer définitivement tes sorties, affiches et livres ?')">{% csrf_token %}
+        <button class="btn ghost" type="submit">Supprimer toutes mes données</button>
+      </form>
+    {% else %}
+      <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+        <input type="hidden" name="full" value="1">
+        <button class="btn ghost" type="submit">Tout réimporter depuis Strava</button>
+      </form>
+      <form method="post" action="{% url 'activities:disconnect' %}">{% csrf_token %}
+        <button class="btn ghost" type="submit">Retirer l'accès Strava et supprimer mes données</button>
+      </form>
+    {% endif %}
   </details>
 {% endblock %}
