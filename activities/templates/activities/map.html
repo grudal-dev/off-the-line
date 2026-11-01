@@ -1,6 +1,6 @@
 {% extends "activities/base.html" %}
 {% block title %}Tous mes parcours · Off the line{% endblock %}
-{% block head %}{% include "activities/leaflet_head.html" %}{% endblock %}
+{% block head %}{% include "activities/globe_head.html" %}{% endblock %}
 {% block main_class %}full{% endblock %}
 {% block content %}
   {% if routes %}
@@ -75,7 +75,7 @@
         {% endfor %}
       </ul>
     </aside>
-    <div class="atlas-map" id="atlas-map">
+    <div class="atlas-map is-globe" id="atlas-map">
       <div id="map" role="img" aria-label="Carte de tous les parcours"></div>
     </div>
   </div>
@@ -131,135 +131,241 @@
   });
   const box = document.getElementById("atlas-map");
   const list = document.getElementById("route-list");
+  const trips = JSON.parse(document.getElementById("journeys-data").textContent);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // Deux affichages :
-  // - Densité : chaque tracé ajoute un peu d'intensité là où il passe ; l'image est
-  //   ensuite recolorée selon cette intensité (1 passage → couleur légère, chemins
-  //   très empruntés → couleur intense). Les rues souvent parcourues ressortent.
-  // - Couleurs par sport : un tracé = la couleur de son sport.
+  // Carte en globe (MapLibre) : vue d'ensemble sur la Terre entière, qui s'aplatit
+  // d'elle-même en carte classique quand on zoome sur une région.
+  const byId = new Map(routes.map(r => [r.id, r]));
+  const ll = c => [c[1], c[0]];  // [lat, lng] → [lng, lat] (GeoJSON, MapLibre)
+  function boundsOf(coordsList) {
+    let w = 180, s = 90, e = -180, n = -90;
+    for (const coords of coordsList) for (const [lat, lng] of coords) {
+      if (lng < w) w = lng; if (lng > e) e = lng; if (lat < s) s = lat; if (lat > n) n = lat;
+    }
+    return w <= e ? [[w, s], [e, n]] : null;
+  }
+  for (const r of routes) r.bounds = boundsOf([r.coords]);
+  const routeFeatures = routes.filter(r => r.coords.length > 1).map(r => ({
+    type: "Feature", id: r.id,
+    properties: { id: r.id, family: r.family, color: r.color },
+    geometry: { type: "LineString", coordinates: r.coords.map(ll) },
+  }));
+  const startFeatures = routeFeatures.map(f => ({
+    type: "Feature", properties: f.properties, geometry: { type: "Point", coordinates: f.geometry.coordinates[0] },
+  }));
+  const all = boundsOf(routes.map(r => r.coords));
+  // Centre de gravité des départs (sur la sphère) : le globe s'ouvre face aux lieux les plus parcourus
+  function centroid() {
+    let x = 0, y = 0, z = 0;
+    for (const r of routes) {
+      if (!r.coords.length) continue;
+      const [lat, lng] = r.coords[0].map(v => v * Math.PI / 180);
+      x += Math.cos(lat) * Math.cos(lng); y += Math.cos(lat) * Math.sin(lng); z += Math.sin(lat);
+    }
+    if (!x && !y && !z) return [2.5, 46.5];
+    return [Math.atan2(y, x) * 180 / Math.PI, Math.atan2(z, Math.hypot(x, y)) * 180 / Math.PI];
+  }
+  const centre = centroid();
+  // Parcours sur plusieurs continents : on reste sur le globe ; sinon on se pose sur la zone
+  const worldwide = all && (all[1][0] - all[0][0] > 100 || all[1][1] - all[0][1] > 70);
+
+  const map = new maplibregl.Map({
+    container: "map",
+    style: {
+      version: 8,
+      projection: { type: "globe" },
+      // Halo d'atmosphère autour du globe, qui s'efface quand on se rapproche du sol
+      sky: { "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 0.6, 4, 0.5, 7, 0] },
+      light: { anchor: "viewport", position: [1.5, 0, 40] },
+      sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": "#dfe6e4" } }],
+    },
+    center: centre, zoom: 1.1,
+    attributionControl: { compact: true },
+    dragRotate: false, pitchWithRotate: false, touchPitch: false, maxPitch: 0,
+  });
+  map.touchZoomRotate.disableRotation();
+  map.keyboard.disableRotation();
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+  // Bouton « vue globe » : revient à la Terre entière
+  map.addControl({
+    onAdd() {
+      const el = document.createElement("div");
+      el.className = "maplibregl-ctrl maplibregl-ctrl-group";
+      el.innerHTML = `<button type="button" class="globe-btn" title="Vue globe" aria-label="Revenir à la vue globe">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/></svg></button>`;
+      el.querySelector("button").addEventListener("click", () => map.easeTo({ zoom: 1.4, duration: reduceMotion ? 0 : 1600 }));
+      return el;
+    },
+    onRemove() {},
+  }, "bottom-right");
+
+  // Densité : deux couches très transparentes qui s'additionnent là où les tracés se superposent :
+  // une teinte (1 passage = couleur légère) et une seconde qui ne ressort qu'après de nombreux
+  // passages (blanc sur fond sombre, violet sur fond clair) : les chemins très empruntés ressortent.
+  // Couleurs par sport : un tracé = la couleur de son sport.
   const PALETTES = {
     bright: [[0, "rgba(232,89,12,0)"], [0.06, "rgba(240,96,20,.65)"], [0.3, "#fc6a1e"], [0.6, "#ffb347"], [1, "#fffbe8"]],
     deep: [[0, "rgba(252,76,2,0)"], [0.06, "rgba(252,76,2,.75)"], [0.35, "#e11d48"], [0.65, "#9d174d"], [1, "#3b0764"]],
   };
-  function palette(stops) {
-    const c = document.createElement("canvas");
-    c.width = 256; c.height = 1;
-    const g = c.getContext("2d").createLinearGradient(0, 0, 256, 0);
-    stops.forEach(([at, col]) => g.addColorStop(at, col));
-    const ctx = c.getContext("2d");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 1);
-    return { data: ctx.getImageData(0, 0, 256, 1).data, css: `linear-gradient(90deg, ${stops.slice(1).map(([a, c]) => `${c} ${a * 100}%`).join(", ")})` };
-  }
-  const RAMPS = { bright: palette(PALETTES.bright), deep: palette(PALETTES.deep) };
-
-  const TracksCanvas = L.Canvas.extend({
-    // Toujours redessiner tout le canevas : la recoloration porte sur l'image entière
-    _extendRedrawBounds() {},
-    _draw() {
-      this._ctx.globalCompositeOperation = this.options.density ? "lighter" : this.options.blend;
-      L.Canvas.prototype._draw.call(this);
-      if (this.options.density) this._colorize();
-    },
-    _colorize() {
-      const { width, height } = this._container;
-      if (!width || !height) return;
-      const img = this._ctx.getImageData(0, 0, width, height);
-      const px = img.data, pal = this.options.ramp.data;
-      for (let i = 3; i < px.length; i += 4) {
-        const a = px[i];
-        if (!a) continue;
-        const k = a * 4;
-        px[i - 3] = pal[k]; px[i - 2] = pal[k + 1]; px[i - 1] = pal[k + 2]; px[i] = pal[k + 3];
-      }
-      this._ctx.putImageData(img, 0, 0);
-    },
-  });
-  const renderer = new TracksCanvas({ padding: 0.3, tolerance: 6, density: true, blend: "source-over", ramp: RAMPS.bright });
-  const overlay = L.canvas({ padding: 0.3 });  // mise en évidence au survol, au-dessus de tout
-  const map = L.map("map", { renderer, zoomSnap: 0.25, zoomControl: false });
-  L.control.zoom({ position: "bottomright" }).addTo(map);
-
-  // Densité : lignes fines et très transparentes qui s'additionnent.
-  // Sports : plus épais, et « multiply » sur fond clair pour voir quand même les superpositions.
+  const DENSITY = {
+    bright: { tint: "#fc6a1e", tintOpacity: 0.32, peak: "#fffbe8", peakOpacity: 0.09 },
+    deep: { tint: "#fc4c02", tintOpacity: 0.3, peak: "#3b0764", peakOpacity: 0.07 },
+  };
+  const rampCss = stops => `linear-gradient(90deg, ${stops.slice(1).map(([a, c]) => `${c} ${a * 100}%`).join(", ")})`;
   const SPORTS = {
-    dark: { weight: 2, opacity: 0.45, blend: "lighter" },
-    light: { weight: 2.5, opacity: 0.5, blend: "multiply" },
-    color: { weight: 2.5, opacity: 0.55, blend: "multiply" },
-    photo: { weight: 2.5, opacity: 0.6, blend: "screen" },
+    dark: { weight: 2, opacity: 0.6 },
+    light: { weight: 2.5, opacity: 0.7 },
+    color: { weight: 2.5, opacity: 0.75 },
+    photo: { weight: 2.5, opacity: 0.75 },
   };
   const HL = { dark: "#ffffff", photo: "#ffffff", light: "#1c2629", color: "#1c2629" };
+  const GROUND = { dark: "#262d30", photo: "#1d2a2e", light: "#e8eaea", color: "#dfe6e4" };
+  // Un peu plus épais en vue globe, pour que les tracés restent visibles de loin
+  const width = k => ["interpolate", ["linear"], ["zoom"], 0, 2.2 * k, 5, 2 * k, 10, 2.5 * k];
   let theme = "color";
   let mode = "density";
   try { mode = localStorage.getItem("otl-map-mode") || "density"; } catch (e) {}
+  const hidden = new Set();
+  let ready = false;
 
-  function lineStyle(route) {
-    if (mode === "density") return { color: "#ffffff", weight: 2.5, opacity: 0.22 };
-    return { color: route.color, weight: SPORTS[theme].weight, opacity: SPORTS[theme].opacity };
-  }
   function restyle() {
-    renderer.options.density = mode === "density";
-    renderer.options.blend = SPORTS[theme].blend;
-    renderer.options.ramp = theme === "dark" || theme === "photo" ? RAMPS.bright : RAMPS.deep;
-    document.getElementById("density-ramp").style.background = renderer.options.ramp.css;
+    if (!ready) return;
+    const ramp = theme === "dark" || theme === "photo" ? "bright" : "deep";
+    const d = DENSITY[ramp];
+    document.getElementById("density-ramp").style.background = rampCss(PALETTES[ramp]);
     document.getElementById("density-legend").hidden = mode !== "density";
-    for (const line of byId.values()) Object.assign(line.options, lineStyle(line.route));
-    if (renderer._map && renderer._ctx) renderer._redraw();
+    if (mode === "density") {
+      map.setPaintProperty("routes", "line-color", d.tint);
+      map.setPaintProperty("routes", "line-opacity", d.tintOpacity);
+      map.setPaintProperty("routes", "line-width", width(1));
+      map.setPaintProperty("routes-peak", "line-color", d.peak);
+      map.setPaintProperty("routes-peak", "line-opacity", d.peakOpacity);
+      map.setLayoutProperty("routes-peak", "visibility", "visible");
+      map.setPaintProperty("starts", "circle-color", d.tint);
+    } else {
+      map.setPaintProperty("routes", "line-color", ["get", "color"]);
+      map.setPaintProperty("routes", "line-opacity", SPORTS[theme].opacity);
+      map.setPaintProperty("routes", "line-width", width(SPORTS[theme].weight / 2.5));
+      map.setLayoutProperty("routes-peak", "visibility", "none");
+      map.setPaintProperty("starts", "circle-color", ["get", "color"]);
+    }
+    map.setPaintProperty("hl", "line-color", HL[theme]);
+    map.setPaintProperty("bg", "background-color", GROUND[theme]);
+    map.setPaintProperty("trips-casing", "line-color", theme === "dark" || theme === "photo" ? "#1c2629" : "#ffffff");
     document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
   }
 
-  const group = L.featureGroup().addTo(map);
-  const byId = new Map();
-  let active = null, glow = null;
-
-  for (const r of routes) {
-    const line = L.polyline(r.coords, lineStyle(r));
-    line.route = r;
-    line.bindTooltip(
-      `<strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.sport)}, ${r.date}, ${r.km.toFixed(1).replace(".", ",")} km</span>`,
-      { sticky: true, className: "route-tip", direction: "top", offset: [0, -8] }
-    );
-    line.on("mouseover", () => highlight(r.id, true));
-    line.on("mouseout", () => highlight(r.id, false));
-    line.on("click", () => { window.location = `/activites/${r.id}/`; });
-    line.addTo(group);
-    byId.set(r.id, line);
+  function applyFilter() {
+    const f = hidden.size ? ["!", ["in", ["get", "family"], ["literal", [...hidden]]]] : null;
+    ["routes", "routes-peak", "starts"].forEach(id => map.setFilter(id, f));
   }
 
-  // Périples : liseré et dégradé orange → violet ; les transferts (train, ferry…)
+  // Périples : liseré et couleur par étape (orange → violet) ; les transferts (train, ferry…)
   // en pointillés. Masqués par défaut pour laisser voir la densité.
-  const trips = JSON.parse(document.getElementById("journeys-data").textContent);
-  const tripRenderer = L.canvas({ padding: 0.3, tolerance: 4 });
-  const tripLayer = L.featureGroup();
-  const casings = [];
-  for (const t of trips) {
-    const tip = `<strong>${escapeHtml(t.title)}</strong><span>${t.dates}, ${t.stages.length} étapes</span>`;
-    const coords = t.stages.map(id => byId.get(id) && byId.get(id).route.coords);
-    coords.forEach(c => c && casings.push(L.polyline(c, { renderer: tripRenderer, color: "#fff", weight: 9, opacity: 0.95, interactive: false }).addTo(tripLayer)));
+  const tripStages = [], tripTransfers = [], tripLabels = [];
+  trips.forEach((t, ti) => {
+    const coords = t.stages.map(id => byId.get(id) && byId.get(id).coords);
     coords.forEach((c, i) => {
-      if (!c) return;
-      L.polyline(c, { renderer: tripRenderer, color: t.colors[i], weight: 4.5, lineCap: "round" })
-        .bindTooltip(tip, { sticky: true, className: "route-tip" })
-        .on("click", () => { window.location = t.url; })
-        .addTo(tripLayer);
+      if (c && c.length > 1) tripStages.push({ type: "Feature", properties: { trip: ti, color: t.colors[i] },
+        geometry: { type: "LineString", coordinates: c.map(ll) } });
     });
     (t.transfers || []).forEach(i => {
       if (!coords[i] || !coords[i + 1]) return;
-      L.polyline([coords[i][coords[i].length - 1], coords[i + 1][0]], {
-        renderer: tripRenderer, color: "#1c2629", weight: 2.5, dashArray: "2 7", lineCap: "round", interactive: false,
-      }).addTo(tripLayer);
+      tripTransfers.push({ type: "Feature", properties: {},
+        geometry: { type: "LineString", coordinates: [ll(coords[i][coords[i].length - 1]), ll(coords[i + 1][0])] } });
     });
     if (coords[0]) {
-      L.marker(coords[0][0], {
-        icon: L.divIcon({ className: "", html: `<a class="journey-label" href="${t.url}">${escapeHtml(t.title)}</a>`, iconSize: null, iconAnchor: [0, 30] }),
-        zIndexOffset: 1000,
-      }).addTo(tripLayer);
+      const a = document.createElement("a");
+      a.className = "journey-label"; a.href = t.url; a.textContent = t.title;
+      tripLabels.push(new maplibregl.Marker({ element: a, anchor: "top-left", offset: [0, -30] }).setLngLat(ll(coords[0][0])));
     }
-  }
+  });
+  const fc = features => ({ type: "FeatureCollection", features });
   const tripToggle = document.getElementById("journey-toggle");
-  if (tripToggle) tripToggle.addEventListener("click", () => {
-    const on = tripToggle.getAttribute("aria-pressed") !== "true";
+  const tripsOn = () => tripToggle && tripToggle.getAttribute("aria-pressed") === "true";
+  function showTrips(on) {
+    if (!tripToggle) return;
     tripToggle.setAttribute("aria-pressed", on);
-    on ? tripLayer.addTo(map) : tripLayer.remove();
+    ["trips-casing", "trips-line", "trips-transfer"].forEach(id => map.setLayoutProperty(id, "visibility", on ? "visible" : "none"));
+    tripLabels.forEach(m => (on ? m.addTo(map) : m.remove()));
+  }
+  if (tripToggle) tripToggle.addEventListener("click", () => ready && showTrips(!tripsOn()));
+
+  const fit = (bounds, duration) => bounds && map.fitBounds(bounds, { padding: 40, maxZoom: 15, duration: reduceMotion ? 0 : duration });
+
+  map.on("load", () => {
+    const line = { "line-cap": "round", "line-join": "round" };
+    map.addSource("routes", { type: "geojson", data: fc(routeFeatures), promoteId: "id", tolerance: 0.5 });
+    map.addLayer({ id: "routes", type: "line", source: "routes", layout: line, paint: { "line-width": width(1) } });
+    map.addLayer({ id: "routes-peak", type: "line", source: "routes", layout: line, paint: { "line-width": width(0.8) } });
+    // Vue globe : une pastille par départ, les tracés n'y sont que des points ; elles s'effacent en zoomant
+    const fade = ["interpolate", ["linear"], ["zoom"], 4, 1, 6.5, 0];
+    map.addSource("starts", { type: "geojson", data: fc(startFeatures) });
+    map.addLayer({ id: "starts", type: "circle", source: "starts", paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 3, 5, 4.5], "circle-opacity": fade,
+      "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.2, "circle-stroke-opacity": fade,
+      "circle-pitch-alignment": "map",
+    } });
+    map.addSource("trips", { type: "geojson", data: fc(tripStages) });
+    map.addSource("transfers", { type: "geojson", data: fc(tripTransfers) });
+    const off = { ...line, visibility: "none" };
+    map.addLayer({ id: "trips-casing", type: "line", source: "trips", layout: off, paint: { "line-color": "#fff", "line-width": 9, "line-opacity": 0.95 } });
+    map.addLayer({ id: "trips-line", type: "line", source: "trips", layout: off, paint: { "line-color": ["get", "color"], "line-width": 4.5 } });
+    map.addLayer({ id: "trips-transfer", type: "line", source: "transfers", layout: off,
+                   paint: { "line-color": "#1c2629", "line-width": 2.5, "line-dasharray": [0.8, 2.8] } });
+    map.addLayer({ id: "hl", type: "line", source: "routes", layout: line, filter: ["==", ["get", "id"], -1], paint: { "line-width": 4 } });
+    map.addSource("zone", { type: "geojson", data: fc([]) });
+    map.addLayer({ id: "zone-fill", type: "fill", source: "zone", paint: { "fill-color": "#2f7aa0", "fill-opacity": 0.08 } });
+    map.addLayer({ id: "zone-line", type: "line", source: "zone", paint: { "line-color": "#2f7aa0", "line-width": 2, "line-dasharray": [3, 2] } });
+    ready = true;
+    mountBasemapsGlobe(map, def => {
+      theme = def.theme;
+      box.dataset.theme = theme;
+      restyle();
+    });
+    // Arrivée façon carnet de voyage : la Terre entière, puis on se pose sur les parcours
+    setTimeout(() => {
+      if (worldwide) map.easeTo({ center: centre, zoom: 1.6, duration: reduceMotion ? 0 : 2000 });
+      else fit(all, 2600);
+    }, reduceMotion ? 0 : 400);
+  });
+
+  // Survol et clic : un peu de marge autour du pointeur, les tracés sont fins
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: "route-tip", offset: 12, maxWidth: "none" });
+  let active = null;
+  function pick(point) {
+    const bbox = [[point.x - 5, point.y - 5], [point.x + 5, point.y + 5]];
+    if (tripsOn()) {
+      const t = map.queryRenderedFeatures(bbox, { layers: ["trips-line"] })[0];
+      if (t) return { trip: trips[t.properties.trip] };
+    }
+    const r = map.queryRenderedFeatures(bbox, { layers: ["routes", ...(map.getZoom() < 6 ? ["starts"] : [])] })[0];
+    return r ? { route: byId.get(r.properties.id) } : null;
+  }
+  map.on("mousemove", e => {
+    if (selecting || zoneStart) return;
+    const hit = pick(e.point);
+    map.getCanvas().style.cursor = hit ? "pointer" : "";
+    if (!hit) { tip.remove(); if (active) highlight(active, false); return; }
+    if (hit.trip) {
+      if (active) highlight(active, false);
+      tip.setHTML(`<strong>${escapeHtml(hit.trip.title)}</strong><span>${hit.trip.dates}, ${hit.trip.stages.length} étapes</span>`);
+    } else {
+      const r = hit.route;
+      if (active !== r.id) highlight(r.id, true);
+      tip.setHTML(`<strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.sport)}, ${r.date}, ${r.km.toFixed(1).replace(".", ",")} km</span>`);
+    }
+    tip.setLngLat(e.lngLat).addTo(map);
+  });
+  map.getCanvas().addEventListener("mouseleave", () => { tip.remove(); if (active) highlight(active, false); });
+  map.on("click", e => {
+    if (swallowClick) { swallowClick = false; return; }
+    if (selecting) return;
+    const hit = pick(e.point);
+    if (hit) window.location = hit.trip ? hit.trip.url : `/activites/${hit.route.id}/`;
   });
 
   document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
@@ -268,24 +374,14 @@
     restyle();
   }));
 
-  mountBasemaps(map, def => {
-    theme = def.theme;
-    box.dataset.theme = theme;
-    const casing = theme === "dark" || theme === "photo" ? "#1c2629" : "#ffffff";
-    casings.forEach(c => c.setStyle({ color: casing }));
-    restyle();
-  });
-
   function highlight(id, on) {
-    const line = byId.get(id);
     const item = list.querySelector(`[data-route="${id}"]`);
-    if (glow) { glow.remove(); glow = null; }
     if (active) list.querySelector(`[data-route="${active}"]`)?.classList.remove("is-active");
     active = null;
+    if (ready) map.setFilter("hl", ["==", ["get", "id"], on ? id : -1]);
     if (!on) return;
     active = id;
-    glow = L.polyline(line.route.coords, { renderer: overlay, color: HL[theme], weight: 4, opacity: 1, interactive: false }).addTo(map);
-    item.classList.add("is-active");
+    item?.classList.add("is-active");
   }
 
   // Survol de la liste : met le parcours en évidence sur la carte
@@ -299,28 +395,21 @@
     if (!a) return;
     const id = Number(a.dataset.route);
     highlight(id, true);
-    map.flyToBounds(byId.get(id).getBounds(), { padding: [40, 40], duration: 0.6 });
+    fit(byId.get(id).bounds, 900);
   });
 
   // Filtre par famille de sport
-  const hidden = new Set();
   document.querySelectorAll("[data-family].chip").forEach(chip => chip.addEventListener("click", () => {
     const fam = chip.dataset.family;
     hidden.has(fam) ? hidden.delete(fam) : hidden.add(fam);
     chip.setAttribute("aria-pressed", !hidden.has(fam));
-    let count = 0, km = 0;
-    for (const [id, line] of byId) {
-      const show = !hidden.has(line.route.family);
-      if (show) { count++; km += line.route.km; group.addLayer(line); } else group.removeLayer(line);
-    }
+    const shown = routes.filter(r => !hidden.has(r.family));
     list.querySelectorAll("li[data-family]").forEach(li => { li.hidden = hidden.has(li.dataset.family); });
-    document.getElementById("total-count").textContent = count;
-    document.getElementById("total-km").textContent = Math.round(km).toLocaleString("fr-FR");
-    if (renderer._map && renderer._ctx) renderer._redraw();
-    if (count) map.flyToBounds(group.getBounds(), { padding: [30, 30], duration: 0.6 });
+    document.getElementById("total-count").textContent = shown.length;
+    document.getElementById("total-km").textContent = Math.round(shown.reduce((a, r) => a + r.km, 0)).toLocaleString("fr-FR");
+    if (ready) applyFilter();
+    if (shown.length) fit(boundsOf(shown.map(r => r.coords)), 900);
   }));
-
-  map.fitBounds(group.getBounds(), { padding: [30, 30] });
 
   // Sélection d'une zone : on trace un rectangle, les périples qui y passent
   // sont proposés pour créer un livre (formulaire envoyé à la page Livre).
@@ -329,22 +418,39 @@
   const zoneList = document.getElementById("zone-journeys");
   const zoneForm = document.getElementById("zone-form");
   const zoneEmpty = document.getElementById("zone-empty");
-  const mapEl = map.getContainer();
+  const mapEl = map.getCanvasContainer();
   const hint = document.createElement("p");
   hint.className = "zone-hint"; hint.hidden = true;
   hint.textContent = "Fais glisser pour tracer la zone (Échap pour annuler)";
   box.appendChild(hint);
-  let selecting = false, zoneStart = null, zoneRect = null, swallowClick = false;
+  let selecting = false, zoneStart = null, zoneBounds = null, swallowClick = false;
+
+  // Rectangle en latitude / longitude, ses bords suivent méridiens et parallèles sur le globe
+  function drawZone(b) {
+    const data = [];
+    if (b) {
+      const ring = [], steps = 24;
+      for (let i = 0; i <= steps; i++) ring.push([b.w + (b.e - b.w) * i / steps, b.s]);
+      for (let i = 0; i <= steps; i++) ring.push([b.e - (b.e - b.w) * i / steps, b.n]);
+      ring.push(ring[0]);
+      data.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } });
+    }
+    map.getSource("zone")?.setData(fc(data));
+  }
+  const zoneOf = (a, b) => ({ w: Math.min(a.lng, b.lng), e: Math.max(a.lng, b.lng), s: Math.min(a.lat, b.lat), n: Math.max(a.lat, b.lat) });
+  const local = e => { const r = map.getCanvas().getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
 
   function setSelecting(on) {
     selecting = on;
     zoneBtn.setAttribute("aria-pressed", on);
     box.classList.toggle("is-selecting", on);
     hint.hidden = !on;
-    on ? map.dragging.disable() : map.dragging.enable();
+    on ? map.dragPan.disable() : map.dragPan.enable();
+    if (on) tip.remove();
   }
   function clearZone() {
-    if (zoneRect) { zoneRect.remove(); zoneRect = null; }
+    zoneBounds = null;
+    drawZone(null);
     zonePanel.hidden = true;
   }
   zoneBtn.addEventListener("click", () => {
@@ -356,42 +462,42 @@
   document.getElementById("zone-clear-empty").addEventListener("click", clearZone);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && selecting) { setSelecting(false); clearZone(); } });
 
-  const zoneRenderer = L.svg({ padding: 0.3 });  // hors du canevas « Densité », qui recolorerait le rectangle
-  const zoneStyle = { renderer: zoneRenderer, color: "#2f7aa0", weight: 2, dashArray: "6 4", fillColor: "#2f7aa0", fillOpacity: 0.08, interactive: false };
-  // Phase de capture : on intercepte avant Leaflet (déplacement de la carte, clic sur un tracé)
+  // Phase de capture : on intercepte avant MapLibre (déplacement de la carte, clic sur un tracé)
   const stop = e => { if (selecting) { e.stopPropagation(); e.preventDefault(); } };
   ["mousedown", "touchstart"].forEach(t => mapEl.addEventListener(t, e => {
-    if (selecting && !e.target.closest(".leaflet-control")) stop(e);
+    if (selecting && !e.target.closest(".maplibregl-ctrl")) stop(e);
   }, { capture: true, passive: false }));
-  mapEl.addEventListener("click", e => { if (selecting || swallowClick) { e.stopPropagation(); swallowClick = false; } }, true);
   mapEl.addEventListener("pointerdown", e => {
-    if (!selecting || e.button !== 0 || e.target.closest(".leaflet-control")) return;
+    if (!selecting || e.button !== 0 || e.target.closest(".maplibregl-ctrl")) return;
     stop(e);
-    zoneStart = map.mouseEventToLatLng(e);
+    zoneStart = { point: local(e), lngLat: map.unproject(local(e)) };
     mapEl.setPointerCapture(e.pointerId);
-    if (zoneRect) zoneRect.remove();
-    zoneRect = L.rectangle(L.latLngBounds(zoneStart, zoneStart), zoneStyle).addTo(map);
+    zoneBounds = zoneOf(zoneStart.lngLat, zoneStart.lngLat);
+    drawZone(zoneBounds);
   }, true);
   mapEl.addEventListener("pointermove", e => {
-    if (zoneStart) zoneRect.setBounds(L.latLngBounds(zoneStart, map.mouseEventToLatLng(e)));
+    if (!zoneStart) return;
+    zoneBounds = zoneOf(zoneStart.lngLat, map.unproject(local(e)));
+    drawZone(zoneBounds);
   }, true);
   mapEl.addEventListener("pointerup", e => {
     if (!zoneStart) return;
-    const a = map.latLngToContainerPoint(zoneStart), b = map.mouseEventToContainerPoint(e);
+    const a = zoneStart.point, b = local(e);
     zoneStart = null;
     swallowClick = true;
-    if (Math.abs(a.x - b.x) < 8 || Math.abs(a.y - b.y) < 8) { clearZone(); return; }  // simple clic
+    setTimeout(() => { swallowClick = false; }, 0);
+    if (Math.abs(a[0] - b[0]) < 8 || Math.abs(a[1] - b[1]) < 8) { clearZone(); return; }  // simple clic
     setSelecting(false);
-    showZone(zoneRect.getBounds());
+    showZone(zoneBounds);
   }, true);
 
-  function inZone(coords, bounds) { return coords.some(c => bounds.contains(c)); }
+  const inZone = (coords, b) => coords.some(([lat, lng]) => lat >= b.s && lat <= b.n && lng >= b.w && lng <= b.e);
   function showZone(bounds) {
     let count = 0, km = 0;
-    for (const line of byId.values()) {
-      if (!hidden.has(line.route.family) && inZone(line.route.coords, bounds)) { count++; km += line.route.km; }
+    for (const r of routes) {
+      if (!hidden.has(r.family) && inZone(r.coords, bounds)) { count++; km += r.km; }
     }
-    const inside = trips.filter(t => t.stages.some(id => byId.has(id) && inZone(byId.get(id).route.coords, bounds)));
+    const inside = trips.filter(t => t.stages.some(id => byId.has(id) && inZone(byId.get(id).coords, bounds)));
     document.getElementById("zone-summary").textContent =
       `${count} parcours (${Math.round(km).toLocaleString("fr-FR")} km), ` +
       (inside.length ? `${inside.length} périple${inside.length > 1 ? "s" : ""} :` : "aucun périple.");
@@ -407,7 +513,7 @@
     }
     zonePanel.hidden = false;
     // Les périples de la zone ressortent sur la carte
-    if (inside.length && tripToggle && tripToggle.getAttribute("aria-pressed") !== "true") tripToggle.click();
+    if (inside.length && tripToggle && !tripsOn()) showTrips(true);
   }
   zoneForm.addEventListener("submit", e => {
     if (!zoneList.querySelector("input:checked")) { e.preventDefault(); document.getElementById("zone-summary").textContent = "Coche au moins un périple."; }
