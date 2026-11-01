@@ -82,8 +82,15 @@ La commande enchaîne les lots et, quand Strava répond « quota atteint », att
 
 ## Carte
 
-Deux affichages : « Densité » (les tracés s'additionnent et sont recolorés selon le nombre de
-passages : les rues souvent empruntées ressortent) et « Couleurs par sport ».
+La page Carte est un **globe** (MapLibre GL JS 5, fourni dans `static/activities/vendor/maplibre`) :
+elle s'ouvre sur la Terre entière, centrée sur les lieux les plus parcourus, puis se pose sur la zone
+des parcours (ou reste en vue globe s'ils sont sur plusieurs continents). En zoomant, le globe s'aplatit
+de lui-même en carte classique. En vue globe, une pastille marque le départ de chaque parcours ; le
+bouton 🌐 (en bas à droite) ramène à la Terre entière. Les autres pages restent sur Leaflet.
+
+Deux affichages : « Densité » (les tracés, très transparents, s'additionnent : les rues souvent
+empruntées ressortent, de plus en plus claires sur fond sombre et foncées sur fond clair) et
+« Couleurs par sport ».
 
 ## Fond de carte
 
