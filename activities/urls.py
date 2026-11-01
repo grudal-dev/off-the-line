@@ -19,6 +19,7 @@ urlpatterns = [
     path("periples/completer/", views.journeys_complete, name="journeys_complete"),
     path("periples/<int:journey_id>/", views.journey_detail, name="journey"),
     path("periples/<int:journey_id>/completer/", views.journey_complete, name="journey_complete"),
+    path("affiche/", views.poster, name="poster"),
     path("livre/", views.book_builder, name="book"),
     path("livre/<int:book_id>/", views.book_detail, name="book_detail"),
     path("livre/<int:book_id>/modifier/", views.book_update, name="book_update"),

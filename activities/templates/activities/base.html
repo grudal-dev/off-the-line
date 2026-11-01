@@ -23,6 +23,7 @@
         <a href="{% url 'activities:map' %}" {% if url_name == "map" %}aria-current="page"{% endif %}>Carte</a>
         <a href="{% url 'activities:journeys' %}" {% if url_name == "journeys" or url_name == "journey" %}aria-current="page"{% endif %}>Périples</a>
         <a href="{% url 'activities:book' %}" {% if url_name == "book" %}aria-current="page"{% endif %}>Livre</a>
+        <a href="{% url 'activities:poster' %}" {% if url_name == "poster" %}aria-current="page"{% endif %}>Affiche</a>
       </nav>
       <div class="user">
         {% if user.strava.profile_picture %}<img src="{{ user.strava.profile_picture }}" alt="">{% endif %}

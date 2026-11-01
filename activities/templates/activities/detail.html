@@ -20,6 +20,7 @@
       </dl>
 
       <a href="https://www.strava.com/activities/{{ activity.strava_id }}" target="_blank" rel="noopener">Voir sur Strava</a>
+      {% if route %}· <a href="{% url 'activities:poster' %}?activite={{ activity.strava_id }}">Créer une affiche</a>{% endif %}
     </div>
 
     {% if route %}

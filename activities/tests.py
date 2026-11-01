@@ -860,3 +860,40 @@ class SyncAllPhotosCommandTests(LoggedInTestCase):
         from .management.commands.sync_photos import seconds_until_next_window
         self.assertEqual(seconds_until_next_window(datetime(2026, 10, 31, 21, 44, 0)), 60 + 15)
         self.assertEqual(seconds_until_next_window(datetime(2026, 10, 31, 21, 45, 0)), 15 * 60 + 15)
+
+
+class PosterTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        for i, (sport, day) in enumerate((("Ride", 3), ("Run", 4))):
+            Activity.objects.create(account=self.account, strava_id=100 + i, name=f"Sortie {i}", sport_type=sport,
+                                    start_date=timezone.now() - timedelta(days=day), distance=12000,
+                                    total_elevation_gain=150, summary_polyline=SAMPLE_POLYLINE)
+        Activity.objects.create(account=self.account, strava_id=200, name="Salle", sport_type="Workout",
+                                start_date=timezone.now(), summary_polyline="")
+
+    def test_page_sends_routes_with_a_trace(self):
+        response = self.client.get(reverse("activities:poster"))
+        self.assertContains(response, 'id="poster-canvas"')
+        self.assertContains(response, "poster.js")
+        routes = response.context["routes"]
+        self.assertEqual([r["id"] for r in routes], [101, 100])  # du plus ancien au plus récent, sans la salle
+        self.assertEqual([r["family"] for r in routes], ["run", "ride"])
+        self.assertEqual(routes[0]["elev"], 150)
+        self.assertEqual(response.context["initial"], {})
+
+    def test_preselected_activity(self):
+        response = self.client.get(reverse("activities:poster"), {"activite": "101"})
+        self.assertEqual(response.context["initial"], {"source": "activity", "id": 101})
+        unknown = self.client.get(reverse("activities:poster"), {"activite": "999", "periple": "x"})
+        self.assertEqual(unknown.context["initial"], {})
+
+    def test_links_from_activity_and_nav(self):
+        response = self.client.get(reverse("activities:detail", args=[100]))
+        self.assertContains(response, reverse("activities:poster") + "?activite=100")
+
+    def test_empty_state(self):
+        Activity.objects.all().delete()
+        response = self.client.get(reverse("activities:poster"))
+        self.assertContains(response, "Aucun parcours avec tracé GPS")
+        self.assertNotContains(response, "poster.js")
