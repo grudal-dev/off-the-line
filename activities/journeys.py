@@ -194,11 +194,11 @@ def _endpoints(activity):
     return tuple(start), tuple(end)
 
 
-def _legs(activities):
+def _legs(activities, keep_commutes=False):
     legs = []
     for a in activities:
         raw = a.raw or {}
-        if raw.get("commute") or raw.get("trainer") or a.sport_type.startswith("Virtual"):
+        if (raw.get("commute") and not keep_commutes) or raw.get("trainer") or a.sport_type.startswith("Virtual"):
             continue
         points = _endpoints(a)
         if not points:
@@ -412,3 +412,22 @@ def _queryset(account):
         "moving_time", "elapsed_time", "total_elevation_gain", "summary_polyline",
         "start_lat", "start_lng", "raw", "description", "profile", "details_fetched_at",
     ).prefetch_related("photos")
+
+
+SELECTION_KEY = 0  # identifiant du chapitre d'un livre créé depuis une zone de la carte
+
+
+def from_activities(account, activity_ids, title="", story=""):
+    """Un « périple » fait des activités choisies (zone de la carte), dans l'ordre chronologique.
+
+    Renvoie None si aucune n'a de tracé. Les nuits et les transferts sont déduits comme après une correction.
+    """
+    from . import places
+
+    legs = _legs(_queryset(account).filter(strava_id__in=activity_ids), keep_commutes=True)
+    if not legs:
+        return None
+    nights, jumps = _breaks(legs)
+    journey = Journey(legs, nights, jumps, key=SELECTION_KEY, custom_title=title, story=story)
+    places.name_journeys([journey], None)
+    return journey

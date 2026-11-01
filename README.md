@@ -139,10 +139,16 @@ par-dessus la détection (`journeys.apply_note`). Un périple garde son identifi
 même si on retire cette étape, si bien que son adresse et les livres qui l'utilisent restent valables. Les modes
 de transport des transferts sont rattachés à l'étape qui précède le transfert (clé `a<id>`).
 
-### Livre depuis une zone de la carte
+### Affiche ou livre depuis une zone de la carte
 
-Sur la carte, « Sélectionner une zone pour un livre » puis faire glisser pour tracer un rectangle : les
-périples qui passent dans la zone sont listés (tous cochés) et « Créer le livre » les envoie à la page Livre.
+Sur la carte, « Sélectionner une zone » puis faire glisser pour tracer un rectangle : les activités qui
+passent dans la zone (parmi les sports affichés) sont listées, toutes cochées. On peut en décocher,
+donner un titre, puis :
+
+- « **Créer une affiche** » ouvre l'Affiche sur ces activités (source « Zone », mémorisée dans le navigateur) ;
+- « **Créer un livre** » fabrique un livre d'un seul chapitre avec ces activités dans l'ordre chronologique,
+  même si elles ne forment pas un périple (`Book.activity_ids`, `journeys.from_activities`), au plus 150.
+  Le titre et le récit de ce chapitre sont enregistrés dans le livre (`selection_title`, `selection_story`).
 
 ## Livre
 
