@@ -348,7 +348,7 @@ def _saved_modes(note, detected_legs):
         k = str(k)
         if mode not in TRANSPORT_MODES:
             continue
-        if k.startswith("a") and k[1:].isdigit():
+        if k.startswith("a") and k[1:].lstrip("-").isdigit():
             modes[int(k[1:])] = mode
         elif k.isdigit() and int(k) < len(detected_legs):
             modes.setdefault(detected_legs[int(k)].activity.strava_id, mode)

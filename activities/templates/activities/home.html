@@ -9,9 +9,12 @@
     </svg>
     <div class="hero-text">
       <h1>Toutes tes sorties, sur une seule carte.</h1>
-      <p>Connecte ton compte Strava : Off the line importe tes activités et trace chacun de tes parcours, seul ou superposé aux autres.</p>
-      <a class="btn big" href="{% url 'activities:strava_login' %}">Se connecter avec Strava</a>
-      <small>Accès en lecture seule. Tu peux retirer l'accès et supprimer tes données à tout moment.</small>
+      <p>Connecte ton compte Strava, ou dépose les fichiers de ta montre : Off the line trace chacun de tes parcours, seul ou superposé aux autres.</p>
+      <div class="hero-actions">
+        <a class="btn big" href="{% url 'activities:strava_login' %}">Se connecter avec Strava</a>
+        <a class="btn big ghost" href="{% url 'activities:import' %}">Importer mes fichiers</a>
+      </div>
+      <small>Garmin, Komoot, Coros, Suunto… : fichiers GPX, FIT ou TCX, sans créer de compte. Tu peux supprimer tes données à tout moment.</small>
     </div>
   </section>
 {% endblock %}

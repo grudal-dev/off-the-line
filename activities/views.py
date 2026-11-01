@@ -103,12 +103,91 @@ def strava_logout(request):
 def strava_disconnect(request):
     """Révoque l'accès Strava et supprime les jetons stockés."""
     account = getattr(request.user, "strava", None)
+    local = bool(account and account.is_local)
     if account:
-        strava.deauthorize(account)
+        if not local:
+            strava.deauthorize(account)
         account.delete()
+    user = request.user
     logout(request)
-    messages.info(request, "Ton compte Strava a été déconnecté du site.")
+    if local:
+        user.delete()  # un compte sans Strava n'a rien d'autre : on efface tout
+        messages.info(request, "Tes activités et tes créations ont été supprimées.")
+    else:
+        messages.info(request, "Ton compte Strava a été déconnecté du site.")
     return redirect("activities:home")
+
+
+# ---------- Import de fichiers (GPX, FIT, TCX, ZIP) ----------
+# Pour tout le monde, avec ou sans Strava : sans compte, un compte « sans Strava » est créé et lié
+# au navigateur (cookie de session d'un an). Les fichiers viennent de l'utilisateur, pas de l'API Strava.
+
+MAX_IMPORT_FILES = 300
+MAX_IMPORT_BYTES = 200 * 1024 * 1024
+
+
+def _local_account(request):
+    """Compte de l'utilisateur connecté, ou nouveau compte sans Strava pour un visiteur."""
+    account = _account_or_none(request)
+    if account is not None:
+        return account
+    User = get_user_model()
+    user = User.objects.create(username=f"local_{secrets.token_hex(8)}")
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    account = StravaAccount.objects.create(
+        user=user, athlete_id=-user.pk, is_local=True, access_token="", refresh_token="",
+        expires_at=timezone.now(),
+    )
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    return account
+
+
+def _new_file_id():
+    # Négatif (pas de collision avec Strava) et sous 2^53 : le navigateur lit ces identifiants sans arrondi
+    return -secrets.randbelow(2 ** 52) - 1
+
+
+def import_files(request):
+    """Dépôt de fichiers d'activité : la page, puis l'import (plusieurs fichiers ou une archive)."""
+    from . import tracks
+
+    if request.method != "POST":
+        return render(request, "activities/import.html", {"account": _account_or_none(request)})
+    uploads = request.FILES.getlist("files")[:MAX_IMPORT_FILES]
+    if not uploads:
+        messages.error(request, "Choisis au moins un fichier.")
+        return redirect("activities:import")
+    if sum(f.size for f in uploads) > MAX_IMPORT_BYTES:
+        messages.error(request, "Fichiers trop lourds (200 Mo au plus par envoi) : envoie-les en plusieurs fois.")
+        return redirect("activities:import")
+    found, skipped = tracks.read_files([(f.name, f.read()) for f in uploads])
+    if not found:
+        reason = f" ({skipped[0][1]})" if skipped else ""
+        messages.error(request, f"Aucune activité avec un tracé GPS dans ces fichiers{reason}.")
+        return redirect("activities:import")
+
+    account = _local_account(request)
+    # Une même sortie déposée deux fois (ou déjà venue de Strava) n'est pas recréée
+    known = {(a.start_date.replace(microsecond=0), round(a.distance / 100)) for a in account.activities.only("start_date", "distance")}
+    now, created = timezone.now(), 0
+    for fields in found:
+        key = (fields["start_date"].replace(microsecond=0), round(fields["distance"] / 100))
+        if key in known:
+            continue
+        known.add(key)
+        # Pas de photos ni de détails à demander à Strava : tout vient du fichier
+        Activity.objects.create(account=account, strava_id=_new_file_id(), photos_synced_at=now,
+                                details_fetched_at=now, **fields)
+        created += 1
+    doubles = len(found) - created
+    text = f"{created} activité{'s' if created > 1 else ''} importée{'s' if created > 1 else ''}"
+    if doubles:
+        text += f", {doubles} déjà présente{'s' if doubles > 1 else ''}"
+    if skipped:
+        text += f", {len(skipped)} fichier{'s' if len(skipped) > 1 else ''} ignoré{'s' if len(skipped) > 1 else ''}"
+    messages.success(request, text + ".")
+    return redirect("activities:map" if created else "activities:list")
 
 
 # ---------- Chargement en arrière-plan ----------
@@ -348,8 +427,8 @@ def poster(request):
     for param, key, known in (("periple", "journey", {t["id"] for t in trips}),
                               ("activite", "activity", {r["id"] for r in routes})):
         value = request.GET.get(param, "")
-        if value.isdigit() and int(value) in known:
-            initial = {"source": key, "id": int(value)}
+        if _signed(value) in known:
+            initial = {"source": key, "id": _signed(value)}
     return render(request, "activities/poster.html", {
         "routes": routes, "families": families, "journeys": trips, "initial": initial,
         "athlete": account.firstname,
@@ -372,6 +451,12 @@ def _stops(journey):
     if last.end_name:
         stops = [s for s in stops if s[2] != last.end_name] + [[round(last.end[0], 4), round(last.end[1], 4), last.end_name]]
     return stops
+
+
+def _signed(text):
+    """Entier signé lu dans un paramètre (les activités importées de fichiers ont un identifiant négatif)."""
+    text = (text or "").strip()
+    return int(text) if text.lstrip("-").isdigit() and text.count("-") <= 1 and not text.endswith("-") else None
 
 
 def _date_range(journey):
@@ -503,7 +588,7 @@ def _addable_activities(account, journey):
 
 
 def _ids(request, name):
-    return {int(x) for x in request.POST.getlist(name) if x.isdigit()}
+    return {v for v in map(_signed, request.POST.getlist(name)) if v is not None}
 
 
 def _correct_stages(request, account, journey):
@@ -553,7 +638,7 @@ def book_builder(request):
     if request.method == "POST" and request.POST.getlist("a"):
         return _book_from_selection(request, account)
     if request.method == "POST":
-        wanted = {int(x) for x in request.POST.getlist("j") if x.isdigit()}
+        wanted = {v for v in map(_signed, request.POST.getlist("j")) if v is not None}
         chosen = sorted((j for j in found if j.id in wanted), key=lambda j: j.legs[0].start_at)
         if not chosen:
             messages.error(request, "Choisis au moins un périple pour créer le livre.")
@@ -566,7 +651,7 @@ def book_builder(request):
             messages.info(request, problem)
         # Les photos sont récupérées ensuite par la page du livre, en arrière-plan (book_fetch_photos)
         return redirect("activities:book_detail", book_id=new.pk)
-    preselected = {int(x) for x in request.GET.getlist("j") if x.isdigit()}
+    preselected = {v for v in map(_signed, request.GET.getlist("j")) if v is not None}
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
              for j in found if not j.hidden or j.id in preselected]
     names = {j.id: j.name for j in found}
@@ -581,7 +666,7 @@ MAX_BOOK_ACTIVITIES = 150  # une page par étape : au-delà, le livre devient in
 
 
 def _selected_ids(request):
-    return list(dict.fromkeys(int(x) for x in request.POST.getlist("a") if x.isdigit()))
+    return list(dict.fromkeys(v for v in map(_signed, request.POST.getlist("a")) if v is not None))
 
 
 def _book_from_selection(request, account):
@@ -801,7 +886,7 @@ def book_upload(request, book_id):
 
     book_obj, account = _book_or_404(request, book_id)
     raw = request.POST.get("activity", "")
-    activity_id = int(raw) if raw.isdigit() else None  # sans étape : la photo va dans le bac
+    activity_id = _signed(raw)  # sans étape : la photo va dans le bac
     if activity_id is not None and activity_id not in _book_activity_ids(account, book_obj):
         return JsonResponse({"ok": False, "error": "Étape inconnue"}, status=400)
     added, rejected = [], []

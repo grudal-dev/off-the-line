@@ -69,6 +69,8 @@ def expires_at_to_datetime(timestamp):
 
 def get_valid_access_token(account):
     """Renvoie un jeton d'accès valide, en le renouvelant si besoin."""
+    if account.is_local:
+        raise StravaError("Ce compte n'est pas relié à Strava (activités importées depuis des fichiers).")
     if account.is_expired:
         data = refresh(account.refresh_token)
         account.access_token = data["access_token"]

@@ -19,7 +19,7 @@
         {% endif %}{% endwith %}
       </dl>
 
-      <a href="https://www.strava.com/activities/{{ activity.strava_id }}" target="_blank" rel="noopener">Voir sur Strava</a>
+      {% if not activity.from_file %}<a href="https://www.strava.com/activities/{{ activity.strava_id }}" target="_blank" rel="noopener">Voir sur Strava</a>{% endif %}
       {% if route %}· <a href="{% url 'activities:poster' %}?activite={{ activity.strava_id }}">Créer une affiche</a>{% endif %}
     </div>
 

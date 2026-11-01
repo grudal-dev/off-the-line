@@ -517,3 +517,24 @@ details.advanced form { margin-top: .75rem; }
 .hl-trips label.check { align-items: start; }
 .hl-trips input { margin-top: .2rem; }
 .hl-trips .muted { display: block; font-size: .8rem; }
+
+/* Import de fichiers --------------------------------------------------- */
+.hero-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.page-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.page-actions form { margin: 0; }
+.import { max-width: 40rem; margin: 0 auto; }
+.import > p { margin-bottom: 1.5rem; }
+.dropzone {
+  display: grid; justify-items: center; gap: .35rem; text-align: center; cursor: pointer;
+  padding: 3rem 1.5rem; margin-bottom: 1rem; border: 2px dashed var(--contour); border-radius: 12px; background: var(--sheet);
+}
+.dropzone strong { font-size: 1.25rem; }
+.dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.dropzone:focus-within { outline: 2px solid var(--route); outline-offset: 2px; }
+.dropzone.is-over, .dropzone.has-files { border-color: var(--route); border-style: solid; }
+.dropzone-count { font-weight: 600; color: var(--route-dark); min-height: 1.4em; }
+.import-help { margin: 1.5rem 0 1rem; }
+.import-help summary { cursor: pointer; font-weight: 500; }
+.import-help dt { font-weight: 600; margin-top: .75rem; }
+.import-help dd { margin: .2rem 0 0; color: var(--slate); }
+.site-header .user a[aria-current="page"] { font-weight: 600; }

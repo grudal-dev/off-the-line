@@ -37,7 +37,8 @@ def sync_activities(account, full=False):
     """
     params = {"per_page": PER_PAGE}
     if not full:
-        latest = account.activities.order_by("-start_date").first()
+        # La dernière activité venue de Strava (les fichiers déposés ont un identifiant négatif)
+        latest = account.activities.filter(strava_id__gt=0).order_by("-start_date").first()
         if latest:
             params["after"] = int(latest.start_date.timestamp())
 
