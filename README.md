@@ -227,6 +227,19 @@ Au démarrage, `migrate` et `collectstatic` sont lancés automatiquement.
 
 Les comptes existants peuvent être recréés simplement en se reconnectant avec Strava sur le site en ligne.
 
+## Mise en ligne (Render)
+
+`render.yaml` décrit tout le service : sur [Render](https://render.com), **New → Blueprint**, choisir le
+dépôt `off-the-line`, puis renseigner `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` (et `CARTO_API_KEY` si
+besoin) quand Render les demande. La clé secrète Django est générée, le disque persistant `/data` (base +
+photos) est créé, et le domaine `xxx.onrender.com` est ajouté automatiquement à `ALLOWED_HOSTS`, aux
+origines CSRF et à l'adresse de retour Strava. Plan Starter (≈ 7 $/mois + disque) : le plan gratuit
+n'accepte pas de disque.
+
+Il reste à mettre le domaine `xxx.onrender.com` dans **Authorization Callback Domain** sur
+https://www.strava.com/settings/api. Sur Railway, le domaine généré est lui aussi pris en compte automatiquement
+(`RAILWAY_PUBLIC_DOMAIN`) : `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` et `STRAVA_REDIRECT_URI` deviennent facultatifs.
+
 ## Structure
 
 - `config/` : réglages du projet Django
