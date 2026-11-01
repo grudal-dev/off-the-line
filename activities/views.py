@@ -747,6 +747,8 @@ def book_update(request, book_id):
         options = dict(book_obj.options)
         for key, default in Book.DEFAULT_OPTIONS.items():
             if key in value and isinstance(value[key], type(default)):
+                if key == "imagery" and value[key] not in Book.IMAGERY:
+                    continue
                 options[key] = value[key]
         book_obj.options = options
         book_obj.save()

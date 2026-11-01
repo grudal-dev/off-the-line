@@ -1302,6 +1302,14 @@
     field("profile").closest("label").hidden = state.source === "all";
     field("atlas").closest("label").hidden = state.source === "all";
     document.getElementById("mute-wrap").hidden = !state.base;
+    // Fonds Esri : usage personnel seulement (pas de revente sans accord écrit d'Esri)
+    const layer = LAYERS.find(l => l.key === state.base);
+    const esri = [layer && layer.personal && layer.label, state.base && state.relief && BASEMAP.hillshade && BASEMAP.hillshade.personal && "le relief ombré"].filter(Boolean);
+    const note = document.getElementById("base-note");
+    note.hidden = !esri.length;
+    note.textContent = esri.length
+      ? `${esri.join(" et ").replace(/^./, c => c.toUpperCase())} : imagerie Esri, pour un usage personnel uniquement. Pour une affiche vendue, choisis « Satellite libre » (Sentinel-2, EOX) sans relief.`
+      : "";
     refreshOrientHint(sel, auto);
     document.querySelectorAll("[data-family].chip").forEach(c => c.setAttribute("aria-pressed", !state.hidden.includes(c.dataset.family)));
     yearBox.querySelectorAll("[data-year]").forEach(b => {

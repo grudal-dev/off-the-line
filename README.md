@@ -93,6 +93,15 @@ Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
 
 Les autres fonds du sélecteur (Topo OpenTopoMap, Plan IGN, Satellite Esri, relief Esri) ne demandent pas de clé.
 
+### Fonds et vente
+
+Les fonds **Esri** (Satellite, relief ombré, et les fonds de secours Clair/Nuit sans clé CARTO) sont réservés à un
+usage personnel : leur revente (affiche ou livre vendus) demande un accord écrit d'Esri. L'affiche le signale
+sous le choix du fond. Le fond **Satellite libre** (Sentinel-2 cloudless 2016 d'EOX, 10 m) est sous licence CC BY 4.0 :
+il peut être vendu, à condition d'imprimer l'attribution (déjà ajoutée sur l'affiche et dans le livre). Les
+millésimes EOX 2018 et suivants, eux, ne sont gratuits que pour un usage non commercial. Dans le livre,
+« Personnaliser » permet de choisir l'imagerie (Esri ou Sentinel-2).
+
 ## Pays et villes sur les cartes
 
 Les cartes affichent le nom des pays (en vue large à leur position habituelle, sans les micro-États ; en vue rapprochée, le ou les pays de la zone visible, d'après les villes à l'écran) et quelques grandes villes pour se situer (case « Villes » à côté de « Relief », mémorisée ;
