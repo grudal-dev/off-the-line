@@ -617,3 +617,27 @@ details.advanced form { margin-top: .75rem; }
   .basemap-picker .basemap-choices { flex-wrap: nowrap; overflow-x: auto; max-width: calc(100vw - 2rem); scrollbar-width: none; }
   .basemap-picker { font-size: .8rem; }
 }
+
+/* Explorer : « Créer » pour toute la carte, étoile « Mon préféré », suggestion au-dessus de la carte */
+.totals { align-items: center; }
+.totals-create { margin-left: auto; }
+.star-btn { background: none; border: 0; padding: .25rem; font-size: 1.1rem; line-height: 1; color: #d3d8d5; cursor: pointer; }
+.star-btn:hover { color: var(--slate); }
+.star-btn[aria-pressed="true"] { color: #e0a526; }
+.suggestion-card {
+  position: absolute; left: 12px; bottom: 28px; z-index: 900; width: min(320px, calc(100% - 24px));
+  padding: .9rem 1rem 1rem; background: rgba(251, 252, 250, .97); border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(28, 38, 41, .22);
+}
+.suggestion-card h2 { margin: .1rem 1.5rem .2rem 0; font-size: 1.15rem; line-height: 1.25; }
+.suggestion-card .muted { margin: 0 0 .75rem; font-size: var(--t-small); }
+.suggestion-kicker { margin: 0; font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--route-dark); }
+.suggestion-actions { display: flex; align-items: center; gap: 1rem; }
+.suggestion-actions form { margin: 0; }
+.suggestion-close { position: absolute; top: .4rem; right: .5rem; background: none; border: 0; font-size: 1rem; color: var(--slate); cursor: pointer; padding: .3rem; }
+@media (max-width: 760px) {
+  .suggestion-card { left: 8px; right: 56px; bottom: 22px; width: auto; padding: .55rem .75rem .65rem; z-index: 1001; }
+  .suggestion-card h2 { font-size: 1rem; margin-bottom: .45rem; }
+  .suggestion-card .muted { display: none; }
+  .suggestion-actions { gap: .75rem; }
+}

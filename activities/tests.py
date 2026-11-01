@@ -1185,3 +1185,56 @@ class ExplorerCreateTests(LoggedInTestCase):
 
     def test_book_builder_page_now_lives_in_creations(self):
         self.assertRedirects(self.client.get(reverse("activities:book")), reverse("activities:creations"))
+
+
+class SuggestionFavoriteTests(LoggedInTestCase):
+    """Explorer : la carte complète reste là, avec une suggestion par-dessus et l'étoile « Mon préféré »."""
+
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE), leg(3, 12, 8, ALBERTVILLE, MOUTIERS)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.photos_synced_at = a.details_fetched_at = timezone.now()
+            a.save()
+
+    def test_biggest_trip_suggested_until_created(self):
+        page = self.client.get(reverse("activities:map"))
+        self.assertEqual(page.context["suggestion"]["id"], 1)
+        self.assertEqual(page.context["suggestion"]["heading"], "Ton plus grand voyage")
+        self.assertContains(page, 'id="suggestion"')
+        self.assertContains(page, 'id="map-create"')
+        self.client.post(reverse("activities:create"), {"kind": "affiche", "journey": "1"})
+        self.assertIsNone(self.client.get(reverse("activities:map")).context["suggestion"])
+
+    def test_dismiss_hides_suggestion(self):
+        r = self.client.post(reverse("activities:suggestion_dismiss", args=[1]), HTTP_ACCEPT="application/json")
+        self.assertTrue(r.json()["ok"])
+        self.assertIsNone(self.client.get(reverse("activities:map")).context["suggestion"])
+
+    def test_favorite_toggles_and_wins(self):
+        from .models import JourneyNote
+        url = reverse("activities:journey_favorite", args=[1])
+        self.client.post(reverse("activities:suggestion_dismiss", args=[1]))
+        self.assertTrue(self.client.post(url, HTTP_ACCEPT="application/json").json()["favorite"])
+        self.assertTrue(JourneyNote.objects.get(journey_id=1).favorite)
+        page = self.client.get(reverse("activities:map"))
+        self.assertEqual(page.context["suggestion"]["heading"], "Ton voyage préféré")  # l'étoile annule le ✕
+        self.assertFalse(self.client.post(url, HTTP_ACCEPT="application/json").json()["favorite"])
+        self.assertEqual(self.client.post(reverse("activities:journey_favorite", args=[999])).status_code, 404)
+
+    def test_score_prefers_favorite(self):
+        from . import journeys
+        j = journeys.for_account(self.account)[0]
+        base = journeys.highlight_score(j)
+        j.favorite = True
+        self.assertGreater(journeys.highlight_score(j), base + 999)
+
+    def test_full_map_create_keeps_hidden_sports(self):
+        from .models import Poster
+        self.client.post(reverse("activities:create"), {"kind": "affiche", "hide": ["run", "nope"]})
+        from . import sports
+        fam = next(iter(sports.FAMILIES))
+        Poster.objects.all().delete()
+        self.client.post(reverse("activities:create"), {"kind": "affiche", "hide": [fam, "nope"]})
+        self.assertEqual(Poster.objects.get().settings["hidden"], [fam])

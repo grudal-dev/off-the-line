@@ -149,6 +149,7 @@ class JourneyNote(models.Model):
     added = models.JSONField(default=list, blank=True, help_text="activités ajoutées à la main")
     stage_names = models.JSONField(default=dict, blank=True, help_text='{"<id activité>": "nom de l\'étape"}')
     hidden = models.BooleanField(default=False, help_text="« Ce n'est pas un périple »")
+    favorite = models.BooleanField(default=False, help_text="« Mon préféré » : proposé en premier dans Explorer")
     updated_at = models.DateTimeField(auto_now=True)
 
     @property

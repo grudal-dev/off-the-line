@@ -12,6 +12,7 @@
           <p><strong id="total-count">{{ routes|length }}</strong>sorties</p>
           <p><strong id="total-km">{{ total_km|floatformat:"0g" }}</strong>kilomètres</p>
           {% if journeys %}<p><strong>{{ journeys|length }}</strong>voyage{{ journeys|pluralize }}</p>{% endif %}
+          <button type="button" class="btn small totals-create" id="map-create" title="Une affiche ou un livre avec tout ce qui est sur la carte">Créer</button>
         </div>
         <div class="view-switch explorer-tabs" role="tablist" aria-label="Que montrer">
           {% if journeys %}<button type="button" role="tab" data-tab="voyages">Voyages</button>{% endif %}
@@ -70,6 +71,8 @@
               <strong>{{ t.title }}</strong>
               <span class="muted">{{ t.dates }} · {{ t.days }} jours · {{ t.km }} km</span>
             </button>
+            <button type="button" class="star-btn" data-favorite="{{ t.id }}" aria-pressed="{{ t.favorite|yesno:'true,false' }}"
+                    title="Mon préféré" aria-label="Mon voyage préféré : {{ t.title }}">★</button>
             <button type="button" class="btn small ghost" data-create='{"journey": {{ t.id }}, "name": "{{ t.title|escapejs }}"}'>Créer</button>
           </li>
         {% endfor %}
@@ -102,6 +105,21 @@
     </aside>
     <div class="atlas-map" id="atlas-map">
       <div id="map" role="img" aria-label="Carte de tous les parcours"></div>
+      {% if suggestion %}
+      <section class="suggestion-card" id="suggestion" data-trip="{{ suggestion.id }}" aria-labelledby="suggestion-title">
+        <button type="button" class="suggestion-close" id="suggestion-close" aria-label="Ne plus proposer ce voyage">✕</button>
+        <p class="suggestion-kicker">{% if suggestion.favorite %}★ {% endif %}{{ suggestion.heading }}</p>
+        <h2 id="suggestion-title">{{ suggestion.title }}</h2>
+        <p class="muted">{{ suggestion.dates }} · {{ suggestion.days }} jours · {{ suggestion.km }} km{% if suggestion.photos %} · {{ suggestion.photos }} photo{{ suggestion.photos|pluralize }}{% endif %}</p>
+        <div class="suggestion-actions">
+          <form method="post" action="{% url 'activities:create' %}">{% csrf_token %}
+            <input type="hidden" name="journey" value="{{ suggestion.id }}">
+            <button class="btn small" name="kind" value="affiche">Créer l'affiche</button>
+          </form>
+          <button type="button" class="link-button" data-focus-trip="{{ suggestion.id }}">Voir sur la carte</button>
+        </div>
+      </section>
+      {% endif %}
     </div>
   </div>
   <dialog class="create-dialog" id="create-dialog" aria-labelledby="create-title">
@@ -137,6 +155,7 @@
 <script>
 (() => {
   const routes = JSON.parse(document.getElementById("routes-data").textContent);
+  const PERIPLES = "{% url 'activities:journey' 0 %}".replace(/0\/$/, "");
   const MAX_BOOK = 150;  // un livre compte au plus 150 sorties (une page par étape)
   // Tracés encodés (format Strava) : décodés ici plutôt que côté serveur, page bien plus légère
   function decode(str) {
@@ -321,6 +340,7 @@
   document.querySelectorAll("[data-focus-trip]").forEach(b => b.addEventListener("click", () => {
     const bounds = tripBounds.get(Number(b.dataset.focusTrip));
     document.querySelectorAll("#trip-list .explorer-row").forEach(r => r.classList.toggle("is-active", r === b.parentElement));
+    if (b.closest("#suggestion") && tabs.some(t => t.dataset.tab === "voyages")) showTab("voyages");
     if (bounds) map.flyToBounds(bounds, { padding: [40, 40], duration: 0.7 });
   }));
 
@@ -343,6 +363,7 @@
     if (spec.journey !== undefined) add("journey", spec.journey);
     if (spec.activity !== undefined) add("activity", spec.activity);
     if (spec.year !== undefined) add("year", spec.year);
+    (spec.hide || []).forEach(f => add("hide", f));
     (spec.ids || []).forEach(id => add("a", id));
     const n = spec.count || (spec.ids ? spec.ids.length : 0);
     const tooMany = !spec.journey && n > MAX_BOOK;
@@ -355,6 +376,31 @@
     openCreate(JSON.parse(b.dataset.create));
   }));
   document.getElementById("create-cancel").addEventListener("click", () => dialog.close());
+
+  // « Créer » à côté des totaux : tout ce qui est visible sur la carte (année et sports choisis)
+  document.getElementById("map-create").addEventListener("click", () => {
+    const n = Number(document.getElementById("total-count").textContent) || 0;
+    if (year) return openCreate({ year, name: `Mes sorties ${year}`, count: n });
+    openCreate({ name: hidden.size ? "Mes sorties affichées" : "Toutes mes sorties", count: n, hide: [...hidden] });
+  });
+
+  // Suggestion au-dessus de la carte : ✕ la range, l'étoile « Mon préféré » la remplace au prochain passage
+  const csrf = document.querySelector("#create-form [name=csrfmiddlewaretoken]").value;
+  const post = url => fetch(url, { method: "POST", headers: { "X-CSRFToken": csrf, "Accept": "application/json" } });
+  const card = document.getElementById("suggestion");
+  if (card) {
+    document.getElementById("suggestion-close").addEventListener("click", () => {
+      card.remove();
+      post(`${PERIPLES}${card.dataset.trip}/ignorer/`);
+    });
+  }
+  document.querySelectorAll("[data-favorite]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    post(`${PERIPLES}${b.dataset.favorite}/prefere/`).then(r => r.ok && r.json()).then(d => {
+      if (!d) return;
+      document.querySelectorAll("[data-favorite]").forEach(o => o.setAttribute("aria-pressed", d.favorite && o === b));
+    });
+  }));
   dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });
 
   document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
