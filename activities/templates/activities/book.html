@@ -31,6 +31,12 @@
     <label><input type="checkbox" data-option="profiles" {% if opt.profiles %}checked{% endif %}> Profils d'altitude</label>
     <label><input type="checkbox" data-option="back" {% if opt.back %}checked{% endif %}> Dos du livre</label>
     <label><input type="checkbox" data-option="cities" {% if opt.cities %}checked{% endif %}> Villes sur les cartes</label>
+    <label>Imagerie des cartes
+      <select data-option-select="imagery">
+        <option value="satellite" {% if opt.imagery == "satellite" %}selected{% endif %}>Satellite Esri (usage personnel)</option>
+        <option value="eox" {% if opt.imagery == "eox" %}selected{% endif %}>Satellite libre, Sentinel-2 (livre vendu)</option>
+      </select>
+    </label>
     <span class="sep"></span>
     <strong>Couverture</strong>
     <label><input type="radio" name="cover" value="map" {% if book.cover == "map" %}checked{% endif %}> Carte</label>
@@ -315,9 +321,10 @@
   (() => {
     const maps = JSON.parse(document.getElementById("maps-data").textContent);
     const status = document.getElementById("load-status");
-    // Le livre n'utilise que l'imagerie satellite (droits d'impression plus clairs que
-    // les cartes dessinées) ; l'attribution reste affichée sur chaque carte et au dos.
-    const SATELLITE = BASEMAP.layers.find(d => d.key === "satellite");
+    // Le livre n'utilise que de l'imagerie satellite : Esri (usage personnel : pas de revente sans
+    // accord écrit) ou Sentinel-2 2016 d'EOX (CC BY 4.0, vendable) ; l'attribution est sur chaque carte et au dos.
+    const SATELLITE = BASEMAP.layers.find(d => d.key === (BOOK.options.imagery || "satellite"))
+      || BASEMAP.layers.find(d => d.key === "satellite");
     const instances = [];
     for (const m of maps) {
       const el = document.getElementById("map-" + m.id);
@@ -414,6 +421,9 @@
     // Mise en page : sections affichées et couverture
     document.querySelectorAll("[data-option]").forEach(box => box.addEventListener("change", async () => {
       if (await saveBook({ field: "options", value: { [box.dataset.option]: box.checked } })) reloadAt();
+    }));
+    document.querySelectorAll("[data-option-select]").forEach(sel => sel.addEventListener("change", async () => {
+      if (await saveBook({ field: "options", value: { [sel.dataset.optionSelect]: sel.value } })) reloadAt();
     }));
     document.querySelectorAll("input[name=cover]").forEach(r => r.addEventListener("change", async () => {
       if (await saveBook({ field: "cover", value: r.value })) location.reload();

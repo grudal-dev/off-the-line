@@ -169,7 +169,8 @@ class Book(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False,
-                       "cities": True}
+                       "cities": True, "imagery": "satellite"}
+    IMAGERY = {"satellite", "eox"}  # Esri (usage personnel) ou Sentinel-2 2016 d'EOX (libre, vendable)
 
     class Meta:
         ordering = ["-updated_at"]
