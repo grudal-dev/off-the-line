@@ -907,3 +907,61 @@ class PosterTests(LoggedInTestCase):
         response = self.client.get(reverse("activities:poster"))
         self.assertContains(response, "Aucun parcours avec tracé GPS")
         self.assertNotContains(response, "poster.js")
+
+
+class ZoneSelectionTests(LoggedInTestCase):
+    """Zone de la carte : affiche ou livre à partir d'activités choisies (pas forcément un périple)."""
+
+    def setUp(self):
+        super().setUp()
+        # Deux sorties isolées (pas un périple) et une sans tracé
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 20, 8, ANNECY, ALBERTVILLE, commute=True)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.photos_synced_at = a.details_fetched_at = timezone.now()
+            a.save()
+
+    def test_map_offers_poster_and_book(self):
+        response = self.client.get(reverse("activities:map"))
+        self.assertContains(response, 'formaction="/affiche/"')
+        self.assertContains(response, 'formaction="/livre/"')
+        self.assertEqual({r["day"][:10] for r in response.context["routes_data"]}, {"2026-08-10", "2026-08-20"})
+
+    def test_poster_from_selection(self):
+        response = self.client.post(reverse("activities:poster"), {"a": ["2", "999"], "title": "Mes Alpes"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["initial"], {"source": "selection", "id": [2], "title": "Mes Alpes"})
+        self.assertContains(response, 'data-source="selection"')
+
+    @mock.patch("activities.strava.requests.get", side_effect=fake_http(PLACE_NAMES))
+    def test_book_from_selection(self, get):
+        from .models import Book
+        response = self.client.post(reverse("activities:book"), {"a": ["2", "1"]})
+        book_obj = Book.objects.get()
+        self.assertRedirects(response, reverse("activities:book_detail", args=[book_obj.pk]), fetch_redirect_response=False)
+        self.assertEqual(book_obj.activity_ids, [1, 2])  # ordre chronologique, trajet domicile-travail compris
+        self.assertEqual(book_obj.journey_ids, [])
+        page = self.client.get(response["Location"])
+        self.assertContains(page, 'id="map-s1"')
+        self.assertContains(page, 'id="map-s2"')
+        self.assertContains(self.client.get(reverse("activities:book")), "Sélection sur la carte : 2 activités")
+
+        # Titre et récit du chapitre : enregistrés dans le livre
+        url = reverse("activities:book_update", args=[book_obj.pk])
+        for field, value in (("journey.title", "Deux sorties"), ("journey.story", "Un bel été.")):
+            r = self.client.post(url, {"field": field, "value": value, "journey": 0}, content_type="application/json")
+            self.assertTrue(r.json()["ok"])
+        book_obj.refresh_from_db()
+        self.assertEqual((book_obj.selection_title, book_obj.selection_story), ("Deux sorties", "Un bel été."))
+        self.assertContains(self.client.get(response["Location"]), "Deux sorties")
+        bad = self.client.post(url, {"field": "journey.title", "value": "x", "journey": 5}, content_type="application/json")
+        self.assertEqual(bad.status_code, 400)
+
+    def test_book_selection_limits(self):
+        from .models import Book
+        response = self.client.post(reverse("activities:book"), {"a": ["999"]}, follow=True)
+        self.assertContains(response, "Aucune des activités choisies")
+        with mock.patch("activities.views.MAX_BOOK_ACTIVITIES", 1):
+            response = self.client.post(reverse("activities:book"), {"a": ["1", "2"]}, follow=True)
+        self.assertContains(response, "Trop d&#x27;activités")
+        self.assertFalse(Book.objects.exists())

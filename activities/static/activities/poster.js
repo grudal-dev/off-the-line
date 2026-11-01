@@ -39,7 +39,7 @@
     satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
-    source: "all", hidden: [], from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null,
+    source: "all", hidden: [], from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
     format: "A3", orientation: "portrait", dpi: "200",
     ...PRESETS.paper, relief: false,
     mode: "single", width: 0.6, opacity: 0.85, endpoints: false,
@@ -81,8 +81,11 @@
   if (INITIAL.source) {
     state.source = INITIAL.source;
     state[INITIAL.source] = INITIAL.id;
-    Object.assign(state, { title: "", subtitle: "", stats: "", view: null, manual: false });
+    Object.assign(state, { title: INITIAL.title || "", subtitle: "", stats: "", view: null, manual: false });
   }
+  // Sélection faite sur la carte (zone) : ids des activités encore présentes
+  state.selection = (Array.isArray(state.selection) ? state.selection : []).filter(id => byId.has(id));
+  if (state.source === "selection" && !state.selection.length) state.source = "all";
   if (!LAYERS.some(l => l.key === state.base)) state.base = "";
   if (!byId.has(state.activity)) state.activity = ROUTES.length ? ROUTES[ROUTES.length - 1].id : null;
   if (!TRIPS.some(t => t.id === state.journey)) state.journey = TRIPS[0] ? TRIPS[0].id : null;
@@ -109,6 +112,10 @@
       const r = byId.get(state.activity);
       return { routes: r ? [r] : [], transfers: [] };
     }
+    if (state.source === "selection") {
+      const wanted = new Set(state.selection);
+      return { routes: ROUTES.filter(r => wanted.has(r.id)), transfers: [] };  // ROUTES est trié par date
+    }
     const hidden = new Set(state.hidden);
     return {
       routes: ROUTES.filter(r => !hidden.has(r.family) && (!state.from || r.day >= state.from) && (!state.to || r.day <= state.to)),
@@ -132,6 +139,14 @@
       };
     }
     const fams = [...new Set(rs.map(r => r.family))];
+    if (state.source === "selection" && rs.length) {
+      const first = rs[0].day, last = rs[rs.length - 1].day;
+      const subtitle = first === last ? longDate(first)
+        : first.slice(0, 4) === last.slice(0, 4) ? `Du ${shortDate(first)} au ${longDate(last)}`
+        : `${first.slice(0, 4)} – ${last.slice(0, 4)}`;
+      return { title: ATHLETE ? `Les parcours de ${ATHLETE}` : "Mes parcours", subtitle,
+               stats: `${nf.format(rs.length)} sortie${rs.length > 1 ? "s" : ""} · ${nf.format(km)} km${dplus}` };
+    }
     let title = fams.length === 1 && FAMILY[fams[0]] ? FAMILY[fams[0]].label : (ATHLETE ? `Les parcours de ${ATHLETE}` : "Mes parcours");
     let subtitle = "";
     if (rs.length) {
@@ -463,7 +478,9 @@
     let g = geo[key];
     if (!g) {
       g = geo[key] = { rows: null };
-      g.promise = fetch(GEO_URLS[key]).then(r => r.json()).catch(() => []).then(rows => { g.rows = rows; return g; });
+      // cities.json est un objet { cities, countries } (partagé avec les cartes) ; les frontières, des listes
+      g.promise = fetch(GEO_URLS[key]).then(r => r.json()).catch(() => [])
+        .then(data => { g.rows = Array.isArray(data) ? data : (data && data[key]) || []; return g; });
     }
     if (!g.rows && onLoad) g.promise.then(onLoad);
     return g.rows;
@@ -650,7 +667,7 @@
     const hl = highlighted(sel);
     drawHighlights(ctx, hl, view, s, ppm);
     ctx.restore();
-    drawLabels(ctx, lay, view, ppm, hl, onTileLoad);
+    try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad); } catch (err) { console.error(err); ctx.restore(); }
     drawAttribution(ctx, lay, ppm, defs);
 
     if (!sel.routes.length) {
@@ -849,6 +866,8 @@
 
   function refreshPanel({ sel, auto }) {
     document.querySelectorAll("[data-source]").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === state.source));
+    const selBtn = document.querySelector('[data-source="selection"]');
+    if (selBtn) selBtn.hidden = !state.selection.length;
     document.querySelectorAll("[data-for-source]").forEach(el => { el.hidden = el.dataset.forSource !== state.source; });
     document.querySelectorAll("[data-for-mode]").forEach(el => { el.hidden = !el.dataset.forMode.split(" ").includes(state.mode); });
     document.querySelectorAll("[data-for-frame]").forEach(el => { el.hidden = !el.dataset.forFrame.split(" ").includes(state.frame); });

@@ -18,6 +18,7 @@
             <button type="button" data-source="all">Mes sorties</button>
             <button type="button" data-source="journey" {% if not journeys %}disabled title="Aucun périple"{% endif %}>Un périple</button>
             <button type="button" data-source="activity">Une activité</button>
+            <button type="button" data-source="selection" hidden>Zone</button>
           </div>
           <div data-for-source="all">
             {% if families|length > 1 %}
@@ -40,6 +41,9 @@
             <select class="field" id="journey-select" name="journey">
               {% for j in journeys %}<option value="{{ j.id }}">{{ j.title }} ({{ j.dates }})</option>{% endfor %}
             </select>
+          </div>
+          <div data-for-source="selection">
+            <p class="muted">Les activités choisies sur la carte. <a href="{% url 'activities:map' %}">Choisir une autre zone</a></p>
           </div>
           <div data-for-source="activity">
             <label class="sr-only" for="activity-select">Activité</label>

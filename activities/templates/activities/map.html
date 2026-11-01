@@ -37,17 +37,22 @@
           </div>
         {% endif %}
         <div class="zone-tool">
-          <button type="button" class="btn ghost" id="zone-btn" aria-pressed="false" aria-controls="zone-panel">Sélectionner une zone pour un livre</button>
+          <button type="button" class="btn ghost" id="zone-btn" aria-pressed="false" aria-controls="zone-panel">Sélectionner une zone</button>
           <div class="zone-panel" id="zone-panel" hidden aria-live="polite">
             <h2>Zone sélectionnée</h2>
             <p class="muted" id="zone-summary"></p>
             <form method="post" action="{% url 'activities:book' %}" id="zone-form">{% csrf_token %}
-              <ul id="zone-journeys"></ul>
-              <label>Titre du livre
-                <input class="field" type="text" name="title" maxlength="120" placeholder="Par défaut : le nom du périple, ou « Mes périples »">
+              <div class="zone-actions zone-check">
+                <button class="link-button" type="button" data-zone-check="1">Tout cocher</button>
+                <button class="link-button" type="button" data-zone-check="0">Tout décocher</button>
+              </div>
+              <ul id="zone-activities"></ul>
+              <label>Titre
+                <input class="field" type="text" name="title" maxlength="120" placeholder="Facultatif : proposé d'après les lieux et les dates">
               </label>
               <div class="zone-actions">
-                <button class="btn" type="submit" id="zone-submit">Créer le livre</button>
+                <button class="btn" type="submit" formaction="{% url 'activities:poster' %}" data-zone-action="poster">Créer une affiche</button>
+                <button class="btn ghost" type="submit" formaction="{% url 'activities:book' %}" data-zone-action="book">Créer un livre</button>
                 <button class="link-button" type="button" id="zone-clear">Effacer la zone</button>
               </div>
             </form>
@@ -322,11 +327,12 @@
 
   map.fitBounds(group.getBounds(), { padding: [30, 30] });
 
-  // Sélection d'une zone : on trace un rectangle, les périples qui y passent
-  // sont proposés pour créer un livre (formulaire envoyé à la page Livre).
+  // Sélection d'une zone : on trace un rectangle, les activités qui y passent (sports affichés)
+  // sont listées, toutes cochées, pour en faire une affiche ou un livre (formulaire envoyé à l'une
+  // ou l'autre page).
   const zoneBtn = document.getElementById("zone-btn");
   const zonePanel = document.getElementById("zone-panel");
-  const zoneList = document.getElementById("zone-journeys");
+  const zoneList = document.getElementById("zone-activities");
   const zoneForm = document.getElementById("zone-form");
   const zoneEmpty = document.getElementById("zone-empty");
   const mapEl = map.getContainer();
@@ -386,32 +392,36 @@
   }, true);
 
   function inZone(coords, bounds) { return coords.some(c => bounds.contains(c)); }
+  const MAX_BOOK = 150;
+  function zoneSummary() {
+    const boxes = [...zoneList.querySelectorAll("input")], on = boxes.filter(b => b.checked);
+    const km = on.reduce((t, b) => t + byId.get(+b.value).route.km, 0);
+    document.getElementById("zone-summary").textContent = boxes.length
+      ? `${on.length} activité${on.length > 1 ? "s" : ""} sur ${boxes.length} cochée${on.length > 1 ? "s" : ""}, ${Math.round(km).toLocaleString("fr-FR")} km.`
+        + (on.length > MAX_BOOK ? ` Un livre en compte au plus ${MAX_BOOK}.` : "")
+      : "Aucune activité dans cette zone (avec les sports affichés).";
+    zoneForm.querySelectorAll("[data-zone-action]").forEach(b => { b.disabled = !on.length; });
+    zoneForm.querySelector('[data-zone-action="book"]').disabled = !on.length || on.length > MAX_BOOK;
+  }
   function showZone(bounds) {
-    let count = 0, km = 0;
-    for (const line of byId.values()) {
-      if (!hidden.has(line.route.family) && inZone(line.route.coords, bounds)) { count++; km += line.route.km; }
-    }
-    const inside = trips.filter(t => t.stages.some(id => byId.has(id) && inZone(byId.get(id).route.coords, bounds)));
-    document.getElementById("zone-summary").textContent =
-      `${count} parcours (${Math.round(km).toLocaleString("fr-FR")} km), ` +
-      (inside.length ? `${inside.length} périple${inside.length > 1 ? "s" : ""} :` : "aucun périple.");
-    zoneList.innerHTML = inside.map(t => `
-      <li><label><input type="checkbox" name="j" value="${t.id}" checked>
-        <span><strong>${escapeHtml(t.title)}</strong><span class="muted">${t.dates}, ${t.days} jours, ${t.km} km</span></span>
+    const inside = [...byId.values()]
+      .filter(line => !hidden.has(line.route.family) && inZone(line.route.coords, bounds))
+      .map(line => line.route);
+    inside.sort((a, b) => b.day.localeCompare(a.day));  // les plus récentes d'abord
+    zoneList.innerHTML = inside.map(r => `
+      <li><label><input type="checkbox" name="a" value="${r.id}" checked>
+        <span><strong>${escapeHtml(r.name)}</strong><span class="muted">${escapeHtml(r.sport)}, ${r.date}, ${r.km.toLocaleString("fr-FR")} km</span></span>
       </label></li>`).join("");
     zoneForm.hidden = !inside.length;
     zoneEmpty.hidden = !!inside.length;
-    if (!inside.length) {
-      document.getElementById("zone-summary").textContent +=
-        " Un livre se compose de périples : élargis la zone, ou rends-toi dans Périples pour en corriger un.";
-    }
+    zoneSummary();
     zonePanel.hidden = false;
-    // Les périples de la zone ressortent sur la carte
-    if (inside.length && tripToggle && tripToggle.getAttribute("aria-pressed") !== "true") tripToggle.click();
   }
-  zoneForm.addEventListener("submit", e => {
-    if (!zoneList.querySelector("input:checked")) { e.preventDefault(); document.getElementById("zone-summary").textContent = "Coche au moins un périple."; }
-  });
+  zoneList.addEventListener("change", zoneSummary);
+  zoneForm.querySelectorAll("[data-zone-check]").forEach(b => b.addEventListener("click", () => {
+    zoneList.querySelectorAll("input").forEach(i => { i.checked = b.dataset.zoneCheck === "1"; });
+    zoneSummary();
+  }));
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

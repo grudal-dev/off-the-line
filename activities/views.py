@@ -281,6 +281,7 @@ def all_routes_map(request):
             "id": a.strava_id, "name": a.name, "sport": sports.label(a.sport_type),
             "family": fam, "color": sports.FAMILIES[fam][1],
             "date": formats.date_format(a.start_date_local or a.start_date, "j F Y"),
+            "day": (a.start_date_local or a.start_date).isoformat(),
             "km": a.distance_km, "poly": a.summary_polyline,
             "photos": [p.url for p in a.photos.all()],
         })
@@ -296,7 +297,7 @@ def all_routes_map(request):
          "days": j.days, "km": round(j.distance_km)}
         for j in journeys.for_account(account, include_hidden=False)
     ]
-    routes_data = [{k: r[k] for k in ("id", "name", "sport", "family", "color", "date", "km", "poly")} for r in routes]
+    routes_data = [{k: r[k] for k in ("id", "name", "sport", "family", "color", "date", "day", "km", "poly")} for r in routes]
     return render(request, "activities/map.html",
                   {"routes": routes, "routes_data": routes_data, "families": families, "total_km": total_km,
                    "journeys": trips})
@@ -334,6 +335,12 @@ def poster(request):
                         key=lambda j: j.legs[0].start_at, reverse=True)
     ]
     initial = {}
+    if request.method == "POST":
+        known = {r["id"] for r in routes}
+        chosen = [i for i in _selected_ids(request) if i in known]
+        if chosen:
+            initial = {"source": "selection", "id": chosen,
+                       "title": request.POST.get("title", "").strip()[:120]}
     for param, key, known in (("periple", "journey", {t["id"] for t in trips}),
                               ("activite", "activity", {r["id"] for r in routes})):
         value = request.GET.get(param, "")
@@ -521,6 +528,8 @@ def book_builder(request):
     if account is None:
         return redirect("activities:home")
     found = journeys.for_account(account)
+    if request.method == "POST" and request.POST.getlist("a"):
+        return _book_from_selection(request, account)
     if request.method == "POST":
         wanted = {int(x) for x in request.POST.getlist("j") if x.isdigit()}
         chosen = sorted((j for j in found if j.id in wanted), key=lambda j: j.legs[0].start_at)
@@ -539,10 +548,38 @@ def book_builder(request):
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
              for j in found if not j.hidden or j.id in preselected]
     names = {j.id: j.name for j in found}
-    books = [{"book": b, "names": [names.get(i, "Périple introuvable") for i in b.journey_ids]}
+    books = [{"book": b, "names": [f"Sélection sur la carte : {len(b.activity_ids)} activité{'s' if len(b.activity_ids) > 1 else ''}"]
+              if b.activity_ids else [names.get(i, "Périple introuvable") for i in b.journey_ids]}
              for b in account.books.all()]
     return render(request, "activities/book_builder.html",
                   {"items": items, "books": books, "background": _names_background(found)})
+
+
+MAX_BOOK_ACTIVITIES = 150  # une page par étape : au-delà, le livre devient ingérable
+
+
+def _selected_ids(request):
+    return list(dict.fromkeys(int(x) for x in request.POST.getlist("a") if x.isdigit()))
+
+
+def _book_from_selection(request, account):
+    """Livre à partir des activités d'une zone de la carte : un seul chapitre, dans l'ordre chronologique."""
+    ids = _selected_ids(request)
+    if len(ids) > MAX_BOOK_ACTIVITIES:
+        messages.error(request, f"Trop d'activités pour un livre ({len(ids)}) : choisis-en au plus "
+                                f"{MAX_BOOK_ACTIVITIES} (zone plus petite, ou décoche-en).")
+        return redirect("activities:map")
+    journey = journeys.from_activities(account, ids)
+    if journey is None:
+        messages.error(request, "Aucune des activités choisies n'a de tracé : impossible de créer le livre.")
+        return redirect("activities:map")
+    title = request.POST.get("title", "").strip()[:200]
+    new = Book.objects.create(account=account, activity_ids=[a.strava_id for a in journey.activities],
+                              title=title or journey.place_name or "Ma sélection")
+    _, problem = book.prepare(account, [journey])
+    if problem:
+        messages.info(request, problem)
+    return redirect("activities:book_detail", book_id=new.pk)
 
 
 def _journey_thumb(j):
@@ -559,6 +596,10 @@ def _book_or_404(request, book_id):
 
 
 def _book_journeys(account, book_obj):
+    if book_obj.activity_ids:
+        j = journeys.from_activities(account, book_obj.activity_ids,
+                                     book_obj.selection_title, book_obj.selection_story)
+        return [j] if j else []
     found = {j.id: j for j in journeys.for_account(account)}
     return [found[i] for i in book_obj.journey_ids if i in found]
 
@@ -642,12 +683,19 @@ def book_update(request, book_id):
         setattr(book_obj, field.split(".")[1], text[:300])
         book_obj.save()
     elif field in ("journey.title", "journey.story"):
-        journey_id = int(data.get("journey", 0))
-        if journey_id not in book_obj.journey_ids:
+        journey_id = int(data.get("journey", -1))
+        if book_obj.activity_ids and journey_id == journeys.SELECTION_KEY:
+            if field == "journey.title":
+                book_obj.selection_title = text[:200]
+            else:
+                book_obj.selection_story = text
+            book_obj.save()
+        elif journey_id not in book_obj.journey_ids:
             return JsonResponse({"ok": False, "error": "Périple inconnu"}, status=400)
-        note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
-        setattr(note, field.split(".")[1], text[:200] if field == "journey.title" else text)
-        note.save()
+        else:
+            note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
+            setattr(note, field.split(".")[1], text[:200] if field == "journey.title" else text)
+            note.save()
     elif field in ("stage.title", "stage.text", "stage.reset_text", "stage.photos"):
         activity_id = int(data.get("activity", 0))
         if activity_id not in _book_activity_ids(account, book_obj):
