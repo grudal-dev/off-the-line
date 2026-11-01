@@ -49,7 +49,7 @@
     textPos: "bottom", title: "", subtitle: "", stats: "",
     rotation: 0, view: null, manual: false,
     countries: false, regions: false, coast: false,
-    borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "dash", regionStyle: "dot", borderOpacity: 0.6,
+    borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "solid", regionStyle: "solid", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
     mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: false,
@@ -963,13 +963,15 @@
         if (!inside(b) || !free(b) || (o.avoid && o.avoid(b))) continue;
         placed.push(b);
         ctx.textAlign = "left"; ctx.textBaseline = "middle";
+        // Texte calé sur le pixel et halo fin : des noms nets plutôt qu'entourés d'un flou épais
+        const tx = Math.round(x0), ty = Math.round(py + o.size * 0.04);
         if (state.labelHalo && !o.noHalo) {
-          ctx.lineJoin = "round"; ctx.strokeStyle = state.bg; ctx.lineWidth = o.size * 0.32;
-          ctx.strokeText(txt, x0, py + o.size * 0.04);
+          ctx.lineJoin = "round"; ctx.miterLimit = 2; ctx.strokeStyle = state.bg; ctx.lineWidth = Math.max(1, o.size * 0.22);
+          ctx.strokeText(txt, tx, ty);
         }
         ctx.fillStyle = o.color;
         ctx.globalAlpha = o.alpha ?? 1;
-        ctx.fillText(txt, x0, py + o.size * 0.04);
+        ctx.fillText(txt, tx, ty);
         ctx.globalAlpha = 1;
         if (o.dot && !o.hideDot) {  // hideDot : le marqueur de départ/arrivée est déjà dessiné
           ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI);
@@ -1017,7 +1019,7 @@
         const [lat, lng, name] = stops[i];
         const [x, y] = project(...mercator(lat, lng));
         if (label(name, x, y, {
-          size: ends ? size * 1.15 : size * 0.92, weight: ends ? 700 : 500, family: state.cityUpper ? COND : SANS,
+          size: ends ? size * 1.15 : size * 0.95, weight: ends && state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
           color: state.cityColor, dot: state.cityDots || (ends && state.endpoints), hideDot: ends && state.endpoints, upper: state.cityUpper,
         }) && !ends) count++;
       }
@@ -1032,7 +1034,7 @@
         if (!visible(box, lng, lat, lng, lat)) continue;
         const [x, y] = project(...mercator(lat, lng));
         if (label(name, x, y, {
-          size: capital ? size * 1.08 : size, weight: capital ? 600 : 500, family: state.cityUpper ? COND : SANS,
+          size: capital ? size * 1.08 : size, weight: capital && state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
           color: state.cityColor, dot: state.cityDots, upper: state.cityUpper,
         })) count++;
       }
@@ -1490,7 +1492,7 @@
 
   const fonts = Promise.all([
     document.fonts.load(`700 40px "Barlow Condensed"`), document.fonts.load(`600 40px "Barlow Condensed"`),
-    document.fonts.load(`500 40px "Barlow"`), document.fonts.load(`400 40px "Barlow"`),
+    document.fonts.load(`600 40px "Barlow"`), document.fonts.load(`500 40px "Barlow"`), document.fonts.load(`400 40px "Barlow"`),
   ]).catch(() => null);
   fillActivities();
   syncFields();
