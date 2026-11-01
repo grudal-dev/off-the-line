@@ -1,13 +1,15 @@
 """Génère activities/static/activities/cities.json à partir de Natural Earth (domaine public).
 
-Source : ne_10m_populated_places.geojson
+Sources :
 https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_10m_populated_places.geojson
+https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_50m_admin_0_countries.geojson
 
-    python scripts/build_cities.py chemin/vers/ne_10m_populated_places.geojson
+    python scripts/build_cities.py ne_10m_populated_places.geojson ne_50m_admin_0_countries.geojson
 
 Format de sortie (compact, servi tel quel au navigateur) :
-[[nom, lat, lng, zoom_min, population_en_milliers, capitale], …] trié par importance.
-« zoom_min » est le niveau de zoom à partir duquel Natural Earth conseille d'afficher la ville.
+{"cities": [[nom, lat, lng, zoom_min, population_en_milliers, capitale], …] triées par importance,
+ "countries": [[nom, lat, lng, zoom_min, zoom_max], …]}
+Les zooms sont ceux que Natural Earth conseille pour afficher l'étiquette.
 """
 
 import json
@@ -17,10 +19,9 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent.parent / "activities" / "static" / "activities" / "cities.json"
 
 
-def main(source):
-    features = json.loads(Path(source).read_text(encoding="utf-8"))["features"]
+def cities(source):
     rows = []
-    for f in features:
+    for f in json.loads(Path(source).read_text(encoding="utf-8"))["features"]:
         p = f["properties"]
         name = (p.get("NAME_FR") or p.get("NAME") or "").strip()
         if not name:
@@ -34,9 +35,43 @@ def main(source):
             1 if p.get("ADM0CAP") else 0,
         ])
     rows.sort(key=lambda r: (r[3], -r[4]))
-    OUT.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"{len(rows)} villes → {OUT} ({OUT.stat().st_size // 1024} Ko)")
+    return rows
+
+
+MIN_COUNTRY_AREA = 0.3  # degrés carrés (emprise) : écarte les micro-États (Monaco, Vatican, Jersey…)
+
+
+def _bbox_area(geometry):
+    """Surface de l'emprise du plus grand polygone, en degrés carrés (assez pour trier petit / grand)."""
+    polygons = geometry["coordinates"] if geometry["type"] == "MultiPolygon" else [geometry["coordinates"]]
+    best = 0
+    for poly in polygons:
+        xs = [pt[0] for pt in poly[0]]
+        ys = [pt[1] for pt in poly[0]]
+        best = max(best, (max(xs) - min(xs)) * (max(ys) - min(ys)))
+    return best
+
+
+def countries(source):
+    rows = []
+    for f in json.loads(Path(source).read_text(encoding="utf-8"))["features"]:
+        p = f["properties"]
+        name = (p.get("NAME_FR") or p.get("NAME") or "").strip()
+        if not name or p.get("LABEL_Y") is None or not f.get("geometry"):
+            continue
+        if _bbox_area(f["geometry"]) < MIN_COUNTRY_AREA:
+            continue
+        rows.append([name, round(p["LABEL_Y"], 3), round(p["LABEL_X"], 3),
+                     round(p.get("MIN_LABEL") or 5, 1), round(p.get("MAX_LABEL") or 10, 1)])
+    rows.sort(key=lambda r: r[3])
+    return rows
+
+
+def main(places_source, countries_source):
+    data = {"cities": cities(places_source), "countries": countries(countries_source)}
+    OUT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"{len(data['cities'])} villes, {len(data['countries'])} pays → {OUT} ({OUT.stat().st_size // 1024} Ko)")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])
