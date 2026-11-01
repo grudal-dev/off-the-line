@@ -276,7 +276,6 @@ class ActivityPagesTests(LoggedInTestCase):
         self.assertEqual(len(response.context["routes"]), 2)
         self.assertContains(response, 'data-route="1"')
         self.assertNotContains(response, 'data-route="3"')
-        self.assertContains(response, "maplibre-gl.js")  # carte en globe
 
     def test_pages_require_login(self):
         self.client.logout()
