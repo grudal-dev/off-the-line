@@ -176,6 +176,9 @@ L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à 
 - le **style** : thèmes prêts à l'emploi, fond uni ou fond de carte (relief en option), couleurs du fond et du texte ;
 - les **tracés** : une couleur, par sport, dégradé dans le temps ou densité ; épaisseur (en mm), opacité, halo,
   points de départ et d'arrivée ; les transferts d'un périple sont en pointillés ;
+- les **repères** : frontières des pays, régions et départements, côtes (trait, épaisseur, opacité, couleur) et
+  grandes villes (nombre, taille, couleur, majuscules, point, contour), placées sans chevauchement ;
+- les **périples en évidence** (avec « Mes sorties ») : couleur, épaisseur, liseré, noms, choix des périples ;
 - le **cadre** : filet fin, double filet, cadre épais ou passe-partout, avec sa marge et ses couleurs ;
 - les **textes** (en haut, en bas ou aucun) : titre, sous-titre et chiffres proposés, modifiables ;
 - le **cadrage** : glisser l'aperçu pour déplacer, molette ou pincement pour zoomer, rotation.
@@ -184,6 +187,9 @@ L'aperçu et l'image finale sont dessinés par la même fonction (`static/activi
 ce qu'on voit est ce qui sera imprimé. La résolution est inscrite dans le PNG (bloc `pHYs`) pour que
 l'imprimeur retrouve la bonne taille. Les réglages sont mémorisés dans le navigateur. Les fonds de carte
 sont chargés en CORS ; si un fournisseur refuse, l'image est quand même produite et un message l'indique.
+Frontières et côtes viennent de Natural Earth (domaine public), réduites à
+`activities/static/activities/borders-*.json` par `scripts/build_borders.py` ; ces fichiers ne sont chargés
+que si l'option est cochée. Les villes réutilisent `cities.json`.
 Les liens « Créer une affiche » des pages périple et activité ouvrent l'affiche sur cette source
 (`/affiche/?periple=<id>` ou `?activite=<id>`).
 

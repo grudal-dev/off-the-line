@@ -31,12 +31,12 @@
   };
   const LAYERS = BASEMAP.layers;
   const PRESETS = {
-    paper: { bg: "#f4efe4", ink: "#2b2118", color: "#c2410c", color2: "#5b1a0b", base: "", frameColor: "#2b2118", matColor: "#fbf8f1", glow: false },
-    night: { bg: "#141b1e", ink: "#f3efe6", color: "#ff8a3d", color2: "#fff4d6", base: "", frameColor: "#f3efe6", matColor: "#0b1012", glow: true },
-    snow: { bg: "#ffffff", ink: "#1c2629", color: "#1c2629", color2: "#fc4c02", base: "", frameColor: "#1c2629", matColor: "#f2f2ef", glow: false },
-    ocean: { bg: "#0f2a3d", ink: "#e0f2fe", color: "#7dd3fc", color2: "#ffffff", base: "", frameColor: "#e0f2fe", matColor: "#0a1d2b", glow: true },
-    forest: { bg: "#e7ece3", ink: "#1f3326", color: "#2f5d3a", color2: "#c2410c", base: "", frameColor: "#1f3326", matColor: "#f6f8f3", glow: false },
-    satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", glow: true },
+    paper: { bg: "#f4efe4", ink: "#2b2118", color: "#c2410c", color2: "#5b1a0b", base: "", frameColor: "#2b2118", matColor: "#fbf8f1", hlColor: "#0f766e", glow: false },
+    night: { bg: "#141b1e", ink: "#f3efe6", color: "#ff8a3d", color2: "#fff4d6", base: "", frameColor: "#f3efe6", matColor: "#0b1012", hlColor: "#7dd3fc", glow: true },
+    snow: { bg: "#ffffff", ink: "#1c2629", color: "#1c2629", color2: "#fc4c02", base: "", frameColor: "#1c2629", matColor: "#f2f2ef", hlColor: "#fc4c02", glow: false },
+    ocean: { bg: "#0f2a3d", ink: "#e0f2fe", color: "#7dd3fc", color2: "#ffffff", base: "", frameColor: "#e0f2fe", matColor: "#0a1d2b", hlColor: "#fbbf24", glow: true },
+    forest: { bg: "#e7ece3", ink: "#1f3326", color: "#2f5d3a", color2: "#c2410c", base: "", frameColor: "#1f3326", matColor: "#f6f8f3", hlColor: "#c2410c", glow: false },
+    satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
     source: "all", hidden: [], from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null,
@@ -46,6 +46,11 @@
     frame: "line", margin: 15,
     textPos: "bottom", title: "", subtitle: "", stats: "",
     rotation: 0, view: null, manual: false,
+    countries: false, regions: false, coast: false,
+    borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "dash", regionStyle: "dot", borderOpacity: 0.6,
+    cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
+    labelHalo: true,
+    hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
   };
 
   // --- Données ------------------------------------------------------------
@@ -53,7 +58,7 @@
     const s = Math.sin(lat * Math.PI / 180);
     return [(lng + 180) / 360, 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)];
   }
-  function decode(str) {
+  function decode(str, factor = 1e5) {
     const out = [];
     let i = 0, lat = 0, lng = 0;
     while (i < str.length) {
@@ -63,7 +68,7 @@
         const d = result & 1 ? ~(result >> 1) : result >> 1;
         if (axis === 0) lat += d; else lng += d;
       }
-      out.push(...mercator(lat / 1e5, lng / 1e5));
+      out.push(...mercator(lat / factor, lng / factor));
     }
     return Float64Array.from(out);
   }
@@ -450,6 +455,164 @@
     return { sel, auto, texts, lay };
   }
 
+  // --- Repères : frontières, côtes, villes, périples en évidence ---------
+  // Données Natural Earth (domaine public), chargées seulement quand l'option est cochée
+  const GEO_URLS = canvas.dataset;
+  const geo = {};
+  function geoData(key, onLoad) {
+    let g = geo[key];
+    if (!g) {
+      g = geo[key] = { rows: null };
+      g.promise = fetch(GEO_URLS[key]).then(r => r.json()).catch(() => []).then(rows => { g.rows = rows; return g; });
+    }
+    if (!g.rows && onLoad) g.promise.then(onLoad);
+    return g.rows;
+  }
+  // [clé, épaisseur et opacité relatives] : les limites intérieures restent plus discrètes
+  const BORDER_LAYERS = [["coast", 1, 1], ["regions", 0.55, 0.7], ["countries", 1.5, 1]];
+  const wantedGeo = () => [...BORDER_LAYERS.map(([k]) => k), "cities"].filter(k => state[k]);
+
+  function viewBox(view, mapPx, s) {
+    const r = Math.hypot(mapPx.w, mapPx.h) / 2 / s;
+    const lng = x => x * 360 - 180;
+    const lat = y => Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI;
+    return { w: lng(view.cx - r), e: lng(view.cx + r), n: lat(Math.max(0, view.cy - r)), s: lat(Math.min(1, view.cy + r)) };
+  }
+  const visible = (box, w, s, e, n) => !(e < box.w || w > box.e || n < box.s || s > box.n);
+
+  function drawBorders(ctx, view, s, ppm, mapPx, onLoad) {
+    const box = viewBox(view, mapPx, s);
+    const base = Math.max(0.5, state.borderWidth * ppm);
+    ctx.save();
+    ctx.strokeStyle = state.borderColor; ctx.lineJoin = "round";
+    for (const [key, kw, ka] of BORDER_LAYERS) {
+      if (!state[key]) continue;
+      const rows = geoData(key, onLoad);
+      if (!rows) continue;
+      const w = Math.max(0.5, base * kw);
+      // Une côte reste un trait continu ; les régions ont leur propre trait
+      const style = key === "coast" ? "solid" : key === "regions" ? state.regionStyle : state.borderStyle;
+      ctx.lineWidth = w; ctx.globalAlpha = state.borderOpacity * ka;
+      ctx.lineCap = style === "dot" ? "round" : "butt";
+      ctx.setLineDash(style === "solid" ? [] : style === "dot" ? [0.001, w * 2.6] : [w * 5, w * 3]);
+      ctx.beginPath();
+      for (const row of rows) {
+        if (!visible(box, row[0], row[1], row[2], row[3])) continue;
+        if (!row.parts) row.parts = row[4].split(" ").map(p => decode(p, 1e4));
+        for (const pts of row.parts) tracePath(ctx, pts, view, s);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Périples en évidence (source « Mes sorties ») : ceux qui ont au moins une étape affichée
+  function tripsInSelection(sel) {
+    const ids = new Set(sel.routes.map(r => r.id));
+    return TRIPS.filter(t => t.stages.some(id => ids.has(id)));
+  }
+  function highlighted(sel) {
+    if (state.source !== "all" || !state.hl) return [];
+    const off = new Set(state.hlOff);
+    return tripsInSelection(sel).filter(t => !off.has(t.id))
+      .map(t => ({ trip: t, stages: t.stages.map(id => byId.get(id)).filter(Boolean) }));
+  }
+  function drawHighlights(ctx, list, view, s, ppm) {
+    if (!list.length) return;
+    const lw = Math.max(0.8, state.width * state.hlWidth * ppm);
+    const all = () => { ctx.beginPath(); for (const h of list) for (const r of h.stages) tracePath(ctx, r.pts, view, s); ctx.stroke(); };
+    ctx.save();
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 1;
+    if (state.hlCasing) { ctx.strokeStyle = state.bg; ctx.lineWidth = lw + Math.max(1.5, lw * 0.9); all(); }
+    ctx.strokeStyle = state.hlColor; ctx.lineWidth = lw; all();
+    // Transferts (train, ferry…) en pointillés
+    ctx.lineWidth = Math.max(0.6, lw * 0.5); ctx.setLineDash([0.001, lw * 1.6]);
+    ctx.beginPath();
+    for (const h of list) for (const i of h.trip.transfers || []) {
+      const a = byId.get(h.trip.stages[i]), b = byId.get(h.trip.stages[i + 1]);
+      if (!a || !b) continue;
+      ctx.moveTo((a.pts[a.pts.length - 2] - view.cx) * s, (a.pts[a.pts.length - 1] - view.cy) * s);
+      ctx.lineTo((b.pts[0] - view.cx) * s, (b.pts[1] - view.cy) * s);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Étiquettes (périples puis villes), toujours horizontales même si la carte tourne,
+  // sans chevauchement et sans déborder de la carte.
+  function drawLabels(ctx, lay, view, ppm, hl, onLoad) {
+    if (!state.cities && !(hl.length && state.hlLabels)) return;
+    const m = lay.map, X = v => v * ppm;
+    const mapPx = { w: X(m.w), h: X(m.h) }, s = mapPx.w / view.span;
+    const th = state.rotation * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+    const ox = X(m.x) + mapPx.w / 2, oy = X(m.y) + mapPx.h / 2;
+    const project = (x, y) => {
+      const u = (x - view.cx) * s, v = (y - view.cy) * s;
+      return [ox + u * cos - v * sin, oy + u * sin + v * cos];
+    };
+    const size = X(state.citySize);
+    const edge = size * 0.5;
+    const inside = b => b.x0 >= X(m.x) + edge && b.x1 <= X(m.x + m.w) - edge && b.y0 >= X(m.y) + edge && b.y1 <= X(m.y + m.h) - edge;
+    const placed = [];
+    const free = b => !placed.some(p => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
+
+    function label(str, px, py, o) {
+      ctx.font = fontString(o.weight, o.size, o.family);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${o.upper ? o.size * 0.08 : 0}px`;
+      const txt = o.upper ? str.toUpperCase() : str;
+      const w = ctx.measureText(txt).width;
+      const r = o.dot ? o.size * 0.2 : 0;
+      const gap = o.dot ? o.size * 0.45 : 0;
+      const sides = o.dot ? [1, -1] : [0];
+      for (const side of sides) {
+        const x0 = side > 0 ? px + gap : side < 0 ? px - gap - w : px - w / 2;
+        const b = { x0: Math.min(x0, px - r) - o.size * 0.2, x1: Math.max(x0 + w, px + r) + o.size * 0.2, y0: py - o.size * 0.62, y1: py + o.size * 0.62 };
+        if (!inside(b) || !free(b)) continue;
+        placed.push(b);
+        ctx.textAlign = "left"; ctx.textBaseline = "middle";
+        if (state.labelHalo) {
+          ctx.lineJoin = "round"; ctx.strokeStyle = state.bg; ctx.lineWidth = o.size * 0.32;
+          ctx.strokeText(txt, x0, py + o.size * 0.04);
+        }
+        ctx.fillStyle = o.color;
+        ctx.fillText(txt, x0, py + o.size * 0.04);
+        if (o.dot) {
+          ctx.beginPath(); ctx.arc(px, py, r, 0, 2 * Math.PI);
+          if (state.labelHalo) { ctx.lineWidth = r * 0.9; ctx.stroke(); }
+          ctx.fill();
+        }
+        return true;
+      }
+      return false;
+    }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(X(m.x), X(m.y), mapPx.w, mapPx.h); ctx.clip();
+    if (state.hlLabels) {
+      for (const h of hl) {
+        const p = h.stages[0].pts, [x, y] = project(p[0], p[1]);
+        label(h.trip.title, x, y, { size: size * 1.1, weight: 700, family: COND, color: state.hlColor, dot: true, upper: false });
+      }
+    }
+    const rows = state.cities ? geoData("cities", onLoad) : null;
+    if (rows) {
+      const box = viewBox(view, mapPx, s);
+      let count = 0;
+      for (const c of rows) {
+        if (count >= state.cityCount) break;
+        const [name, lat, lng, , , capital] = c;
+        if (!visible(box, lng, lat, lng, lat)) continue;
+        const [x, y] = project(...mercator(lat, lng));
+        if (label(name, x, y, {
+          size: capital ? size * 1.08 : size, weight: capital ? 600 : 500, family: state.cityUpper ? COND : SANS,
+          color: state.cityColor, dot: state.cityDots, upper: state.cityUpper,
+        })) count++;
+      }
+    }
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    ctx.restore();
+  }
+
   /** Dessine l'affiche entière sur ctx ; l'échelle (pixels par mm) vient de la largeur du canevas. */
   function render(ctx, onTileLoad, maxTiles = 160) {
     const { sel, auto, texts, lay } = compose();
@@ -482,8 +645,12 @@
       }
     }
     ctx.globalAlpha = 1;
+    drawBorders(ctx, view, s, ppm, mapPx, onTileLoad);
     drawTracks(ctx, sel, view, s, ppm);
+    const hl = highlighted(sel);
+    drawHighlights(ctx, hl, view, s, ppm);
     ctx.restore();
+    drawLabels(ctx, lay, view, ppm, hl, onTileLoad);
     drawAttribution(ctx, lay, ppm, defs);
 
     if (!sel.routes.length) {
@@ -604,8 +771,9 @@
     set({ from: y ? `${y}-01-01` : "", to: y ? `${y}-12-31` : "" }, true);
   });
 
-  const NUMERIC = new Set(["width", "opacity", "margin", "rotation"]);
-  const CHECKS = new Set(["relief", "glow", "endpoints"]);
+  const NUMERIC = new Set(["width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
+  const CHECKS = new Set(["relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+                          "labelHalo", "hl", "hlCasing", "hlLabels"]);
   const RESHAPE = new Set(["from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
     for (const el of form.elements) {
@@ -640,6 +808,7 @@
   }));
   document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
     const p = { ...PRESETS[b.dataset.preset] };
+    p.borderColor = p.cityColor = p.ink;
     if (p.base && !LAYERS.some(l => l.key === p.base)) p.base = "";
     set(p);
   }));
@@ -648,6 +817,35 @@
     syncFields();
     redraw();
   });
+
+  // Liste des périples à mettre en évidence : ceux de la sélection, cochés sauf exclusion
+  const tripList = document.getElementById("hl-trips");
+  let tripKey = "";
+  function refreshTrips(sel) {
+    const hlBox = form.querySelector("[data-for-hl]");
+    if (!hlBox) return;
+    hlBox.hidden = !state.hl;
+    const trips = tripsInSelection(sel);
+    const key = trips.map(t => t.id).join() + "|" + state.hlOff.join();
+    if (key === tripKey) return;
+    tripKey = key;
+    const off = new Set(state.hlOff);
+    tripList.innerHTML = trips.length ? trips.map(t => `
+      <li><label class="check"><input type="checkbox" data-hl-trip="${t.id}" ${off.has(t.id) ? "" : "checked"}>
+        <span>${escapeHtml(t.title)} <span class="muted">${escapeHtml(t.dates)}</span></span></label></li>`).join("")
+      : `<li class="muted">Aucun périple dans cette sélection.</li>`;
+  }
+  if (tripList) {
+    tripList.addEventListener("change", e => {
+      const id = Number(e.target.dataset.hlTrip);
+      const off = new Set(state.hlOff);
+      e.target.checked ? off.delete(id) : off.add(id);
+      set({ hlOff: [...off] });
+    });
+    document.querySelectorAll("[data-hl-all]").forEach(b => b.addEventListener("click", () => {
+      set({ hlOff: b.dataset.hlAll === "1" ? [] : TRIPS.map(t => t.id) });
+    }));
+  }
 
   function refreshPanel({ sel, auto }) {
     document.querySelectorAll("[data-source]").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === state.source));
@@ -668,6 +866,17 @@
     out("opacity", `${Math.round(state.opacity * 100)} %`);
     out("margin", `${state.margin} mm`);
     out("rotation", `${state.rotation}°`);
+    out("borderWidth", `${nf1.format(state.borderWidth)} mm`);
+    out("borderOpacity", `${Math.round(state.borderOpacity * 100)} %`);
+    out("cityCount", state.cityCount);
+    out("citySize", `${nf1.format(state.citySize)} mm`);
+    out("hlWidth", `× ${nf1.format(state.hlWidth)}`);
+    form.querySelector("[data-for-borders]").hidden = !(state.countries || state.regions || state.coast);
+    form.querySelector("[data-for-borders] [data-dash=countries]").hidden = !state.countries;
+    form.querySelector("[data-for-borders] [data-dash=regions]").hidden = !state.regions;
+    form.querySelector("[data-for-cities]").hidden = !state.cities;
+    form.querySelector("[data-for-labels]").hidden = !(state.cities || (state.hl && state.hlLabels && state.source === "all"));
+    refreshTrips(sel);
     const km = sel.routes.reduce((a, r) => a + r.km, 0);
     document.getElementById("poster-summary").textContent = sel.routes.length
       ? `${nf.format(sel.routes.length)} tracé${sel.routes.length > 1 ? "s" : ""}, ${nf.format(km)} km`
@@ -690,6 +899,7 @@
     status.textContent = "Préparation de l'image…";
     try {
       await fonts;
+      await Promise.all(wantedGeo().map(k => { geoData(k); return geo[k].promise; }));
       const out = document.createElement("canvas");
       out.width = w; out.height = h;
       const ctx = out.getContext("2d");

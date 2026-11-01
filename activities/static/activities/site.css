@@ -462,7 +462,7 @@ details.advanced form { margin-top: .75rem; }
 .poster-row { display: flex; gap: .6rem; align-items: end; flex-wrap: wrap; }
 .poster-row > label { flex: 1; min-width: 7rem; }
 .poster-row .btn { padding: .45rem .8rem; font-size: var(--t-small); }
-.poster-row .btn.square { width: 2.3rem; padding-inline: 0; font-size: 1.1rem; line-height: 1; }
+.poster-row .btn.square { justify-content: center; width: 2.3rem; padding-inline: 0; font-size: 1.1rem; line-height: 1; }
 .colors label, label.colors { display: flex !important; align-items: center; justify-content: space-between; gap: .5rem; }
 .poster-form input[type=color] { width: 2.6rem; height: 1.9rem; padding: 2px; border: 1px solid var(--contour); border-radius: 6px; background: #fff; cursor: pointer; }
 .poster-form input[type=range] { width: 100%; accent-color: var(--route); }
@@ -491,3 +491,9 @@ details.advanced form { margin-top: .75rem; }
   .poster-panel { overflow: visible; }
   .poster-form { overflow: visible; }
 }
+.sub-options { display: grid; gap: .55rem; margin: -.2rem 0 .2rem 1.6rem; padding-left: .8rem; border-left: 2px solid var(--contour-soft); }
+.hl-head { display: flex; justify-content: space-between; font-weight: 500; }
+.hl-trips { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; max-height: 14rem; overflow-y: auto; }
+.hl-trips label.check { align-items: start; }
+.hl-trips input { margin-top: .2rem; }
+.hl-trips .muted { display: block; font-size: .8rem; }
