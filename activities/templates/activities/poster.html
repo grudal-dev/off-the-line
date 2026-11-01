@@ -30,6 +30,9 @@
                 {% endfor %}
               </ul>
             {% endif %}
+            <label class="poster-search">Rechercher dans les noms
+              <input class="field" type="search" name="q" placeholder="ex. col, marathon, Annecy" autocomplete="off">
+            </label>
             <div class="poster-row">
               <label>Du <input class="field" type="date" name="from"></label>
               <label>au <input class="field" type="date" name="to"></label>
@@ -46,6 +49,8 @@
             <p class="muted">Les activités choisies sur la carte. <a href="{% url 'activities:map' %}">Choisir une autre zone</a></p>
           </div>
           <div data-for-source="activity">
+            <label class="sr-only" for="activity-search">Rechercher une activité</label>
+            <input class="field poster-search" type="search" id="activity-search" placeholder="Rechercher une activité par son nom" autocomplete="off">
             <label class="sr-only" for="activity-select">Activité</label>
             <select class="field" id="activity-select" name="activity"></select>
           </div>
@@ -209,6 +214,15 @@
           </label>
           <label>Marge <output data-out="margin"></output>
             <input type="range" name="margin" min="0" max="60" step="1">
+          </label>
+          <label>Marque Off the line
+            <select class="field" name="brand">
+              <option value="none">Aucune</option>
+              <option value="gap">Coupure : dans le filet du bas</option>
+              <option value="escape">Échappée : le cadre quitte sa ligne</option>
+              <option value="signature">Signature : dans la marge</option>
+              <option value="stamp">Tampon : sceau dans le coin</option>
+            </select>
           </label>
           <label class="colors" data-for-frame="line double bold mat">Couleur du cadre <input type="color" name="frameColor"></label>
           <label class="colors" data-for-frame="mat">Couleur du passe-partout <input type="color" name="matColor"></label>
