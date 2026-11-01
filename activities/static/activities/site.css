@@ -470,6 +470,8 @@ details.advanced form { margin-top: .75rem; }
 .poster-form legend { float: left; width: 100%; padding: 0; margin-bottom: .1rem; font-family: var(--cond); font-weight: 700; font-size: 1.2rem; }
 .poster-form label { display: grid; gap: .25rem; font-weight: 500; }
 .poster-form .poster-search { margin-bottom: .5rem; }
+.poster-hint { margin: .2rem 0 0; font-size: var(--t-small); color: var(--slate); }
+.poster-hint[hidden] { display: none; }
 .poster-form label.check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
 .poster-form .field { width: 100%; padding: .4rem .5rem; }
 .poster-form output { font-weight: 400; color: var(--slate); }

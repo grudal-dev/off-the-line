@@ -315,22 +315,26 @@ def poster(request):
         return redirect("activities:home")
     qs = account.activities.exclude(summary_polyline="").only(
         "account", "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
-        "total_elevation_gain", "summary_polyline"
+        "total_elevation_gain", "summary_polyline", "profile"
     ).order_by("start_date")
     routes, counts = [], {}
     for a in qs:
         fam = sports.family(a.sport_type)
         counts[fam] = counts.get(fam, 0) + 1
-        routes.append({
+        route = {
             "id": a.strava_id, "name": a.name, "family": fam,
             "day": (a.start_date_local or a.start_date).date().isoformat(),
             "km": a.distance_km, "elev": round(a.total_elevation_gain), "poly": a.summary_polyline,
-        })
+        }
+        if a.profile:  # profil d'altitude (récupéré pour les livres) : allégé pour l'affiche
+            step = max(1, len(a.profile) // POSTER_PROFILE_POINTS)
+            route["prof"] = [round(alt) for _, alt in a.profile[::step]]
+        routes.append(route)
     families = [{"key": key, "label": label, "color": color, "count": counts[key]}
                 for key, (label, color) in sports.FAMILIES.items() if key in counts]
     trips = [
-        {"id": j.id, "title": j.name, "dates": _date_range(j),
-         "stages": [a.strava_id for a in j.activities], "transfers": j.transfers}
+        {"id": j.id, "title": j.name, "dates": _date_range(j), "days": j.days,
+         "stages": [a.strava_id for a in j.activities], "transfers": j.transfers, "stops": _stops(j)}
         for j in sorted(journeys.for_account(account, include_hidden=False),
                         key=lambda j: j.legs[0].start_at, reverse=True)
     ]
@@ -350,6 +354,24 @@ def poster(request):
         "routes": routes, "families": families, "journeys": trips, "initial": initial,
         "athlete": account.firstname,
     })
+
+
+POSTER_PROFILE_POINTS = 40
+
+
+def _stops(journey):
+    """Lieux d'étape nommés (départ puis chaque arrivée) : [lat, lng, nom], sans doublon de nom."""
+    points = [(journey.legs[0].start, journey.legs[0].start_name)] + [(leg.end, leg.end_name) for leg in journey.legs]
+    stops, seen = [], set()
+    for (lat, lng), name in points:
+        if name and name not in seen:
+            seen.add(name)
+            stops.append([round(lat, 4), round(lng, 4), name])
+    # l'arrivée reste en dernier, au point d'arrivée, même si on y était déjà passé
+    last = journey.legs[-1]
+    if last.end_name:
+        stops = [s for s in stops if s[2] != last.end_name] + [[round(last.end[0], 4), round(last.end[1], 4), last.end_name]]
+    return stops
 
 
 def _date_range(journey):

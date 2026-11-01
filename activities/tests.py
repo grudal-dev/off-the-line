@@ -970,3 +970,44 @@ class ZoneSelectionTests(LoggedInTestCase):
             response = self.client.post(reverse("activities:book"), {"a": ["1", "2"]}, follow=True)
         self.assertContains(response, "Trop d&#x27;activités")
         self.assertFalse(Book.objects.exists())
+
+
+
+@mock.patch("activities.journeys.MIN_DAYS", 2)
+class PosterJourneyDataTests(LoggedInTestCase):
+    """Données envoyées à l'affiche pour un périple : lieux d'étape, jours, profils allégés."""
+
+    def setUp(self):
+        super().setUp()
+        for a in (leg(1, 10, 8, ANNECY, FAVERGES), leg(2, 11, 8, FAVERGES, ALBERTVILLE), leg(3, 12, 8, ALBERTVILLE, FAVERGES)):
+            a.account = self.account
+            a.summary_polyline = SAMPLE_POLYLINE
+            a.profile = [[k / 10, 400 + k] for k in range(120)]
+            a.save()
+        from decimal import Decimal
+        from .places import _key
+        for point, name in ((ANNECY, "Annecy"), (FAVERGES, "Faverges"), (ALBERTVILLE, "Albertville")):
+            lat, lng = _key(point)
+            Place.objects.create(lat_key=lat, lng_key=lng, name=name)
+
+    def test_trip_stops_days_and_profiles(self):
+        response = self.client.get(reverse("activities:poster"))
+        trip = response.context["journeys"][0]
+        self.assertEqual(trip["days"], 3)
+        # Faverges revient en arrivée : une seule fois, à la fin, au point d'arrivée
+        self.assertEqual([s[2] for s in trip["stops"]], ["Annecy", "Albertville", "Faverges"])
+        self.assertEqual(trip["stops"][-1][:2], [round(FAVERGES[0], 4), round(FAVERGES[1], 4)])
+        route = response.context["routes"][0]
+        self.assertLessEqual(len(route["prof"]), 41)
+        self.assertEqual(route["prof"][0], 400)
+        self.assertContains(response, "countries-shapes.json")
+        for name in ("mute", "casing", "stageDots", "cityMode", "profile", "air"):
+            self.assertContains(response, f'name="{name}"')
+
+    def test_country_shapes_file(self):
+        import json
+        from django.contrib.staticfiles import finders
+        data = json.loads(open(finders.find("activities/countries-shapes.json"), encoding="utf-8").read())
+        names = [row[0] for row in data["countries"]]
+        self.assertIn("France", names)
+        self.assertEqual(len(names), len(set(names)))

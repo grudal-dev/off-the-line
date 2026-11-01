@@ -79,6 +79,9 @@
               </select>
             </label>
           </div>
+          <p class="poster-hint" id="orient-hint" hidden>
+            <span></span> <button type="button" class="link-button" id="orient-btn"></button>
+          </p>
           <label>Résolution
             <select class="field" name="dpi">
               <option value="150">150 ppp (rapide, tirage courant)</option>
@@ -105,6 +108,9 @@
             </select>
           </label>
           <label class="check" id="relief-wrap"><input type="checkbox" name="relief"> Relief ombré</label>
+          <label id="mute-wrap">Atténuer le fond <output data-out="mute"></output>
+            <input type="range" name="mute" min="0" max="90" step="5">
+          </label>
           <div class="poster-row colors">
             <label>Fond <input type="color" name="bg"></label>
             <label>Texte <input type="color" name="ink"></label>
@@ -132,7 +138,9 @@
             <input type="range" name="opacity" min="0.1" max="1" step="0.05">
           </label>
           <label class="check"><input type="checkbox" name="glow"> Halo lumineux</label>
+          <label class="check"><input type="checkbox" name="casing"> Liseré (couleur du fond) : le tracé ressort</label>
           <label class="check"><input type="checkbox" name="endpoints"> Départ et arrivée</label>
+          <label class="check"><input type="checkbox" name="stageDots"> Points d'étape</label>
         </fieldset>
 
         <fieldset>
@@ -165,8 +173,14 @@
             </label>
             <label class="colors">Couleur <input type="color" name="borderColor"></label>
           </div>
-          <label class="check"><input type="checkbox" name="cities"> Grandes villes</label>
+          <label class="check"><input type="checkbox" name="cities"> Noms de villes</label>
           <div class="sub-options" data-for-cities>
+            <label>Villes
+              <select class="field" name="cityMode">
+                <option value="big">Les plus grandes de la zone</option>
+                <option value="stops">Villes-étapes du périple</option>
+              </select>
+            </label>
             <label>Nombre maximum <output data-out="cityCount"></output>
               <input type="range" name="cityCount" min="1" max="40" step="1">
             </label>
@@ -241,6 +255,7 @@
             <label>Titre <input class="field" type="text" name="title" maxlength="80"></label>
             <label>Sous-titre <input class="field" type="text" name="subtitle" maxlength="120"></label>
             <label>Chiffres <input class="field" type="text" name="stats" maxlength="120"></label>
+            <label class="check"><input type="checkbox" name="profile"> Profil d'altitude (sinon D+ de chaque étape)</label>
             <p class="muted small-print">Laisse un champ vide pour le texte proposé ; un espace seul l'efface.</p>
           </div>
         </fieldset>
@@ -253,6 +268,9 @@
             <button type="button" class="btn ghost square" id="zoom-in" aria-label="Zoomer">+</button>
             <button type="button" class="btn ghost square" id="zoom-out" aria-label="Dézoomer">−</button>
           </div>
+          <label>Air autour du tracé <output data-out="air"></output>
+            <input type="range" name="air" min="2" max="40" step="1">
+          </label>
           <label>Rotation <output data-out="rotation"></output>
             <input type="range" name="rotation" min="-180" max="180" step="1">
           </label>
@@ -267,6 +285,7 @@
     <div class="poster-stage" id="poster-stage">
       <canvas id="poster-canvas" role="img" aria-label="Aperçu de l'affiche"
               data-cities="{% static 'activities/cities.json' %}"
+              data-country-shapes="{% static 'activities/countries-shapes.json' %}"
               data-countries="{% static 'activities/borders-countries.json' %}"
               data-regions="{% static 'activities/borders-regions.json' %}"
               data-coast="{% static 'activities/borders-coast.json' %}"></canvas>

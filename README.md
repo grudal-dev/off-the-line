@@ -181,7 +181,10 @@ L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à 
 - le **format** (A4 à A1, 30 × 40, 40 × 50, 50 × 70, carré 30 × 30), le sens et la résolution (150, 200 ou 300 ppp) ;
 - le **style** : thèmes prêts à l'emploi, fond uni ou fond de carte (relief en option), couleurs du fond et du texte ;
 - les **tracés** : une couleur, par sport, dégradé dans le temps ou densité ; épaisseur (en mm), opacité, halo,
-  points de départ et d'arrivée ; les transferts d'un périple sont en pointillés ;
+  liseré (couleur du fond), points de départ et d'arrivée, point à chaque fin d'étape ; les transferts d'un
+  périple sont en pointillés ;
+- le **fond atténué** : avec un fond de carte, couleurs adoucies et voile de la couleur du fond (35 % par défaut)
+  pour que le tracé ressorte ;
 - les **repères** : frontières des pays, régions et départements, côtes (trait, épaisseur, opacité, couleur) et
   grandes villes (nombre, taille, couleur, majuscules, point, contour), placées sans chevauchement ;
 - les **périples en évidence** (avec « Mes sorties ») : couleur, épaisseur, liseré, noms, choix des périples ;
@@ -192,7 +195,17 @@ L'onglet « Affiche » compose une image à imprimer (PNG haute résolution) à 
   le filet du bas), « Échappée » (le cadre quitte sa ligne, par défaut), « Signature » (dans la marge, avec
   le format et l'année), « Tampon » (sceau dans le coin), ou aucune ;
 - les **textes** (en haut, en bas ou aucun) : titre, sous-titre et chiffres proposés, modifiables ;
-- le **cadrage** : glisser l'aperçu pour déplacer, molette ou pincement pour zoomer, rotation.
+- le **cadrage** : glisser l'aperçu pour déplacer, molette ou pincement pour zoomer, rotation, air autour du
+  tracé ; un conseil propose l'autre orientation quand elle remplirait nettement mieux l'affiche ;
+- les **villes** : les plus grandes de la zone, ou les **villes-étapes** d'un périple (départ et arrivée en
+  évidence, puis des étapes réparties le long du parcours, d'après les noms de lieux déjà connus) ;
+- le **profil d'altitude** dans le bandeau (périple, zone, activité) : altitudes enchaînées si toutes les
+  étapes en ont un (récupérés à la création d'un livre), sinon le D+ de chaque étape en barres.
+
+Les chiffres proposés comptent les **jours** et les **pays traversés** (au moins deux), d'après les contours
+simplifiés de Natural Earth 1:110 M (`countries-shapes.json`, généré par `scripts/build_countries.py`) : un pays
+ne compte qu'au-delà de 15 km parcourus. Les polices Barlow n'ayant ni l'espace fine du format français des
+nombres ni la flèche « → », la première est remplacée par une espace insécable et la seconde est dessinée.
 
 L'aperçu et l'image finale sont dessinés par la même fonction (`static/activities/poster.js`), en millimètres :
 ce qu'on voit est ce qui sera imprimé. La résolution est inscrite dans le PNG (bloc `pHYs`) pour que
