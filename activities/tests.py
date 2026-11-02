@@ -52,6 +52,19 @@ class StravaOAuthTests(TestCase):
         self.assertRedirects(response, reverse("activities:home"))
         self.assertFalse(StravaAccount.objects.exists())
 
+    @mock.patch("activities.strava.requests.get")
+    @mock.patch("activities.strava.requests.post")
+    def test_second_callback_after_login_is_silent(self, post, get):
+        """Le retour Strava reçu une deuxième fois (rechargement…) ne doit pas afficher d'erreur."""
+        post.return_value = fake_response(json_data=TOKEN_RESPONSE)
+        get.return_value = fake_response(json_data=[])
+        state = self._start_login()
+        params = {"state": state, "code": "abc", "scope": "read,activity:read_all"}
+        self.client.get(reverse("activities:strava_callback"), params)
+        response = self.client.get(reverse("activities:strava_callback"), params, follow=True)
+        self.assertNotContains(response, "Réponse Strava invalide")
+        self.assertEqual(post.call_count, 1)
+
     def test_callback_requires_activity_scope(self):
         state = self._start_login()
         response = self.client.get(

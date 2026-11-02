@@ -37,6 +37,10 @@ def strava_login(request):
 def strava_callback(request):
     expected_state = request.session.pop(SESSION_STATE_KEY, None)
     if not expected_state or request.GET.get("state") != expected_state:
+        # Retour Strava reçu deux fois (rechargement, page restaurée, double redirection) : la
+        # première fois a déjà connecté le compte, inutile d'afficher une erreur
+        if request.user.is_authenticated and hasattr(request.user, "strava"):
+            return redirect("activities:home")
         messages.error(request, "Réponse Strava invalide, recommence la connexion.")
         return redirect("activities:home")
 
