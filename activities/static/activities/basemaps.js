@@ -120,14 +120,21 @@
       return OTLStyles.attribution(def.vector, vectorOptions());
     }
 
-    function setBase(key) {
+    function setBase(key, remember = true) {
       def = defs.find(d => d.key === key);
       current = key;
       if (tiles) tiles.remove();
       if (def.vector) {
-        tiles = L.maplibreGL({ style: OTLStyles.build(def.vector, vectorOptions()), maxZoom: 22 });
-        tiles.addTo(map);
+        try {
+          tiles = L.maplibreGL({ style: OTLStyles.build(def.vector, vectorOptions()), maxZoom: 22 });
+          tiles.addTo(map);
+        } catch (err) {
+          // WebGL indisponible (carte graphique, navigateur) : on revient au fond en images
+          console.error("Fond vectoriel indisponible", err);
+          return fallback(key);
+        }
         setVectorAttribution(vectorAttribution());
+        watchVector(tiles, key);
       } else {
         setVectorAttribution(null);
         tiles = L.tileLayer(def.url, def.options).addTo(map);
@@ -138,10 +145,27 @@
       el.querySelectorAll("[data-base]").forEach(b => b.setAttribute("aria-pressed", b.dataset.base === key));
       el.querySelector("[data-current]").innerHTML = (def.vector ? swatch(def) : "") + def.label;
       el.querySelector("[data-toggle=relief]").checked = def.vector ? vrelief : relief;
-      write(STORE, key);
+      if (remember) write(STORE, key);
       applyRelief();
       if (cities) cities.setEnabled(citiesOn && !def.vector);
       onChange && onChange(def);
+    }
+
+    // Si le style ne se charge pas (WebGL bloqué, erreur), on bascule sur le fond en images Topo
+    function fallback(key) {
+      const raster = defs.find(d => !d.vector && d.key === "topo") || defs.find(d => !d.vector);
+      if (tiles) { try { tiles.remove(); } catch (e) { /* déjà retiré */ } tiles = null; }
+      ours.forEach(d => { const b = control._el.querySelector(`[data-base="${d.key}"]`); if (b) b.disabled = true; });
+      if (raster) setBase(raster.key, false);
+    }
+    function watchVector(layer, key) {
+      const check = () => {
+        if (tiles !== layer) return;
+        if (document.visibilityState !== "visible") return setTimeout(check, 4000);  // onglet caché : on attend
+        const m = layer.getMaplibreMap && layer.getMaplibreMap();
+        if (!m || !m.isStyleLoaded()) { console.error("Fond vectoriel non chargé :", key); fallback(key); }
+      };
+      setTimeout(check, 12000);
     }
 
     // Style vectoriel : relief et noms font partie du style, que l'on redessine

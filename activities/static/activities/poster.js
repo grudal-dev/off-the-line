@@ -48,15 +48,15 @@
     source: "all", hidden: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
     format: "A3", orientation: "portrait", dpi: "200",
     ...PRESETS.paper, relief: false,
-    mode: "single", width: 0.6, opacity: 0.85, endpoints: false,
+    mode: "single", width: 1.7, opacity: 0.85, endpoints: false,
     frame: "line", margin: 15,
     textPos: "bottom", title: "", subtitle: "", stats: "",
     rotation: 0, view: null, manual: false,
-    countries: false, regions: false, coast: false,
+    countries: true, regions: true, coast: false,
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "solid", regionStyle: "solid", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
-    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: false,
+    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: true,
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
     // Fonds vectoriels Off the line (mapstyles.js) : couleurs remplacées et réglages
     vColors: {}, vRelief: null, vContours: null, vRoads: "all", vPaths: true, vBuildings: true, vNature: true,
@@ -64,6 +64,15 @@
   };
   const VECTOR = !!(window.OTLStyles && window.OTLRender);
   const isVector = key => VECTOR && !!(LAYERS.find(l => l.key === key) || {}).vector;
+  // Fond par défaut : notre style Rando, l'affiche prenant ses couleurs
+  const DEFAULT_STYLE = VECTOR && OTLStyles.styles.find(v => v.key === "rando");
+  if (DEFAULT_STYLE && LAYERS.some(l => l.key === "rando")) {
+    const c = DEFAULT_STYLE.colors;
+    Object.assign(DEFAULTS, {
+      base: "rando", mute: 0, bg: c.land, ink: c.label, frameColor: c.label, borderColor: c.label, cityColor: c.label,
+      matColor: OTLStyles.mix(c.land, "#ffffff", 0.5),
+    });
+  }
 
   // --- Données ------------------------------------------------------------
   function mercator(lat, lng) {
