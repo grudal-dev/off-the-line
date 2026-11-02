@@ -46,6 +46,24 @@
   }
 
   /**
+   * Indicateur « Chargement de la carte… » : affiché si le fond met plus de 300 ms à venir,
+   * retiré dès que tout est dessiné.
+   */
+  function loadingBadge(map) {
+    const el = L.DomUtil.create("div", "map-loading", map.getContainer());
+    el.setAttribute("role", "status");
+    el.innerHTML = `<span class="spinner" aria-hidden="true"></span>Chargement de la carte…`;
+    let timer = null;
+    return {
+      start() {
+        if (timer || el.classList.contains("is-on")) return;
+        timer = setTimeout(() => { timer = null; el.classList.add("is-on"); }, 300);
+      },
+      stop() { clearTimeout(timer); timer = null; el.classList.remove("is-on"); },
+    };
+  }
+
+  /**
    * Ajoute le sélecteur à la carte.
    * onChange(layerDef) est appelé à chaque changement de fond (et une fois au démarrage),
    * pour adapter le style des tracés au fond choisi.
@@ -61,6 +79,7 @@
     let citiesOn = read(CITIES, "1") === "1";
     const cities = window.mountCities ? window.mountCities(map, { enabled: citiesOn }) : null;
     let tiles = null, def = null, vAttr = null;
+    const loading = loadingBadge(map);
     // Attribution des styles vectoriels gérée ici : elle change avec le relief
     function setVectorAttribution(text) {
       const ctl = map.attributionControl;
@@ -126,8 +145,14 @@
       if (tiles) tiles.remove();
       if (def.vector) {
         try {
-          tiles = L.maplibreGL({ style: OTLStyles.build(def.vector, vectorOptions()), maxZoom: 22 });
+          tiles = L.maplibreGL({ style: OTLStyles.build(def.vector, vectorOptions()), maxZoom: 22, fadeDuration: 0 });
           tiles.addTo(map);
+          const gl = tiles.getMaplibreMap();
+          loading.start();
+          if (gl) {
+            gl.on("dataloading", () => loading.start());
+            gl.on("idle", () => loading.stop());
+          }
         } catch (err) {
           // WebGL indisponible (carte graphique, navigateur) : on revient au fond en images
           console.error("Fond vectoriel indisponible", err);
@@ -137,7 +162,8 @@
         watchVector(tiles, key);
       } else {
         setVectorAttribution(null);
-        tiles = L.tileLayer(def.url, def.options).addTo(map);
+        loading.stop();
+        tiles = L.tileLayer(def.url, def.options).on("loading", () => loading.start()).on("load", () => loading.stop()).addTo(map);
         if (def.filter) tiles.getContainer().style.filter = def.filter;  // ex. Sentinel-2 éclairci
       }
       map.getContainer().dataset.theme = def.theme;
@@ -189,6 +215,7 @@
       else { relief = on; write(RELIEF, on ? "1" : "0"); applyRelief(); }
     }
 
-    setBase(current);
+    // Le fond (et MapLibre) n'est posé qu'une fois la vue de la carte fixée (fitBounds de la page)
+    map.whenReady(() => setBase(current));
   };
 })();

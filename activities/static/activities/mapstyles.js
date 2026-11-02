@@ -155,8 +155,9 @@
       sources.dem = { type: "raster-dem", tiles: [d.tiles], encoding: CFG.dem.encoding || "terrarium", tileSize: 256,
                       maxzoom: CFG.dem.maxzoom || 12 };
       if (contours && d.contour) {
+        // À l'écran, pas de courbes avant le zoom 11 : leur calcul ralentirait les zooms
         sources.contours = {
-          type: "vector", maxzoom: 15,
+          type: "vector", maxzoom: 15, ...(o.print ? {} : { minzoom: 11 }),
           tiles: [d.contour.contourProtocolUrl({
             multiplier: 1, elevationKey: "ele", levelKey: "level", contourLayer: "contours",
             thresholds: { 9: [200, 1000], 10: [100, 500], 11: [100, 500], 12: [50, 250], 13: [20, 100], 14: [10, 50], 15: [10, 50] },

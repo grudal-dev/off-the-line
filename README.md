@@ -84,10 +84,12 @@ La commande enchaîne les lots et, quand Strava répond « quota atteint », att
 
 Deux espaces seulement, et un seul bouton pour créer.
 
-- **Explorer** (`/carte/`, page d'accueil une fois connecté) : la carte de toutes les sorties, avec trois onglets
-  sous les totaux : **Voyages** (les périples détectés, mis en évidence sur la carte), **Sorties** et **Années**
-  (un clic filtre la carte). « Affichage » (densité ou couleurs par sport, sports affichés) et « Tracer une zone »
-  sont discrets.
+- **Explorer** (`/carte/`, page d'accueil une fois connecté) : la carte de toutes les sorties, avec quatre onglets
+  sous les totaux : **Voyages** (les périples détectés, mis en évidence sur la carte), **Sorties**, **Années**
+  (un clic filtre la carte) et **Zone** (on dessine aussitôt un rectangle sur la carte, les sorties qui y passent
+  s'affichent avec « Créer »). « Affichage » règle la densité ou les couleurs par sport, les sports affichés et
+  l'**épaisseur des tracés** (mémorisée dans le navigateur). Un badge « Chargement de la carte… » apparaît
+  tant que le fond se charge.
 - **Créer** : sur un voyage, une sortie, une année ou une zone tracée, une seule question, Affiche ou Livre
   (`/creer/`, vue `create`). Un livre compte au plus 150 sorties.
 - **Mes créations** (`/creations/`) : affiches et livres, les plus récents d'abord. Une affiche créée ainsi est
@@ -225,7 +227,7 @@ de transport des transferts sont rattachés à l'étape qui précède le transfe
 
 ### Affiche ou livre depuis une zone de la carte
 
-Sur la carte, « Sélectionner une zone » puis faire glisser pour tracer un rectangle : les activités qui
+Dans l'Explorer, onglet « Zone », faire glisser pour tracer un rectangle : les activités qui
 passent dans la zone (parmi les sports affichés) sont listées, toutes cochées. On peut en décocher,
 donner un titre, puis :
 

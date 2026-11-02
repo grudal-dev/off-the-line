@@ -475,16 +475,29 @@
   const covers = (img, job) => img && img.key === job.key && Math.abs(img.zoom - job.zoom) < 0.12 &&
     img.pixelRatio >= job.pixelRatio * 0.8 && img.wx0 <= job.wx0 + 1e-12 && img.wy0 <= job.wy0 + 1e-12 &&
     img.wx1 >= job.wx1 - 1e-12 && img.wy1 >= job.wy1 - 1e-12;
+  // « Chargement de la carte… » sur l'aperçu pendant le rendu du fond
+  const vecBadge = document.createElement("div");
+  vecBadge.className = "map-loading";
+  vecBadge.setAttribute("role", "status");
+  vecBadge.innerHTML = `<span class="spinner" aria-hidden="true"></span>Chargement de la carte…`;
+  stage.appendChild(vecBadge);
+  let badgeTimer = null;
+  function vecLoading(on) {
+    clearTimeout(badgeTimer);
+    if (on) badgeTimer = setTimeout(() => vecBadge.classList.add("is-on"), 250);
+    else vecBadge.classList.remove("is-on");
+  }
   async function pumpVector(onLoad) {
     if (vec.busy || !vec.next) return;
     const job = vec.next;
     vec.next = null; vec.busy = true;
+    vecLoading(true);
     try {
       const res = await OTLRender.renderWorld({ ...job, isStale: () => vec.latest !== job && !!vec.next });
       if (res) vec.img = { ...res, key: job.key, zoom: job.zoom, pixelRatio: job.pixelRatio };
     } catch (err) { console.error(err); vec.latest = null; }
     vec.busy = false;
-    if (vec.next) pumpVector(onLoad); else onLoad && onLoad();
+    if (vec.next) pumpVector(onLoad); else { vecLoading(false); onLoad && onLoad(); }
   }
   function drawVector(ctx, def, view, mapPx, ppm, onLoad) {
     const s = mapPx.w / view.span;
