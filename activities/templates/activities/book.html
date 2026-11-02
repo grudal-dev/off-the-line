@@ -36,6 +36,9 @@
         <option value="satellite" {% if opt.imagery == "satellite" %}selected{% endif %}>Satellite Esri (usage personnel)</option>
         <option value="eox" {% if opt.imagery == "eox" %}selected{% endif %}>Satellite libre, Sentinel-2 (livre vendu)</option>
         <option value="ign_ortho" {% if opt.imagery == "ign_ortho" %}selected{% endif %}>Photo IGN, France seulement (livre vendu)</option>
+        {% if basemap.vector %}<optgroup label="Cartes Off the line (livre vendu)">
+          {% for s in basemap.vector.styles %}<option value="{{ s.key }}" {% if opt.imagery == s.key %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+        </optgroup>{% endif %}
       </select>
     </label>
     <span class="sep"></span>
@@ -322,10 +325,13 @@
   (() => {
     const maps = JSON.parse(document.getElementById("maps-data").textContent);
     const status = document.getElementById("load-status");
-    // Le livre n'utilise que de l'imagerie satellite : Esri (usage personnel : pas de revente sans
-    // accord écrit) Sentinel-2 2016 d'EOX (CC BY 4.0, vendable) ou photos IGN (Etalab 2.0, vendable, France) ; l'attribution est sur chaque carte et au dos.
-    const SATELLITE = BASEMAP.layers.find(d => d.key === (BOOK.options.imagery || "satellite"))
+    // Imagerie satellite Esri (usage personnel : pas de revente sans accord écrit), Sentinel-2 2016
+    // d'EOX (CC BY 4.0, vendable), photos IGN (Etalab 2.0, vendable, France) ou l'un de nos fonds vectoriels
+    // (vendables), rendu en image fixe haute définition pour l'impression ; l'attribution est sur chaque carte et au dos.
+    let SATELLITE = BASEMAP.layers.find(d => d.key === (BOOK.options.imagery || "satellite"))
       || BASEMAP.layers.find(d => d.key === "satellite");
+    const vectorOk = SATELLITE.vector && window.OTLRender && window.maplibregl && maplibregl.supported?.() !== false;
+    if (SATELLITE.vector && !vectorOk) SATELLITE = BASEMAP.layers.find(d => d.key === "eox");
     const instances = [];
     for (const m of maps) {
       const el = document.getElementById("map-" + m.id);
@@ -363,30 +369,44 @@
           : m.stages.length === 1 ? [m.stages[0].coords[0], m.stages[0].coords[m.stages[0].coords.length - 1]] : [];
         window.mountCities(map, { max: m.id.startsWith("s") ? 6 : 10, extraZoom: 0.5 });
       }
-      instances.push({ map, tiles: null });
+      instances.push({ id: m.id, map, tiles: null });
       (window.bookMaps = window.bookMaps || {})[m.id] = { map, bounds: group.getBounds() };
     }
 
     // Les cartes doivent être chargées avant d'imprimer, sinon le PDF a des trous
     let pending = 0;
-    function track(layer) {
+    function track(layer, timeout = 15000) {
       pending++;
       update();
       let done = false;
       const finish = () => { if (!done) { done = true; pending--; update(); } };
       layer.once("load", finish);
-      setTimeout(finish, 15000);
+      setTimeout(finish, timeout);
     }
     function update() {
       status.textContent = pending ? `Chargement des cartes (${pending} restantes)…` : "Cartes prêtes";
     }
-    for (const inst of instances) {
-      inst.tiles = L.tileLayer(SATELLITE.url, SATELLITE.options).addTo(inst.map);
-      if (SATELLITE.filter) inst.tiles.getContainer().style.filter = SATELLITE.filter;
-      track(inst.tiles);
+    let creditText = SATELLITE.options.attribution;
+    if (vectorOk) {
+      const style = OTLStyles.build(SATELLITE.vector, { print: true });
+      creditText = OTLStyles.attribution(SATELLITE.vector, { print: true });
+      // Une carte à la fois (rendu hors écran partagé), la couverture d'abord puis dans l'ordre des pages
+      const ordered = instances.filter(i => i.id === "cover").concat(instances.filter(i => i.id !== "cover"));
+      for (const inst of ordered) {
+        inst.map.attributionControl.addAttribution(creditText);
+        let fire = null;
+        track({ once: (ev, fn) => { fire = fn; } }, 180000);
+        OTLRender.leafletStill(inst.map, style, { pixelRatio: 3 }).catch(console.error).finally(() => fire && fire());
+      }
+    } else {
+      for (const inst of instances) {
+        inst.tiles = L.tileLayer(SATELLITE.url, SATELLITE.options).addTo(inst.map);
+        if (SATELLITE.filter) inst.tiles.getContainer().style.filter = SATELLITE.filter;
+        track(inst.tiles);
+      }
     }
     const credit = document.getElementById("map-credit");
-    if (credit) credit.innerHTML = SATELLITE.options.attribution;
+    if (credit) credit.innerHTML = creditText;
 
     document.getElementById("print-btn").addEventListener("click", () => {
       if ((pending || window.photosPending || window.stravaPhotosFetching) && !confirm("Des cartes ou des photos sont encore en cours de chargement. Imprimer quand même ?")) return;

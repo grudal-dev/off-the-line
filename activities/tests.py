@@ -1046,6 +1046,79 @@ class FreeImageryTests(LoggedInTestCase):
             self.assertEqual(b.option("imagery"), expected)
 
 
+
+class VectorBasemapTests(LoggedInTestCase):
+    """Fonds vectoriels Off the line : configuration, sélecteur, affiche et livre."""
+
+    def setUp(self):
+        super().setUp()
+        Activity.objects.create(account=self.account, strava_id=100, name="Sortie", sport_type="Ride",
+                                start_date=timezone.now() - timedelta(days=2), distance=12000,
+                                summary_polyline=SAMPLE_POLYLINE)
+
+    def basemap(self, **settings_overrides):
+        from django.test import RequestFactory, override_settings
+        from .context_processors import basemap
+        with override_settings(**settings_overrides):
+            return basemap(RequestFactory().get("/"))["basemap"]
+
+    def test_styles_are_listed_first_and_sellable(self):
+        from .context_processors import VECTOR_STYLES
+        data = self.basemap()
+        keys = [s["key"] for s in VECTOR_STYLES]
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual([l["key"] for l in data["layers"][:len(keys)]], keys)
+        self.assertEqual(data["default"], "rando")
+        for layer in data["layers"][:len(keys)]:
+            self.assertEqual(layer["vector"], layer["key"])
+            self.assertFalse(layer.get("personal"))
+            self.assertIn("openstreetmap.org/copyright", layer["options"]["attribution"])
+        # Les clés ne doivent pas masquer un fond en images
+        raster = {l["key"] for l in data["layers"] if not l.get("vector")}
+        self.assertFalse(raster & set(keys))
+        for style in VECTOR_STYLES:
+            self.assertEqual(set(style["colors"]), {"land", "water", "nature", "urban", "road", "label", "shadow"})
+
+    def test_sources_follow_settings(self):
+        data = self.basemap()["vector"]
+        self.assertIn("openfreemap", data["tiles"])
+        self.assertIn("{fontstack}", data["glyphs"])
+        self.assertEqual(data["dem"]["encoding"], "terrarium")
+        own = self.basemap(VECTOR_TILES_URL="pmtiles://https://example.org/planet.pmtiles", DEM_TILES_URL="")["vector"]
+        self.assertEqual(own["tiles"], "pmtiles://https://example.org/planet.pmtiles")
+        self.assertNotIn("OpenFreeMap", own["attribution"])
+        self.assertIn("OpenStreetMap", own["attribution"])
+        self.assertIsNone(own["dem"])
+
+    def test_pages_load_vector_scripts_and_poster_panel(self):
+        for name in ("map", "poster"):
+            response = self.client.get(reverse(f"activities:{name}"))
+            for script in ("maplibre-gl.js", "maplibre-contour.js", "pmtiles.js", "mapstyles.js", "maprender.js"):
+                self.assertContains(response, script)
+        response = self.client.get(reverse("activities:poster"))
+        self.assertContains(response, 'id="vector-panel"')
+        for name in ("vRelief", "vContours", "vRoads", "vRoadScale", "vDetail", "vPaths", "vBuildings", "vNature", "vBorders"):
+            self.assertContains(response, f'name="{name}"')
+        for seed in ("land", "water", "nature", "urban", "road", "shadow"):
+            self.assertContains(response, f'data-vcolor="{seed}"')
+
+    def test_vendored_files_exist(self):
+        from django.contrib.staticfiles import finders
+        for path in ("maplibre-gl.js", "maplibre-gl.css", "leaflet-maplibre-gl.js", "maplibre-contour.js", "pmtiles.js",
+                     "LICENSE-maplibre-gl.txt"):
+            self.assertTrue(finders.find(f"activities/vendor/maplibre/{path}"), path)
+
+    def test_book_accepts_vector_styles(self):
+        from .models import Book
+        b = Book.objects.create(account=self.account, journey_ids=[1])
+        url = reverse("activities:book_update", args=[b.pk])
+        for value, expected in (("carnet", "carnet"), ("inconnu", "carnet"), ("alpin", "alpin")):
+            r = self.client.post(url, {"field": "options", "value": {"imagery": value}}, content_type="application/json")
+            self.assertTrue(r.json()["ok"])
+            b.refresh_from_db()
+            self.assertEqual(b.option("imagery"), expected)
+
+
 SMALL_FIT = "DCDiUmsBAAAuRklUQAAAAAADAAEAAQKEBASGAAQBAOhtskJAAAAUAAT9BIYABIUBBIUCAoQA6G2yQjXxrCCeFY0EiBMABm6yQmpOrSBuoY0EoRMAJG6yQp+rrSA9LY4EuhMAQm6yQtQIriAMuY4E0xMAYG6yQglmriDcRI8E7BMAfm6yQj7DriCr0I8EBRQAnG6yQnMgryB7XJAEHhQAum6yQqh9ryBK6JAENxQA2G6yQt3aryAZdJEEUBQA9m6yQhI4sCDp/5EEaRQAFG+yQkeVsCC4i5IEghQAMm+yQnzysCCHF5MEmxQAUG+yQrFPsSBXo5MEtBQAbm+yQuassSAmL5QEzRQAjG+yQhoKsiD2upQE5hQAqm+yQk9nsiDFRpUE/xQAyG+yQoTEsiCU0pUEGBUA5m+yQrkhsyBkXpYEMRUABHCyQu5+syAz6pYEShUAInCyQiPcsyADdpcEYxVAAAASAAMCBIYFAQAGAQAA6G2yQgIuyzI="
 
 

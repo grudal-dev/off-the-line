@@ -38,6 +38,10 @@
     snow: { bg: "#ffffff", ink: "#1c2629", color: "#1c2629", color2: "#fc4c02", base: "", frameColor: "#1c2629", matColor: "#f2f2ef", hlColor: "#fc4c02", glow: false },
     ocean: { bg: "#0f2a3d", ink: "#e0f2fe", color: "#7dd3fc", color2: "#ffffff", base: "", frameColor: "#e0f2fe", matColor: "#0a1d2b", hlColor: "#fbbf24", glow: true },
     forest: { bg: "#e7ece3", ink: "#1f3326", color: "#2f5d3a", color2: "#c2410c", base: "", frameColor: "#1f3326", matColor: "#f6f8f3", hlColor: "#c2410c", glow: false },
+    // Avec nos fonds vectoriels (couleurs du fond = celles de la carte)
+    carnet: { bg: "#efe5cf", ink: "#4a3626", color: "#b4341b", color2: "#4a3626", base: "carnet", mute: 0, frameColor: "#4a3626", matColor: "#f7f1e3", hlColor: "#1f6f78", glow: false },
+    alpin: { bg: "#fafaf8", ink: "#243442", color: "#d9480f", color2: "#7a1f04", base: "alpin", mute: 0, frameColor: "#243442", matColor: "#ffffff", hlColor: "#1d4ed8", glow: false },
+    cyanotype: { bg: "#1f4f7b", ink: "#eef5fb", color: "#ffd166", color2: "#ffffff", base: "cyanotype", mute: 0, frameColor: "#eef5fb", matColor: "#173f63", hlColor: "#ff8a3d", glow: true },
     satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
@@ -54,7 +58,12 @@
     labelHalo: true, brand: "escape",
     mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: false,
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
+    // Fonds vectoriels Off the line (mapstyles.js) : couleurs remplacées et réglages
+    vColors: {}, vRelief: null, vContours: null, vRoads: "all", vPaths: true, vBuildings: true, vNature: true,
+    vBorders: true, vRoadScale: 1, vDetail: 0,
   };
+  const VECTOR = !!(window.OTLStyles && window.OTLRender);
+  const isVector = key => VECTOR && !!(LAYERS.find(l => l.key === key) || {}).vector;
 
   // --- Données ------------------------------------------------------------
   function mercator(lat, lng) {
@@ -90,7 +99,8 @@
   // Sélection faite sur la carte (zone) : ids des activités encore présentes
   state.selection = (Array.isArray(state.selection) ? state.selection : []).filter(id => byId.has(id));
   if (state.source === "selection" && !state.selection.length) state.source = "all";
-  if (!LAYERS.some(l => l.key === state.base)) state.base = "";
+  if (!LAYERS.some(l => l.key === state.base) || (LAYERS.find(l => l.key === state.base).vector && !VECTOR)) state.base = "";
+  if (!state.vColors || typeof state.vColors !== "object") state.vColors = {};
   if (!byId.has(state.activity)) state.activity = ROUTES.length ? ROUTES[ROUTES.length - 1].id : null;
   if (!TRIPS.some(t => t.id === state.journey)) state.journey = TRIPS[0] ? TRIPS[0].id : null;
   if (state.source === "journey" && state.journey === null) state.source = "all";
@@ -422,9 +432,64 @@
     const base = LAYERS.find(l => l.key === state.base);
     if (base) {
       defs.push({ def: base, alpha: 1 });
-      if (state.relief && BASEMAP.hillshade) defs.push({ def: BASEMAP.hillshade, alpha: BASEMAP.hillshade.options.opacity || 0.45 });
+      if (!base.vector && state.relief && BASEMAP.hillshade) defs.push({ def: BASEMAP.hillshade, alpha: BASEMAP.hillshade.options.opacity || 0.45 });
     }
     return defs;
+  }
+
+  // --- Fonds vectoriels -----------------------------------------------------
+  // Dessinés par une carte MapLibre hors écran (maprender.js) puis copiés comme une image.
+  // Taille des objets fixée en millimètres sur le papier : 1 pixel CSS de la carte = CSS_MM mm
+  // (× 2 par cran de « Détail ») ; l'aperçu et l'export ne diffèrent que par la finesse.
+  const CSS_MM = 0.2646;
+  function vectorOptions() {
+    return {
+      print: true, colors: state.vColors, relief: state.vRelief === null ? null : state.vRelief / 100,
+      contours: state.vContours, roads: state.vRoads, paths: state.vPaths, buildings: state.vBuildings,
+      nature: state.vNature, boundaries: state.vBorders, roadScale: state.vRoadScale,
+    };
+  }
+  function vectorJob(def, view, mapPx, ppm, margin) {
+    const cssMm = CSS_MM * 2 ** -(+state.vDetail || 0);
+    const s = mapPx.w / view.span;
+    const zoom = Math.log2(mapPx.w / ppm / view.span / cssMm / 512);
+    const th = state.rotation * Math.PI / 180, c = Math.abs(Math.cos(th)), sn = Math.abs(Math.sin(th));
+    const hw = mapPx.w / 2 / s, hh = mapPx.h / 2 / s;
+    const ex = (c * hw + sn * hh) * margin, ey = (sn * hw + c * hh) * margin;
+    const style = OTLStyles.build(def.vector, vectorOptions());
+    return {
+      key: JSON.stringify([def.vector, vectorOptions()]), style, zoom, pixelRatio: ppm * cssMm,
+      wx0: view.cx - ex, wy0: Math.max(0, view.cy - ey), wx1: view.cx + ex, wy1: Math.min(1, view.cy + ey),
+    };
+  }
+  const vec = { img: null, busy: false, next: null, latest: null, exportImg: null };
+  const covers = (img, job) => img && img.key === job.key && Math.abs(img.zoom - job.zoom) < 0.12 &&
+    img.pixelRatio >= job.pixelRatio * 0.8 && img.wx0 <= job.wx0 + 1e-12 && img.wy0 <= job.wy0 + 1e-12 &&
+    img.wx1 >= job.wx1 - 1e-12 && img.wy1 >= job.wy1 - 1e-12;
+  async function pumpVector(onLoad) {
+    if (vec.busy || !vec.next) return;
+    const job = vec.next;
+    vec.next = null; vec.busy = true;
+    try {
+      const res = await OTLRender.renderWorld({ ...job, isStale: () => vec.latest !== job && !!vec.next });
+      if (res) vec.img = { ...res, key: job.key, zoom: job.zoom, pixelRatio: job.pixelRatio };
+    } catch (err) { console.error(err); vec.latest = null; }
+    vec.busy = false;
+    if (vec.next) pumpVector(onLoad); else onLoad && onLoad();
+  }
+  function drawVector(ctx, def, view, mapPx, ppm, onLoad) {
+    const s = mapPx.w / view.span;
+    const need = vectorJob(def, view, mapPx, ppm, 1);
+    const img = vec.exportImg || vec.img;
+    // Rendu un peu plus large que la vue, pour pouvoir déplacer la carte sans attendre
+    if (!vec.exportImg && onLoad && !covers(img, need) && !covers(vec.latest, need)) {
+      vec.latest = vec.next = vectorJob(def, view, mapPx, ppm, 1.35);
+      pumpVector(onLoad);
+    }
+    if (!img) return;
+    // Un rendu d'autres réglages reste visible, estompé, en attendant le nouveau
+    if (img.key !== need.key) ctx.globalAlpha *= 0.5;
+    ctx.drawImage(img.canvas, (img.wx0 - view.cx) * s, (img.wy0 - view.cy) * s, (img.wx1 - img.wx0) * s, (img.wy1 - img.wy0) * s);
   }
 
   // --- Dessin ---------------------------------------------------------------
@@ -803,19 +868,31 @@
     ctx.restore();
   }
 
+  // Crédits des données du fond, en petit dans le coin de la carte : couleur du texte de l'affiche,
+  // détourée de la couleur du fond pour rester lisible sur une photo satellite
+  function attributionText(defs) {
+    return defs.map(d => d.def.vector ? OTLStyles.attribution(d.def.vector, vectorOptions()) : d.def.options.attribution || "")
+      .join(" · ").replace(/<[^>]+>/g, "").replace(/&copy;/g, "©").replace(/&mdash;/g, "—").replace(/&amp;/g, "&");
+  }
   function drawAttribution(ctx, lay, ppm, defs) {
     if (!defs.length) return;
-    const txt = defs.map(d => d.def.options.attribution || "").join(" · ").replace(/<[^>]+>/g, "").replace(/&copy;/g, "©").replace(/&mdash;/g, "—").replace(/&amp;/g, "&");
-    const size = Math.max(6, 1.8 * lay.k * ppm);
+    const txt = attributionText(defs);
+    const size = Math.max(5, 1.6 * lay.k * ppm);
+    ctx.save();
     ctx.font = fontString(400, size, SANS);
     ctx.textAlign = "right"; ctx.textBaseline = "bottom";
-    const x = (lay.map.x + lay.map.w) * ppm - size * 0.6, y = (lay.map.y + lay.map.h) * ppm - size * 0.4;
-    const w = ctx.measureText(txt).width;
-    ctx.globalAlpha = 0.6; ctx.fillStyle = "#000";
-    ctx.fillRect(x - w - size * 0.4, y - size * 1.3, w + size * 0.8, size * 1.5);
-    ctx.globalAlpha = 0.9; ctx.fillStyle = "#fff";
-    ctx.fillText(txt, x, y - size * 0.1);
-    ctx.globalAlpha = 1;
+    const x = (lay.map.x + lay.map.w) * ppm - size * 0.7, y = (lay.map.y + lay.map.h) * ppm - size * 0.5;
+    const base = LAYERS.find(l => l.key === state.base);
+    const photo = base && base.theme === "photo";
+    const land = base && base.vector && window.OTLStyles ? OTLStyles.palette(OTLStyles.styles.find(v => v.key === base.vector), state.vColors).land : state.bg;
+    const ink = photo ? "#ffffff" : (luminance(land) < 0.45 ? mix(land, "#ffffff", 0.75) : mix(land, "#000000", 0.62));
+    ctx.lineJoin = "round"; ctx.lineWidth = size * 0.35;
+    ctx.strokeStyle = photo ? "rgba(0,0,0,.45)" : land;
+    ctx.globalAlpha = 0.9;
+    ctx.strokeText(txt, x, y);
+    ctx.fillStyle = ink;
+    ctx.fillText(txt, x, y);
+    ctx.restore();
   }
 
   // Sélection, textes, mise en page et cadrage (recadré sur les tracés tant qu'on n'y a pas touché)
@@ -1112,6 +1189,7 @@
     const muteFilter = mute ? `saturate(${(1 - mute * 0.8).toFixed(2)})` : "";
     for (const { def, alpha } of defs) {
       ctx.globalAlpha = alpha;
+      if (def.vector) { if ("filter" in ctx) ctx.filter = muteFilter || "none"; drawVector(ctx, def, view, mapPx, ppm, onTileLoad); continue; }
       // Filtre propre au fond (ex. Sentinel-2 éclairci), comme sur la carte
       if ("filter" in ctx) ctx.filter = [def.filter, muteFilter].filter(Boolean).join(" ") || "none";
       for (const t of tilePlan(def, view, mapPx, maxTiles)) {
@@ -1247,7 +1325,59 @@
   // --- Panneau --------------------------------------------------------------
   const field = name => form.elements[name];
   const baseSelect = document.getElementById("base-select");
-  for (const l of LAYERS) baseSelect.insertAdjacentHTML("beforeend", `<option value="${l.key}">${l.label}</option>`);
+  const ourLayers = LAYERS.filter(l => l.vector && VECTOR), otherLayers = LAYERS.filter(l => !l.vector);
+  const options = list => list.map(l => `<option value="${l.key}">${l.label}</option>`).join("");
+  baseSelect.insertAdjacentHTML("beforeend", ourLayers.length
+    ? `<optgroup label="Cartes Off the line">${options(ourLayers)}</optgroup><optgroup label="Autres fonds">${options(otherLayers)}</optgroup>`
+    : options(otherLayers));
+  document.querySelectorAll("[data-needs-vector]").forEach(b => { b.hidden = !VECTOR; });
+
+  // Styles vectoriels : vignettes, couleurs et réglages
+  const vstyle = () => VECTOR && OTLStyles.styles.find(v => v.key === (LAYERS.find(l => l.key === state.base) || {}).vector);
+  const vseeds = () => { const st = vstyle(); return st ? { ...st.colors, ...state.vColors } : {}; };
+  const styleBox = document.getElementById("vector-styles");
+  if (styleBox && VECTOR) {
+    styleBox.innerHTML = ourLayers.map(l => {
+      const c = OTLStyles.styles.find(v => v.key === l.vector).colors;
+      const p = OTLStyles.palette(OTLStyles.styles.find(v => v.key === l.vector));
+      return `<button type="button" class="vector-style" data-vstyle="${l.key}"
+        style="--land:${c.land};--water:${c.water};--nature:${p.wood};--road:${c.road}"><span class="chip-map"></span>${l.label}</button>`;
+    }).join("");
+    styleBox.addEventListener("click", e => {
+      const b = e.target.closest("[data-vstyle]");
+      if (b) pickStyle(b.dataset.vstyle);
+    });
+  }
+  /** Choisit un style : le fond de l'affiche et le texte prennent les couleurs de la carte. */
+  function pickStyle(key) {
+    const st = OTLStyles.styles.find(v => v.key === (LAYERS.find(l => l.key === key) || {}).vector);
+    if (!st) return set({ base: key });
+    const keepColors = state.base === key;
+    set({
+      base: key, vColors: keepColors ? state.vColors : {}, vRelief: keepColors ? state.vRelief : null,
+      vContours: keepColors ? state.vContours : null,
+      bg: st.colors.land, ink: st.colors.label, frameColor: st.colors.label, borderColor: st.colors.label, cityColor: st.colors.label,
+      matColor: OTLStyles.mix(st.colors.land, OTLStyles.lum(st.colors.land) < 0.42 ? "#000000" : "#ffffff", 0.5),
+      mute: Math.min(state.mute, 10),
+    });
+  }
+  form.querySelectorAll("[data-vcolor]").forEach(input => input.addEventListener("input", e => {
+    e.stopPropagation();
+    set({ vColors: { ...state.vColors, [input.dataset.vcolor]: input.value }, ...(input.dataset.vcolor === "land" ? { bg: input.value } : {}) });
+  }));
+  document.getElementById("vc-match")?.addEventListener("click", () => {
+    const st = vstyle();
+    if (!st) return;
+    const M = OTLStyles.mix;
+    set({ vColors: {
+      land: state.bg, label: state.ink, road: M(state.bg, state.ink, 0.5), urban: M(state.bg, state.ink, 0.35),
+      shadow: state.ink, water: M(state.bg, st.colors.water, 0.7), nature: M(state.bg, st.colors.nature, 0.8),
+    } });
+  });
+  document.getElementById("vc-reset")?.addEventListener("click", () => {
+    const st = vstyle();
+    set({ vColors: {}, ...(st ? { bg: st.colors.land } : {}) });
+  });
 
   const activitySelect = document.getElementById("activity-select");
   const activitySearch = document.getElementById("activity-search");
@@ -1275,8 +1405,8 @@
     set({ from: y ? `${y}-01-01` : "", to: y ? `${y}-12-31` : "" }, true);
   });
 
-  const NUMERIC = new Set(["mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
-  const CHECKS = new Set(["atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+  const NUMERIC = new Set(["vRelief", "vRoadScale", "vDetail", "mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
+  const CHECKS = new Set(["vContours", "vPaths", "vBuildings", "vNature", "vBorders", "atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
                           "labelHalo", "hl", "hlCasing", "hlLabels"]);
   const RESHAPE = new Set(["air", "profile", "q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
@@ -1284,6 +1414,14 @@
       if (!el.name || !(el.name in state)) continue;
       if (CHECKS.has(el.name)) el.checked = !!state[el.name];
       else el.value = state[el.name] ?? "";
+    }
+    // Relief et courbes « selon le style » tant qu'on n'y a pas touché
+    const st = vstyle();
+    if (st) {
+      field("vRelief").value = state.vRelief === null ? Math.round((st.relief || 0) * 100) : state.vRelief;
+      field("vContours").checked = state.vContours === null ? !!st.contours : state.vContours;
+      const seeds = vseeds();
+      form.querySelectorAll("[data-vcolor]").forEach(input => { input.value = seeds[input.dataset.vcolor] || "#000000"; });
     }
   }
   function set(changes, reshape) {
@@ -1300,6 +1438,7 @@
     let v = CHECKS.has(el.name) ? el.checked : el.value;
     if (NUMERIC.has(el.name)) v = parseFloat(v);
     if (el.name === "journey" || el.name === "activity") v = parseInt(v, 10);
+    if (el.name === "base" && isVector(v)) { pickStyle(v); return; }
     // La rotation tourne autour du centre actuel : on garde le cadrage choisi
     if (el.name === "rotation") { state.rotation = v; redraw(); return; }
     set({ [el.name]: v }, RESHAPE.has(el.name));
@@ -1313,7 +1452,8 @@
   document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
     const p = { ...PRESETS[b.dataset.preset] };
     p.borderColor = p.cityColor = p.ink;
-    if (p.base && !LAYERS.some(l => l.key === p.base)) p.base = "";
+    if (p.base && (!LAYERS.some(l => l.key === p.base) || (isVector(p.base) === false && LAYERS.find(l => l.key === p.base).vector))) p.base = "";
+    if (isVector(p.base)) Object.assign(p, { vColors: {}, vRelief: null, vContours: null });
     set(p);
   }));
   document.getElementById("reset-btn").addEventListener("click", () => {
@@ -1390,7 +1530,16 @@
     document.querySelectorAll("[data-for-mode]").forEach(el => { el.hidden = !el.dataset.forMode.split(" ").includes(state.mode); });
     document.querySelectorAll("[data-for-frame]").forEach(el => { el.hidden = !el.dataset.forFrame.split(" ").includes(state.frame); });
     document.querySelectorAll("[data-for-text]").forEach(el => { el.hidden = state.textPos === "none"; });
-    document.getElementById("relief-wrap").hidden = !state.base || !BASEMAP.hillshade;
+    const vectorBase = isVector(state.base);
+    document.getElementById("relief-wrap").hidden = !state.base || !BASEMAP.hillshade || vectorBase;
+    const vpanel = document.getElementById("vector-panel");
+    if (vpanel) {
+      vpanel.hidden = !VECTOR;
+      document.getElementById("vector-settings").hidden = !vectorBase;
+      document.querySelectorAll("[data-vstyle]").forEach(b => b.setAttribute("aria-pressed", b.dataset.vstyle === state.base));
+      document.getElementById("vc-reset").hidden = !Object.keys(state.vColors).length;
+      form.querySelector("[data-for-roads]").hidden = state.vRoads === "none";
+    }
     field("endpoints").closest("label").hidden = state.source === "all";
     field("stageDots").closest("label").hidden = state.source === "all";
     field("profile").closest("label").hidden = state.source === "all";
@@ -1417,6 +1566,12 @@
     out("margin", `${state.margin} mm`);
     out("rotation", `${state.rotation}°`);
     out("mute", `${state.mute} %`);
+    if (isVector(state.base)) {
+      out("vRelief", state.vRelief === null ? "selon le style" : `${state.vRelief} %`);
+      out("vRoadScale", `× ${nf1.format(state.vRoadScale)}`);
+      const d = +state.vDetail;
+      out("vDetail", d === 0 ? "normale" : d > 0 ? `plus de détails (+${nf1.format(d)})` : `plus gros (${nf1.format(d)})`);
+    }
     out("air", `${state.air} %`);
     out("borderWidth", `${nf1.format(state.borderWidth)} mm`);
     out("borderOpacity", `${Math.round(state.borderOpacity * 100)} %`);
@@ -1459,7 +1614,17 @@
       // Toutes les tuiles nécessaires à cette résolution, avant de dessiner
       const { lay } = compose();
       const ppm = w / lay.W, mapPx = { w: lay.map.w * ppm, h: lay.map.h * ppm };
-      const plan = layerDefs().flatMap(({ def }) => tilePlan(def, state.view, mapPx, 900));
+      const plan = layerDefs().filter(({ def }) => !def.vector).flatMap(({ def }) => tilePlan(def, state.view, mapPx, 900));
+      const vdef = layerDefs().map(d => d.def).find(d => d.vector);
+      let vectorIncomplete = false;
+      if (vdef) {
+        const job = vectorJob(vdef, state.view, mapPx, ppm, 1.02);
+        const res = await OTLRender.renderWorld({ ...job, onProgress: (n, total) => {
+          status.textContent = `Fond de carte : ${n} / ${total} morceau${total > 1 ? "x" : ""}…`;
+        } });
+        vec.exportImg = { ...res, key: job.key };
+        vectorIncomplete = !res.complete;
+      }
       for (const t of plan) if (tiles.get(t.url)?.failed) tiles.delete(t.url);  // nouvel essai
       let done = 0;
       await Promise.all(plan.map(t => tile(t.url).promise.then(() => {
@@ -1470,6 +1635,7 @@
       status.textContent = "Dessin de l'affiche…";
       await new Promise(r => setTimeout(r, 30));
       render(ctx, null, 900);
+      vec.exportImg = null;
       const blob = await new Promise(resolve => out.toBlob(resolve, "image/png"));
       if (!blob) throw new Error("toBlob");
       const file = await withDpi(blob, +state.dpi);
@@ -1480,6 +1646,7 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 60000);
       const [W, H] = paper();
       status.textContent = `Image enregistrée : ${nf.format(w)} × ${nf.format(h)} px, à imprimer en ${nf1.format(W / 10)} × ${nf1.format(H / 10)} cm.` +
+        (vectorIncomplete ? " Attention : une partie du fond de carte n'a pas fini de charger : réessaie si tu vois des manques." : "") +
         (failedTiles ? ` Attention : ${failedTiles} morceau${failedTiles > 1 ? "x" : ""} du fond de carte n'${failedTiles > 1 ? "ont" : "a"} pas pu être chargé${failedTiles > 1 ? "s" : ""} : réessaie, ou choisis un autre fond de carte.` : "");
     } catch (err) {
       console.error(err);
@@ -1487,6 +1654,7 @@
         ? "Ce fond de carte n'autorise pas l'export d'image : choisis-en un autre, ou « Uni »."
         : "L'image est trop grande pour ce navigateur : choisis une résolution ou un format plus petit.";
     } finally {
+      vec.exportImg = null;
       exportBtn.disabled = false;
     }
   });
