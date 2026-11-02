@@ -7,7 +7,7 @@ OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a
 # Sentinel-2 cloudless 2016 d'EOX : seul millésime sous CC BY 4.0, donc utilisable pour des affiches vendues
 # (attribution obligatoire). Les millésimes 2018 et suivants sont réservés à l'usage non commercial.
 EOX = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{y}/{x}.jpg"
-EOX_CREDIT = ('Sentinel-2 cloudless – <a href="https://s2maps.eu">s2maps.eu</a> by EOX IT Services GmbH '
+EOX_CREDIT = ('<a href="https://s2maps.eu">Sentinel-2 cloudless</a> by EOX IT Services GmbH '
               '(Contains modified Copernicus Sentinel data 2016)')
 # Le millésime 2016 est terne et sombre : on l'éclaircit à l'affichage (carte, affiche, livre).
 EOX_FILTER = "brightness(1.3) contrast(1.1) saturate(1.2)"
@@ -45,15 +45,16 @@ VECTOR_STYLES = [
      "colors": {"land": "#1f4f7b", "water": "#183f63", "nature": "#2f6c99", "urban": "#e7f0f8",
                 "road": "#d9e8f4", "label": "#eef5fb", "shadow": "#0a1f35"}},
 ]
-VECTOR_CREDIT = ('<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> '
-                 f'Données {OSM}')
-DEM_CREDIT = 'Relief : <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen, SRTM, Copernicus…)'
+# Crédits courts (exigés : OpenStreetMap, OpenMapTiles ; OpenFreeMap le demande ; sources du relief sur la page liée)
+VECTOR_CREDIT = (f'{OSM} · &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> · '
+                 '<a href="https://openfreemap.org">OpenFreeMap</a>')
+DEM_CREDIT = 'Relief <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a>'
 
 
 def vector_basemap():
     """Configuration des fonds vectoriels transmise au navigateur."""
     tiles = settings.VECTOR_TILES_URL
-    credit = VECTOR_CREDIT if "openfreemap" in tiles else f"&copy; <a href=\"https://www.openmaptiles.org/\">OpenMapTiles</a> Données {OSM}"
+    credit = VECTOR_CREDIT if "openfreemap" in tiles else f"{OSM} · &copy; <a href=\"https://www.openmaptiles.org/\">OpenMapTiles</a>"
     return {
         "tiles": tiles, "glyphs": settings.VECTOR_GLYPHS_URL, "attribution": credit, "styles": VECTOR_STYLES,
         "dem": {"url": settings.DEM_TILES_URL, "encoding": "terrarium", "maxzoom": 12, "attribution": DEM_CREDIT}
