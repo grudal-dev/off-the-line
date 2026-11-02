@@ -24,6 +24,7 @@
     if (!ctl) return;
     const el = ctl.getContainer();
     el.classList.add("attr-compact");
+    ctl.setPrefix(false);  // sans « Leaflet » : bibliothèque sous licence BSD, mention non obligatoire
     const btn = L.DomUtil.create("button", "attr-toggle");
     btn.type = "button"; btn.textContent = "i"; btn.title = "Sources de la carte";
     btn.setAttribute("aria-label", "Sources de la carte");
