@@ -15,6 +15,58 @@ EOX_FILTER = "brightness(1.3) contrast(1.1) saturate(1.2)"
 # Très nettes et lumineuses, mais seulement en France (métropole et outre-mer).
 IGN_ORTHO_CREDIT = '&copy; <a href="https://www.ign.fr/">IGN</a> – BD ORTHO® (Licence Ouverte Etalab 2.0)'
 
+# Fonds vectoriels dessinés par Off the line (style : static/activities/mapstyles.js).
+# Sept couleurs « graines » par style ; le reste en est dérivé. Dosages : nature, urban (0–1),
+# relief (intensité par défaut de l'ombrage, 0 = sans), contours (courbes de niveau par défaut),
+# casing (routes bordées), waterOutline (contour de l'eau à l'encre), upper (villes en capitales),
+# roadScale (épaisseur des routes).
+VECTOR_STYLES = [
+    {"key": "epure", "label": "Épure", "relief": 0, "nature": 0.45, "urban": 0.7, "upper": True,
+     "colors": {"land": "#f4f2ed", "water": "#d2dbdf", "nature": "#bccab1", "urban": "#cfc8bc",
+                "road": "#bfb8ab", "label": "#57524a", "shadow": "#5f5a52"}},
+    {"key": "encre", "label": "Encre", "relief": 0, "nature": 0, "urban": 0.16, "waterOutline": True, "upper": True,
+     "roadScale": 0.75,
+     "colors": {"land": "#ffffff", "water": "#eeeeec", "nature": "#ffffff", "urban": "#1c1c1c",
+                "road": "#1c1c1c", "label": "#1c1c1c", "shadow": "#000000"}},
+    {"key": "carnet", "label": "Carnet", "relief": 0.35, "nature": 0.5, "urban": 0.55,
+     "colors": {"land": "#efe5cf", "water": "#b5cac6", "nature": "#9aab7c", "urban": "#b88d69",
+                "road": "#8c674b", "label": "#4a3626", "shadow": "#5e4630"}},
+    {"key": "rando", "label": "Rando", "relief": 0.55, "contours": True, "nature": 0.55, "urban": 0.7, "casing": True,
+     "colors": {"land": "#f3f1e7", "water": "#95c4dc", "nature": "#7fb36c", "urban": "#d2c1aa",
+                "road": "#e09a4a", "label": "#2e2e2b", "shadow": "#3b3731"}},
+    {"key": "alpin", "label": "Alpin", "relief": 0.85, "contours": True, "nature": 0.38, "urban": 0.6, "upper": True,
+     "colors": {"land": "#fafaf8", "water": "#a2c1d8", "nature": "#a3bb9f", "urban": "#c6c9cc",
+                "road": "#8d989f", "label": "#243442", "shadow": "#22405c"}},
+    {"key": "nocturne", "label": "Nocturne", "relief": 0.45, "nature": 0.45, "urban": 0.6, "upper": True,
+     "colors": {"land": "#15191c", "water": "#0b0e11", "nature": "#2a3c30", "urban": "#3b454c",
+                "road": "#4c5961", "label": "#a7b2b8", "shadow": "#000000"}},
+    {"key": "cyanotype", "label": "Cyanotype", "relief": 0.3, "nature": 0.3, "urban": 0.22, "waterOutline": True, "upper": True,
+     "roadScale": 0.8,
+     "colors": {"land": "#1f4f7b", "water": "#183f63", "nature": "#2f6c99", "urban": "#e7f0f8",
+                "road": "#d9e8f4", "label": "#eef5fb", "shadow": "#0a1f35"}},
+]
+VECTOR_CREDIT = ('<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> '
+                 f'Données {OSM}')
+DEM_CREDIT = 'Relief : <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen, SRTM, Copernicus…)'
+
+
+def vector_basemap():
+    """Configuration des fonds vectoriels transmise au navigateur."""
+    tiles = settings.VECTOR_TILES_URL
+    credit = VECTOR_CREDIT if "openfreemap" in tiles else f"&copy; <a href=\"https://www.openmaptiles.org/\">OpenMapTiles</a> Données {OSM}"
+    return {
+        "tiles": tiles, "glyphs": settings.VECTOR_GLYPHS_URL, "attribution": credit, "styles": VECTOR_STYLES,
+        "dem": {"url": settings.DEM_TILES_URL, "encoding": "terrarium", "maxzoom": 12, "attribution": DEM_CREDIT}
+        if settings.DEM_TILES_URL else None,
+    }
+
+
+def vector_layers(credit):
+    """Une entrée du sélecteur par style vectoriel (`vector` : clé du style)."""
+    return [{"key": s["key"], "label": s["label"], "vector": s["key"], "group": "otl",
+             "theme": "dark" if s["key"] in ("nocturne", "cyanotype") else "light",
+             "options": {"maxZoom": 19, "attribution": credit}} for s in VECTOR_STYLES]
+
 
 def basemap(request):
     """Fonds de carte proposés par le sélecteur Leaflet (voir static/activities/basemaps.js).
@@ -60,4 +112,6 @@ def basemap(request):
         "options": {"maxZoom": 19, "maxNativeZoom": 16, "opacity": 0.45,
                     "attribution": "Relief &copy; Esri"}, "personal": True,
     }
-    return {"basemap": {"layers": layers, "hillshade": hillshade, "default": "topo"}}
+    vector = vector_basemap()
+    return {"basemap": {"layers": vector_layers(vector["attribution"]) + layers, "hillshade": hillshade,
+                        "default": "rando", "vector": vector}}

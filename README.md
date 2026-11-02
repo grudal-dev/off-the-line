@@ -84,10 +84,12 @@ La commande enchaîne les lots et, quand Strava répond « quota atteint », att
 
 Deux espaces seulement, et un seul bouton pour créer.
 
-- **Explorer** (`/carte/`, page d'accueil une fois connecté) : la carte de toutes les sorties, avec trois onglets
-  sous les totaux : **Voyages** (les périples détectés, mis en évidence sur la carte), **Sorties** et **Années**
-  (un clic filtre la carte). « Affichage » (densité ou couleurs par sport, sports affichés) et « Tracer une zone »
-  sont discrets.
+- **Explorer** (`/carte/`, page d'accueil une fois connecté) : la carte de toutes les sorties, avec quatre onglets
+  sous les totaux : **Voyages** (les périples détectés, mis en évidence sur la carte), **Sorties**, **Années**
+  (un clic filtre la carte) et **Zone** (on dessine aussitôt un rectangle sur la carte, les sorties qui y passent
+  s'affichent avec « Créer »). « Affichage » règle la densité ou les couleurs par sport, les sports affichés et
+  l'**épaisseur des tracés** (mémorisée dans le navigateur). Un badge « Chargement de la carte… » apparaît
+  tant que le fond se charge.
 - **Créer** : sur un voyage, une sortie, une année ou une zone tracée, une seule question, Affiche ou Livre
   (`/creer/`, vue `create`). Un livre compte au plus 150 sorties.
 - **Mes créations** (`/creations/`) : affiches et livres, les plus récents d'abord. Une affiche créée ainsi est
@@ -128,6 +130,40 @@ passages : les rues souvent empruntées ressortent) et « Couleurs par sport ».
 
 ## Fond de carte
 
+### Nos fonds vectoriels (par défaut)
+
+Sept styles dessinés par Off the line : **Épure**, **Encre**, **Carnet**, **Rando** (par défaut), **Alpin**,
+**Nocturne** et **Cyanotype**. Ils sont proposés en premier dans le sélecteur des cartes, comme fond de l'affiche
+et comme fond des cartes du livre. Ils sont **vendables** : seule l'attribution OpenStreetMap / OpenMapTiles est due
+(imprimée en petit dans le coin de la carte et au dos du livre).
+
+- **Données** : tuiles vectorielles au schéma OpenMapTiles. Par défaut celles d'[OpenFreeMap](https://openfreemap.org)
+  (gratuites, sans clé ni limite). Pour ne dépendre de personne, télécharge le fichier `planet.pmtiles` d'OpenFreeMap
+  (même schéma, donc mêmes styles), dépose-le sur un stockage de fichiers (S3, R2…) et renseigne
+  `VECTOR_TILES_URL=pmtiles://https://…/planet.pmtiles`. Un modèle `https://…/{z}/{x}/{y}.pbf` ou une adresse TileJSON
+  fonctionnent aussi. Les polices des noms viennent de `VECTOR_GLYPHS_URL`.
+- **Relief** : ombrage et courbes de niveau calculés dans le navigateur à partir du MNT Terrarium des
+  [Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (`DEM_TILES_URL`, vide pour s'en passer).
+- **Dessin** : `static/activities/mapstyles.js` fabrique le style MapLibre. Chaque style est défini dans
+  `context_processors.VECTOR_STYLES` par sept couleurs « graines » (terre, eau, nature, bâti, routes, textes, ombres)
+  et quelques dosages ; toutes les autres teintes en sont dérivées. Pour ajouter un style, il suffit d'y ajouter une entrée.
+- **Pages avec carte** : affichées avec MapLibre dans Leaflet (`leaflet-maplibre-gl`). Le menu du fond de carte, en
+  haut à droite, propose nos styles puis les autres fonds ; « Relief » et « Villes » règlent l'ombrage, les courbes et
+  les noms de lieux du style. Les crédits se replient derrière un bouton (i) au premier mouvement de la carte ou après
+  cinq secondes, comme l'autorisent les règles d'attribution d'OpenStreetMap.
+- **Affiche et livre** : `static/activities/maprender.js` dessine le fond avec une seule carte MapLibre invisible,
+  morceau par morceau (2048 px au plus), puis le recopie comme une image. La taille des objets est fixée en
+  millimètres sur le papier : l'aperçu et l'image à 300 ppp sont identiques, seule la finesse change. Ces fonds
+  d'impression n'ont pas de texte (l'affiche a ses propres villes et frontières).
+- **Personnalisation dans l'affiche** (« Fond de carte » → un style) : six couleurs, « Accorder aux couleurs de
+  l'affiche », intensité du relief, courbes de niveau, routes (toutes, grands axes, aucune), épaisseur des routes,
+  finesse (taille des détails), sentiers, bâtiments, forêts et prés, frontières. Choisir un style donne au fond de
+  l'affiche et au texte les couleurs de la carte. Trois préréglages l'utilisent : Carnet, Alpin, Cyanotype.
+
+Le navigateur doit gérer WebGL ; sinon nos styles disparaissent du choix et le livre se rabat sur Sentinel-2.
+
+### Fonds en images
+
 La carte globale utilise le fond sombre CARTO, qui exige désormais une clé gratuite :
 demande-la sur https://carto.com/basemaps/apikey puis renseigne `CARTO_API_KEY` dans `.env`.
 Sans clé, le site bascule sur le fond sombre Esri, qui n'en demande pas.
@@ -141,7 +177,7 @@ usage personnel : leur revente (affiche ou livre vendus) demande un accord écri
 sous le choix du fond. Le fond **Satellite libre** (Sentinel-2 cloudless 2016 d'EOX, 10 m) est sous licence CC BY 4.0 :
 il peut être vendu, à condition d'imprimer l'attribution (déjà ajoutée sur l'affiche et dans le livre). Les
 millésimes EOX 2018 et suivants, eux, ne sont gratuits que pour un usage non commercial. Dans le livre,
-« Personnaliser » permet de choisir l'imagerie (Esri ou Sentinel-2).
+« Personnaliser » permet de choisir l'imagerie (Esri, Sentinel-2 ou l'un de nos fonds vectoriels).
 
 ## Pays et villes sur les cartes
 
@@ -191,7 +227,7 @@ de transport des transferts sont rattachés à l'étape qui précède le transfe
 
 ### Affiche ou livre depuis une zone de la carte
 
-Sur la carte, « Sélectionner une zone » puis faire glisser pour tracer un rectangle : les activités qui
+Dans l'Explorer, onglet « Zone », faire glisser pour tracer un rectangle : les activités qui
 passent dans la zone (parmi les sports affichés) sont listées, toutes cochées. On peut en décocher,
 donner un titre, puis :
 

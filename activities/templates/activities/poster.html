@@ -99,6 +99,9 @@
             <button type="button" class="preset" data-preset="ocean" style="--bg:#0f2a3d;--fg:#7dd3fc">Océan</button>
             <button type="button" class="preset" data-preset="forest" style="--bg:#e7ece3;--fg:#2f5d3a">Forêt</button>
             <button type="button" class="preset" data-preset="satellite" style="--bg:#26302a;--fg:#ffd166">Satellite</button>
+            <button type="button" class="preset" data-preset="carnet" style="--bg:#efe5cf;--fg:#b4341b" data-needs-vector>Carnet</button>
+            <button type="button" class="preset" data-preset="alpin" style="--bg:#fafaf8;--fg:#d9480f" data-needs-vector>Alpin</button>
+            <button type="button" class="preset" data-preset="cyanotype" style="--bg:#1f4f7b;--fg:#ffd166" data-needs-vector>Cyanotype</button>
           </div>
         </fieldset>
 
@@ -120,6 +123,48 @@
           </label>
           <label class="check" id="relief-wrap"><input type="checkbox" name="relief"> Relief ombré</label>
           <p class="poster-hint" id="base-note" hidden></p>
+          <div class="vector-panel" id="vector-panel" hidden>
+            <p class="vector-label">Cartes Off the line</p>
+            <div class="vector-styles" id="vector-styles" role="group" aria-label="Style de la carte"></div>
+            <div class="vector-settings" id="vector-settings">
+            <p class="vector-label">Couleurs de la carte</p>
+            <div class="vector-colors">
+              <label><input type="color" data-vcolor="land"> Terre</label>
+              <label><input type="color" data-vcolor="water"> Eau</label>
+              <label><input type="color" data-vcolor="nature"> Nature</label>
+              <label><input type="color" data-vcolor="urban"> Bâti</label>
+              <label><input type="color" data-vcolor="road"> Routes</label>
+              <label><input type="color" data-vcolor="shadow"> Ombres</label>
+            </div>
+            <div class="vector-actions">
+              <button type="button" class="link-button" id="vc-match">Accorder aux couleurs de l'affiche</button>
+              <button type="button" class="link-button" id="vc-reset" hidden>Couleurs du style</button>
+            </div>
+            <label>Relief <output data-out="vRelief"></output>
+              <input type="range" name="vRelief" min="0" max="100" step="5">
+            </label>
+            <label class="check"><input type="checkbox" name="vContours"> Courbes de niveau</label>
+            <label>Routes
+              <select class="field" name="vRoads">
+                <option value="all">Toutes, avec les rues</option>
+                <option value="main">Grands axes seulement</option>
+                <option value="none">Aucune</option>
+              </select>
+            </label>
+            <label data-for-roads>Épaisseur des routes <output data-out="vRoadScale"></output>
+              <input type="range" name="vRoadScale" min="0.4" max="2.5" step="0.1">
+            </label>
+            <label>Finesse <output data-out="vDetail"></output>
+              <input type="range" name="vDetail" min="-2" max="2" step="0.5">
+            </label>
+            <div class="vector-checks">
+              <label class="check"><input type="checkbox" name="vPaths"> Sentiers</label>
+              <label class="check"><input type="checkbox" name="vBuildings"> Bâtiments</label>
+              <label class="check"><input type="checkbox" name="vNature"> Forêts et prés</label>
+              <label class="check"><input type="checkbox" name="vBorders"> Frontières</label>
+            </div>
+            </div>
+          </div>
           <label id="mute-wrap">Atténuer le fond <output data-out="mute"></output>
             <input type="range" name="mute" min="0" max="90" step="5">
           </label>
@@ -332,4 +377,5 @@
   </div>
   {% endif %}
 {% endblock %}
-{% block scripts %}{% if routes %}<script src="{% asset 'activities/poster.js' %}"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if routes %}{% include "activities/vector_head.html" %}
+<script src="{% asset 'activities/poster.js' %}"></script>{% endif %}{% endblock %}

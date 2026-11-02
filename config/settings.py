@@ -57,6 +57,14 @@ if not DEBUG:
 # Fond de carte CARTO (clé gratuite : https://carto.com/basemaps/apikey)
 CARTO_API_KEY = os.environ.get("CARTO_API_KEY", "")
 
+# Fonds de carte vectoriels Off the line (activities/static/activities/mapstyles.js).
+# Tuiles au schéma OpenMapTiles : OpenFreeMap par défaut (gratuit, sans clé), ou ton propre fichier
+# « pmtiles://https://…/planet.pmtiles » (téléchargeable sur openfreemap.org), ou un modèle {z}/{x}/{y}.
+VECTOR_TILES_URL = os.environ.get("VECTOR_TILES_URL", "https://tiles.openfreemap.org/planet")
+VECTOR_GLYPHS_URL = os.environ.get("VECTOR_GLYPHS_URL", "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf")
+# Relief (ombrage, courbes de niveau) : MNT Terrarium des « Terrain Tiles » (AWS Open Data, réutilisation libre)
+DEM_TILES_URL = os.environ.get("DEM_TILES_URL", "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png")
+
 
 # Application definition
 

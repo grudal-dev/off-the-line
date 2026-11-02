@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from .context_processors import VECTOR_STYLES
+
 
 class StravaAccount(models.Model):
     """Lien entre un utilisateur Django et son compte Strava (jetons OAuth)."""
@@ -181,7 +183,9 @@ class Book(models.Model):
 
     DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False,
                        "cities": True, "imagery": "satellite"}
-    IMAGERY = {"satellite", "eox", "ign_ortho"}  # Esri (usage personnel), Sentinel-2 2016 d'EOX ou photos IGN (libres, vendables)
+    # Esri (usage personnel), Sentinel-2 2016 d'EOX ou photos IGN (libres, vendables), ou l'un de nos
+    # fonds vectoriels (vendables)
+    IMAGERY = {"satellite", "eox", "ign_ortho"} | {s["key"] for s in VECTOR_STYLES}
 
     class Meta:
         ordering = ["-updated_at"]

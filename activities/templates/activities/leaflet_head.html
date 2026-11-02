@@ -2,6 +2,8 @@
 <script src="{% asset 'activities/vendor/leaflet/leaflet.js' %}"></script>
 {{ basemap|json_script:"basemap-data" }}
 <script>const BASEMAP = JSON.parse(document.getElementById("basemap-data").textContent);</script>
+{% include "activities/vector_head.html" %}
+<script src="{% asset 'activities/vendor/maplibre/leaflet-maplibre-gl.js' %}"></script>
 <script>window.CITIES_URL = "{% asset 'activities/cities.json' %}";</script>
 <script src="{% asset 'activities/cities.js' %}"></script>
 <script src="{% asset 'activities/basemaps.js' %}"></script>

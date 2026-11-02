@@ -1,0 +1,1 @@
+pmtiles 4.5.0 — BSD-3-Clause — https://github.com/protomaps/PMTiles
