@@ -6,14 +6,14 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import formats, timezone
 from django.views.decorators.http import require_POST
 
 from . import book, geo, journeys, places, polyline, sports, strava
-from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, StravaAccount
+from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, Poster, StravaAccount
 from .sync import ensure_photos, sync_activities, sync_photos
 
 SESSION_STATE_KEY = "strava_oauth_state"
@@ -21,7 +21,7 @@ SESSION_STATE_KEY = "strava_oauth_state"
 
 def home(request):
     if request.user.is_authenticated and hasattr(request.user, "strava"):
-        return redirect("activities:list")
+        return redirect("activities:map")
     return render(request, "activities/home.html")
 
 
@@ -369,29 +369,81 @@ def all_routes_map(request):
         for key, (label, color) in sports.FAMILIES.items() if key in counts
     ]
     total_km = round(sum(r["km"] for r in routes))
+    found = journeys.for_account(account, include_hidden=False)
     trips = [
         {"id": j.id, "title": j.name, "url": reverse("activities:journey", args=[j.id]),
          "dates": _date_range(j), "stages": [a.strava_id for a in j.activities],
          "colors": _stage_colors(len(j.legs)), "transfers": j.transfers,
-         "days": j.days, "km": round(j.distance_km)}
-        for j in journeys.for_account(account, include_hidden=False)
+         "days": j.days, "km": round(j.distance_km), "favorite": j.favorite}
+        for j in found
     ]
+    suggestion = _suggestion(request, account, found)
     routes_data = [{k: r[k] for k in ("id", "name", "sport", "family", "color", "date", "day", "km", "poly")} for r in routes]
+    by_year = {}
+    for r in routes:
+        y = by_year.setdefault(r["day"][:4], {"year": r["day"][:4], "count": 0, "km": 0})
+        y["count"] += 1
+        y["km"] += r["km"]
+    years = sorted(by_year.values(), key=lambda y: y["year"], reverse=True)
     return render(request, "activities/map.html",
                   {"routes": routes, "routes_data": routes_data, "families": families, "total_km": total_km,
-                   "journeys": trips})
+                   "journeys": trips, "years": years, "suggestion": suggestion})
+
+
+DISMISSED_KEY = "dismissed_suggestions"
+
+
+def _wants_json(request):
+    return "application/json" in request.headers.get("Accept", "")
+
+
+def _suggestion(request, account, found):
+    """Le voyage proposé au-dessus de la carte : le préféré, sinon le plus marquant pas encore créé."""
+    used = {p.settings.get("journey") for p in account.posters.only("settings") if p.settings.get("source") == "journey"}
+    for b in account.books.only("journey_ids"):
+        used.update(b.journey_ids or [])
+    dismissed = set(request.session.get(DISMISSED_KEY, []))
+    candidates = [j for j in found if j.id not in used and j.id not in dismissed and j.days >= 2]
+    if not candidates:
+        return None
+    j = max(candidates, key=journeys.highlight_score)
+    return {"id": j.id, "title": j.name, "dates": _date_range(j), "days": j.days, "km": round(j.distance_km),
+            "photos": sum(a.photo_count or 0 for a in j.activities), "favorite": j.favorite,
+            "heading": "Ton voyage préféré" if j.favorite else "Ton plus grand voyage",
+            "url": reverse("activities:journey", args=[j.id])}
 
 
 @login_required
-def poster(request):
-    """Affiche : image à imprimer (PNG haute résolution) composée dans le navigateur.
+@require_POST
+def suggestion_dismiss(request, journey_id):
+    """✕ sur la suggestion : on n'en reparle plus (pour cette session)."""
+    dismissed = request.session.get(DISMISSED_KEY, [])
+    if journey_id not in dismissed:
+        request.session[DISMISSED_KEY] = (dismissed + [journey_id])[-200:]
+    return JsonResponse({"ok": True}) if _wants_json(request) else redirect("activities:map")
 
-    Le serveur fournit les tracés encodés et les périples ; le choix de la source, le format,
-    les couleurs, le cadre et le cadrage sont faits et dessinés par static/activities/poster.js.
-    """
+
+@login_required
+@require_POST
+def journey_favorite(request, journey_id):
+    """L'étoile « Mon préféré » : un seul voyage préféré à la fois."""
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
+    if journey_id not in {j.id for j in journeys.for_account(account)}:
+        raise Http404
+    note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
+    on = not note.favorite
+    if on:
+        account.journey_notes.filter(favorite=True).exclude(pk=note.pk).update(favorite=False)
+        request.session[DISMISSED_KEY] = [i for i in request.session.get(DISMISSED_KEY, []) if i != journey_id]
+    note.favorite = on
+    note.save(update_fields=["favorite", "updated_at"])
+    return JsonResponse({"favorite": on}) if _wants_json(request) else redirect("activities:map")
+
+
+def _poster_context(account):
+    """Données de l'éditeur d'affiche : tracés encodés, familles de sports, périples."""
     qs = account.activities.exclude(summary_polyline="").only(
         "account", "strava_id", "name", "sport_type", "start_date", "start_date_local", "distance",
         "total_elevation_gain", "summary_polyline", "profile"
@@ -417,6 +469,20 @@ def poster(request):
         for j in sorted(journeys.for_account(account, include_hidden=False),
                         key=lambda j: j.legs[0].start_at, reverse=True)
     ]
+    return {"routes": routes, "families": families, "journeys": trips, "athlete": account.firstname}
+
+
+@login_required
+def poster(request):
+    """Affiche libre (sans enregistrement) : réglages gardés dans le navigateur.
+
+    Le parcours habituel passe par Explorer → Créer → Affiche, qui enregistre l'affiche (poster_edit).
+    """
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    ctx = _poster_context(account)
+    routes, trips = ctx["routes"], ctx["journeys"]
     initial = {}
     if request.method == "POST":
         known = {r["id"] for r in routes}
@@ -429,10 +495,131 @@ def poster(request):
         value = request.GET.get(param, "")
         if _signed(value) in known:
             initial = {"source": key, "id": _signed(value)}
-    return render(request, "activities/poster.html", {
-        "routes": routes, "families": families, "journeys": trips, "initial": initial,
-        "athlete": account.firstname,
-    })
+    return render(request, "activities/poster.html", {**ctx, "initial": initial, "creation": None})
+
+
+@login_required
+def poster_edit(request, poster_id):
+    """Une affiche de « Mes créations » : mêmes outils, réglages enregistrés au fil de l'eau."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    obj = get_object_or_404(Poster, pk=poster_id, account=account)
+    creation = {"id": obj.pk, "title": obj.title, "settings": obj.settings,
+                "save": reverse("activities:poster_save", args=[obj.pk])}
+    return render(request, "activities/poster.html",
+                  {**_poster_context(account), "initial": {}, "creation": creation, "poster_obj": obj})
+
+
+@require_POST
+@login_required
+def poster_save(request, poster_id):
+    from django.http import JsonResponse
+
+    account = _account_or_none(request)
+    obj = get_object_or_404(Poster, pk=poster_id, account=account)
+    data = _json_body(request)
+    if isinstance(data.get("settings"), dict):
+        obj.settings = data["settings"]
+    if isinstance(data.get("title"), str):
+        obj.title = data["title"].strip()[:200]
+    thumb = data.get("thumbnail")
+    if isinstance(thumb, str) and thumb.startswith("data:image/") and len(thumb) < 400_000:
+        obj.thumbnail = thumb
+    obj.save()
+    return JsonResponse({"ok": True})
+
+
+@require_POST
+@login_required
+def poster_delete(request, poster_id):
+    account = _account_or_none(request)
+    get_object_or_404(Poster, pk=poster_id, account=account).delete()
+    messages.info(request, "Affiche supprimée.")
+    return redirect("activities:creations")
+
+
+@login_required
+def creations(request):
+    """Mes créations : affiches et livres, les plus récents d'abord."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    found = {j.id: j for j in journeys.for_account(account)}
+    items = [{"kind": "poster", "obj": p, "updated": p.updated_at,
+              "subtitle": f"Affiche {p.settings.get('format', 'A3').replace('x', ' × ')}"}
+             for p in account.posters.all()]
+    for b in account.books.all():
+        if b.activity_ids:
+            sub = f"Livre · {len(b.activity_ids)} sortie{'s' if len(b.activity_ids) > 1 else ''}"
+        else:
+            names = [found[i].name for i in b.journey_ids if i in found]
+            sub = "Livre · " + (", ".join(names) if names else "voyage introuvable")
+        items.append({"kind": "book", "obj": b, "updated": b.updated_at, "subtitle": sub})
+    items.sort(key=lambda i: i["updated"], reverse=True)
+    return render(request, "activities/creations.html", {"items": items})
+
+
+@require_POST
+@login_required
+def create(request):
+    """Le bouton « Créer » d'Explorer : une sélection (voyage, sortie, année, zone) → affiche ou livre."""
+    account = _account_or_none(request)
+    if account is None:
+        return redirect("activities:home")
+    kind = request.POST.get("kind")
+    title = request.POST.get("title", "").strip()[:120]
+    journey_id, activity_id = _signed(request.POST.get("journey")), _signed(request.POST.get("activity"))
+    year = request.POST.get("year", "")
+    ids = _selected_ids(request)
+    settings_, name = {}, ""
+    if journey_id is not None:
+        found = {j.id: j for j in journeys.for_account(account)}
+        j = found.get(journey_id)
+        if j is None:
+            raise Http404
+        settings_, name = {"source": "journey", "journey": j.id}, j.name
+        ids = [a.strava_id for a in j.activities]
+    elif activity_id is not None:
+        a = get_object_or_404(Activity, account=account, strava_id=activity_id)
+        settings_, name, ids = {"source": "activity", "activity": a.strava_id}, a.name, [a.strava_id]
+    elif year.isdigit():
+        settings_, name = {"source": "all", "from": f"{year}-01-01", "to": f"{year}-12-31", "hidden": []}, f"Mes sorties {year}"
+        ids = list(account.activities.exclude(summary_polyline="").filter(
+            start_date__year=int(year)).order_by("start_date").values_list("strava_id", flat=True))
+    elif ids:
+        settings_, name = {"source": "selection", "selection": ids}, "Ma sélection"
+    else:
+        hide = [f for f in request.POST.getlist("hide") if f in sports.FAMILIES]
+        settings_, name = {"source": "all", "from": "", "to": "", "hidden": hide}, "Toutes mes sorties"
+
+    if kind == "livre":
+        if journey_id is not None:
+            j = found[journey_id]
+            new = Book.objects.create(account=account, journey_ids=[j.id], title=title or j.name)
+            _, problem = book.prepare(account, [j])
+            if problem:
+                messages.info(request, problem)
+            return redirect("activities:book_detail", book_id=new.pk)
+        if len(ids) > MAX_BOOK_ACTIVITIES:
+            messages.error(request, f"Un livre compte au plus {MAX_BOOK_ACTIVITIES} sorties ({len(ids)} ici) : "
+                                    "choisis un voyage, ou trace une zone plus petite.")
+            return redirect("activities:map")
+        journey = journeys.from_activities(account, ids)
+        if journey is None:
+            messages.error(request, "Aucune de ces sorties n'a de tracé : impossible de créer le livre.")
+            return redirect("activities:map")
+        new = Book.objects.create(account=account, activity_ids=[a.strava_id for a in journey.activities],
+                                  title=title or (name if name != "Ma sélection" else journey.place_name) or "Mon livre")
+        _, problem = book.prepare(account, [journey])
+        if problem:
+            messages.info(request, problem)
+        return redirect("activities:book_detail", book_id=new.pk)
+
+    if title:
+        settings_["title"] = title
+    obj = Poster.objects.create(account=account, title=title or name, settings=settings_)
+    return redirect("activities:poster_edit", poster_id=obj.pk)
 
 
 POSTER_PROFILE_POINTS = 40
@@ -634,6 +821,8 @@ def book_builder(request):
     account = _account_or_none(request)
     if account is None:
         return redirect("activities:home")
+    if request.method == "GET" and not request.GET.getlist("j"):
+        return redirect("activities:creations")  # les livres vivent dans « Mes créations »
     found = journeys.for_account(account)
     if request.method == "POST" and request.POST.getlist("a"):
         return _book_from_selection(request, account)
@@ -717,8 +906,8 @@ def book_detail(request, book_id):
     book_obj, account = _book_or_404(request, book_id)
     chosen = _book_journeys(account, book_obj)
     if not chosen:
-        messages.error(request, "Les périples de ce livre n'existent plus (activités supprimées ?).")
-        return redirect("activities:book")
+        messages.error(request, "Les voyages de ce livre n'existent plus (activités supprimées ?).")
+        return redirect("activities:creations")
     # Photos Strava et noms de lieux manquants : récupérés ensuite par la page (book_fetch_photos)
     photos_pending = (sum(1 for j in chosen for a in j.activities if not a.photos_synced_at)
                       + len(places.missing_points(chosen)))
@@ -919,4 +1108,4 @@ def book_delete(request, book_id):
         upload.image.delete(save=False)
     book_obj.delete()
     messages.info(request, "Livre supprimé.")
-    return redirect("activities:book")
+    return redirect("activities:creations")

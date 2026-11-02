@@ -149,6 +149,7 @@ class JourneyNote(models.Model):
     added = models.JSONField(default=list, blank=True, help_text="activités ajoutées à la main")
     stage_names = models.JSONField(default=dict, blank=True, help_text='{"<id activité>": "nom de l\'étape"}')
     hidden = models.BooleanField(default=False, help_text="« Ce n'est pas un périple »")
+    favorite = models.BooleanField(default=False, help_text="« Mon préféré » : proposé en premier dans Explorer")
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
@@ -180,7 +181,7 @@ class Book(models.Model):
 
     DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False,
                        "cities": True, "imagery": "satellite"}
-    IMAGERY = {"satellite", "eox"}  # Esri (usage personnel) ou Sentinel-2 2016 d'EOX (libre, vendable)
+    IMAGERY = {"satellite", "eox", "ign_ortho"}  # Esri (usage personnel), Sentinel-2 2016 d'EOX ou photos IGN (libres, vendables)
 
     class Meta:
         ordering = ["-updated_at"]
@@ -225,3 +226,20 @@ class BookPhoto(models.Model):
     @property
     def key(self):
         return f"u:{self.pk}"
+
+
+class Poster(models.Model):
+    """Affiche enregistrée (« Mes créations ») : ses réglages, son titre et une miniature."""
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="posters")
+    title = models.CharField(max_length=200, blank=True)
+    settings = models.JSONField(default=dict, blank=True)
+    thumbnail = models.TextField(blank=True, help_text="image JPEG en data URL, quelques dizaines de Ko")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return self.title or f"Affiche {self.pk}"

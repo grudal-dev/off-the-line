@@ -63,6 +63,7 @@
       current = key;
       if (tiles) tiles.remove();
       tiles = L.tileLayer(def.url, def.options).addTo(map);
+      if (def.filter) tiles.getContainer().style.filter = def.filter;  // ex. Sentinel-2 éclairci
       map.getContainer().dataset.theme = def.theme;
       control._el.querySelectorAll("[data-base]").forEach(b => b.setAttribute("aria-pressed", b.dataset.base === key));
       write(STORE, key);

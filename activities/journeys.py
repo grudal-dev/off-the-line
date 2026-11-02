@@ -91,6 +91,7 @@ class Journey:
     story: str = ""
     key: int = None       # identifiant stable : 1re activité de la chaîne détectée (avant corrections)
     hidden: bool = False  # l'utilisateur a indiqué que ce n'est pas un périple
+    favorite: bool = False  # « Mon préféré »
     removed: list = field(default_factory=list)  # étapes détectées que l'utilisateur a retirées
     corrected: bool = False
 
@@ -358,6 +359,7 @@ def _saved_modes(note, detected_legs):
 def apply_note(journey, note, activities_by_id):
     """Applique titre, récit et corrections (étapes retirées, ajoutées, renommées) d'un JourneyNote."""
     journey.custom_title, journey.story, journey.hidden = note.title, note.story, note.hidden
+    journey.favorite = note.favorite
     modes = _saved_modes(note, journey.legs)
 
     excluded = {int(x) for x in note.excluded or []}
@@ -431,3 +433,16 @@ def from_activities(account, activity_ids, title="", story=""):
     journey = Journey(legs, nights, jumps, key=SELECTION_KEY, custom_title=title, story=story)
     places.name_journeys([journey], None)
     return journey
+
+
+def highlight_score(journey):
+    """Note d'un voyage pour la suggestion d'Explorer : le plus marquant, pas forcément le plus « beau ».
+
+    Durée, distance, photos, trajet d'un point à un autre et attention de l'utilisateur (titre, récit) ;
+    « Mon préféré » passe devant tout.
+    """
+    photos = sum(a.photo_count or 0 for a in journey.activities)
+    one_way = geo.distance_km(journey.legs[0].start, journey.legs[-1].end) > 30
+    score = (journey.days * 2 + journey.distance_km / 100 + min(photos, 30) * 0.5
+             + (8 if one_way else 0) + (5 if journey.custom_title or journey.story else 0))
+    return score + (1000 if journey.favorite else 0)

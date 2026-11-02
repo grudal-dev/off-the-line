@@ -11,7 +11,7 @@
 </head>
 <body class="book{% if edit %} editing{% endif %}">
   <div class="book-toolbar" role="toolbar" aria-label="Livre">
-    <a href="{% url 'activities:book' %}">Mes livres</a>
+    <a href="{% url 'activities:creations' %}">Mes créations</a>
     {% if edit %}
       <a class="btn" href="?">Terminer</a>
       <span class="edit-hint">Clique sur un texte pour le modifier. Enregistrement automatique.</span>
@@ -35,6 +35,7 @@
       <select data-option-select="imagery">
         <option value="satellite" {% if opt.imagery == "satellite" %}selected{% endif %}>Satellite Esri (usage personnel)</option>
         <option value="eox" {% if opt.imagery == "eox" %}selected{% endif %}>Satellite libre, Sentinel-2 (livre vendu)</option>
+        <option value="ign_ortho" {% if opt.imagery == "ign_ortho" %}selected{% endif %}>Photo IGN, France seulement (livre vendu)</option>
       </select>
     </label>
     <span class="sep"></span>
@@ -322,7 +323,7 @@
     const maps = JSON.parse(document.getElementById("maps-data").textContent);
     const status = document.getElementById("load-status");
     // Le livre n'utilise que de l'imagerie satellite : Esri (usage personnel : pas de revente sans
-    // accord écrit) ou Sentinel-2 2016 d'EOX (CC BY 4.0, vendable) ; l'attribution est sur chaque carte et au dos.
+    // accord écrit) Sentinel-2 2016 d'EOX (CC BY 4.0, vendable) ou photos IGN (Etalab 2.0, vendable, France) ; l'attribution est sur chaque carte et au dos.
     const SATELLITE = BASEMAP.layers.find(d => d.key === (BOOK.options.imagery || "satellite"))
       || BASEMAP.layers.find(d => d.key === "satellite");
     const instances = [];
@@ -381,6 +382,7 @@
     }
     for (const inst of instances) {
       inst.tiles = L.tileLayer(SATELLITE.url, SATELLITE.options).addTo(inst.map);
+      if (SATELLITE.filter) inst.tiles.getContainer().style.filter = SATELLITE.filter;
       track(inst.tiles);
     }
     const credit = document.getElementById("map-credit");

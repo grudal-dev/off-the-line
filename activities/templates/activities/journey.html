@@ -6,7 +6,7 @@
 <div class="atlas">
   <aside class="atlas-panel">
     <div class="atlas-head">
-      <a class="back" href="{% url 'activities:journeys' %}">Tous les périples</a>
+      <a class="back" href="{% url 'activities:map' %}">Retour à Explorer</a>
       <h1>{{ journey.name }}</h1>
       <p class="muted" style="margin: 0 0 1rem">{{ journey.title|capfirst }}, {{ dates }}</p>
       <div class="totals">
@@ -16,8 +16,11 @@
       </div>
       <div class="journey-actions">
         <button type="button" class="btn ghost" id="replay">Rejouer le parcours</button>
-        <a class="btn ghost" href="{% url 'activities:book' %}?j={{ journey.id }}">Créer un livre</a>
-        <a class="btn ghost" href="{% url 'activities:poster' %}?periple={{ journey.id }}">Créer une affiche</a>
+        <form method="post" action="{% url 'activities:create' %}" class="create-inline">{% csrf_token %}
+          <input type="hidden" name="journey" value="{{ journey.id }}">
+          <button class="btn" type="submit" name="kind" value="affiche">Créer une affiche</button>
+          <button class="btn ghost" type="submit" name="kind" value="livre">Créer un livre</button>
+        </form>
       </div>
       <details class="journey-edit">
         <summary>Renommer et raconter</summary>

@@ -1,0 +1,40 @@
+{% extends "activities/base.html" %}
+{% block title %}Mes créations · Off the line{% endblock %}
+{% block content %}
+  <div class="page-head">
+    <h1>Mes créations</h1>
+  </div>
+  {% if items %}
+    <ul class="creations">
+      {% for it in items %}
+        <li class="creation">
+          {% if it.kind == "poster" %}
+            <a class="creation-cover poster-cover" href="{% url 'activities:poster_edit' it.obj.pk %}">
+              {% if it.obj.thumbnail %}<img src="{{ it.obj.thumbnail }}" alt="">{% else %}<span aria-hidden="true">Affiche</span>{% endif %}
+            </a>
+            <a class="creation-title" href="{% url 'activities:poster_edit' it.obj.pk %}">{{ it.obj.title|default:"Affiche" }}</a>
+            <span class="muted">{{ it.subtitle }}</span>
+            <form method="post" action="{% url 'activities:poster_delete' it.obj.pk %}" onsubmit="return confirm('Supprimer cette affiche ?')">{% csrf_token %}
+              <button class="link-button" type="submit">Supprimer</button>
+            </form>
+          {% else %}
+            <a class="creation-cover book-cover" href="{% url 'activities:book_detail' it.obj.pk %}">
+              <span>{{ it.obj.title|default:"Mon livre" }}</span>
+            </a>
+            <a class="creation-title" href="{% url 'activities:book_detail' it.obj.pk %}">{{ it.obj.title|default:"Mon livre" }}</a>
+            <span class="muted">{{ it.subtitle }}</span>
+            <form method="post" action="{% url 'activities:book_delete' it.obj.pk %}" onsubmit="return confirm('Supprimer ce livre ?')">{% csrf_token %}
+              <button class="link-button" type="submit">Supprimer</button>
+            </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty-state">
+      <h2>Ta première création</h2>
+      <p>Choisis un voyage, une sortie ou une année dans Explorer, puis « Créer » : une affiche à encadrer ou un livre à feuilleter.</p>
+      <a class="btn" href="{% url 'activities:map' %}">Ouvrir Explorer</a>
+    </div>
+  {% endif %}
+{% endblock %}

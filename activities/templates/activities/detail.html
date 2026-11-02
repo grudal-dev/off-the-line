@@ -3,7 +3,7 @@
 {% block title %}{{ activity.name }} · Off the line{% endblock %}
 {% block head %}{% if route %}{% include "activities/leaflet_head.html" %}{% endif %}{% endblock %}
 {% block content %}
-  <a class="back" href="{% url 'activities:list' %}">Retour aux activités</a>
+  <a class="back" href="{% url 'activities:map' %}">Retour à Explorer</a>
   <div class="detail">
     <div>
       <p class="sport-tag"><span class="dot" style="--c: {{ activity.sport_type|sport_color }}"></span>{{ activity.sport_type|sport_label }}</p>
@@ -20,7 +20,11 @@
       </dl>
 
       {% if not activity.from_file %}<a href="https://www.strava.com/activities/{{ activity.strava_id }}" target="_blank" rel="noopener">Voir sur Strava</a>{% endif %}
-      {% if route %}· <a href="{% url 'activities:poster' %}?activite={{ activity.strava_id }}">Créer une affiche</a>{% endif %}
+      {% if route %}·
+        <form method="post" action="{% url 'activities:create' %}" class="create-inline">{% csrf_token %}
+          <input type="hidden" name="activity" value="{{ activity.strava_id }}">
+          <button class="link-button" type="submit" name="kind" value="affiche">Créer une affiche</button>
+        </form>{% endif %}
     </div>
 
     {% if route %}
