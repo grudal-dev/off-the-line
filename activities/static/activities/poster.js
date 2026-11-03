@@ -2011,6 +2011,7 @@
     document.getElementById("step-prev").disabled = at === 0;
     document.getElementById("step-next").hidden = recap;
     exportBtn.hidden = mode === "steps" && !recap;
+    shareBtn.hidden = exportBtn.hidden;
     document.getElementById("reset-btn").hidden = mode === "steps" && !recap;
     document.getElementById("surprise-btn").textContent = surprised ? "Une autre idée" : "Surprends-moi";
 
@@ -2114,23 +2115,23 @@
     return [Math.round(W / 25.4 * dpi), Math.round(H / 25.4 * dpi)];
   }
   const exportBtn = document.getElementById("export-btn");
-  exportBtn.addEventListener("click", async () => {
-    const [w, h] = exportSize();
-    exportBtn.disabled = true;
-    status.textContent = "Préparation de l'image…";
+  const shareBtn = document.getElementById("share-btn");
+
+  /** Dessine l'affiche à w × h pixels, fonds de carte compris. Renvoie le canevas et les manques éventuels. */
+  async function buildImage(w, h) {
+    await fonts;
+    await Promise.all(wantedGeo().map(k => { geoData(k); return geo[k].promise; }));
+    const out = document.createElement("canvas");
+    out.width = w; out.height = h;
+    const ctx = out.getContext("2d");
+    if (!ctx) throw new Error("canvas");
+    // Toutes les tuiles nécessaires à cette résolution, avant de dessiner
+    const { lay } = compose();
+    const ppm = w / lay.W, mapPx = { w: lay.map.w * ppm, h: lay.map.h * ppm };
+    const plan = layerDefs().filter(({ def }) => !def.vector).flatMap(({ def }) => tilePlan(def, state.view, mapPx, 900));
+    const vdef = layerDefs().map(d => d.def).find(d => d.vector);
+    let vectorIncomplete = false;
     try {
-      await fonts;
-      await Promise.all(wantedGeo().map(k => { geoData(k); return geo[k].promise; }));
-      const out = document.createElement("canvas");
-      out.width = w; out.height = h;
-      const ctx = out.getContext("2d");
-      if (!ctx) throw new Error("canvas");
-      // Toutes les tuiles nécessaires à cette résolution, avant de dessiner
-      const { lay } = compose();
-      const ppm = w / lay.W, mapPx = { w: lay.map.w * ppm, h: lay.map.h * ppm };
-      const plan = layerDefs().filter(({ def }) => !def.vector).flatMap(({ def }) => tilePlan(def, state.view, mapPx, 900));
-      const vdef = layerDefs().map(d => d.def).find(d => d.vector);
-      let vectorIncomplete = false;
       if (vdef) {
         const job = vectorJob(vdef, state.view, mapPx, ppm, 1.02);
         const res = await OTLRender.renderWorld({ ...job, onProgress: (n, total) => {
@@ -2149,27 +2150,94 @@
       status.textContent = "Dessin de l'affiche…";
       await new Promise(r => setTimeout(r, 30));
       render(ctx, null, 900);
-      vec.exportImg = null;
-      const blob = await new Promise(resolve => out.toBlob(resolve, "image/png"));
-      if (!blob) throw new Error("toBlob");
-      const file = await withDpi(blob, +state.dpi);
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(file);
-      a.download = `affiche-${slug(last ? text("title", last.auto) : "") || "off-the-line"}-${state.format}.png`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-      const [W, H] = paper();
-      status.textContent = `Image enregistrée : ${nf.format(w)} × ${nf.format(h)} px, à imprimer en ${nf1.format(W / 10)} × ${nf1.format(H / 10)} cm.` +
-        (vectorIncomplete ? " Attention : une partie du fond de carte n'a pas fini de charger : réessaie si tu vois des manques." : "") +
-        (failedTiles ? ` Attention : ${failedTiles} morceau${failedTiles > 1 ? "x" : ""} du fond de carte n'${failedTiles > 1 ? "ont" : "a"} pas pu être chargé${failedTiles > 1 ? "s" : ""} : réessaie, ou choisis un autre fond de carte.` : "");
-    } catch (err) {
-      console.error(err);
-      status.textContent = err && err.name === "SecurityError"
-        ? "Ce fond de carte n'autorise pas l'export d'image : choisis-en un autre, ou « Uni »."
-        : "L'image est trop grande pour ce navigateur : choisis une résolution ou un format plus petit.";
+      return { canvas: out, vectorIncomplete, failedTiles };
     } finally {
       vec.exportImg = null;
+    }
+  }
+  const missingNote = ({ vectorIncomplete, failedTiles }) =>
+    (vectorIncomplete ? " Attention : une partie du fond de carte n'a pas fini de charger : réessaie si tu vois des manques." : "") +
+    (failedTiles ? ` Attention : ${failedTiles} morceau${failedTiles > 1 ? "x" : ""} du fond de carte n'${failedTiles > 1 ? "ont" : "a"} pas pu être chargé${failedTiles > 1 ? "s" : ""} : réessaie, ou choisis un autre fond de carte.` : "");
+  const failure = err => {
+    console.error(err);
+    status.textContent = err && err.name === "SecurityError"
+      ? "Ce fond de carte n'autorise pas l'export d'image : choisis-en un autre, ou « Uni »."
+      : "L'image est trop grande pour ce navigateur : choisis une résolution ou un format plus petit.";
+  };
+  const fileName = ext => `affiche-${slug(last ? text("title", last.auto) : "") || "off-the-line"}-${state.format}.${ext}`;
+  function download(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+
+  exportBtn.addEventListener("click", async () => {
+    const [w, h] = exportSize();
+    exportBtn.disabled = true;
+    status.textContent = "Préparation de l'image…";
+    try {
+      const built = await buildImage(w, h);
+      const blob = await new Promise(resolve => built.canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("toBlob");
+      download(await withDpi(blob, +state.dpi), fileName("png"));
+      const [W, H] = paper();
+      status.textContent = `Image enregistrée : ${nf.format(w)} × ${nf.format(h)} px, à imprimer en ${nf1.format(W / 10)} × ${nf1.format(H / 10)} cm.` + missingNote(built);
+    } catch (err) {
+      failure(err);
+    } finally {
       exportBtn.disabled = false;
+    }
+  });
+
+  // Partager : image légère (2 048 px de long, JPEG) pour le téléphone, Strava, Instagram…
+  // L'API Strava ne permet pas d'ajouter une photo à une activité : on passe par le menu de partage
+  // du système (ou un téléchargement), puis l'app Strava (Modifier l'activité → photos).
+  const SHARE_PX = 2048;
+  const STRAVA_TIP = "Dans l'app Strava : ouvre ton activité, « Modifier », puis ajoute la photo.";
+  let shareReady = null;  // { key, file } : image prête, partagée au prochain toucher si le navigateur l'exige
+  const shareKey = () => JSON.stringify(state);
+  const canShareFiles = file => !!(navigator.canShare && navigator.share && navigator.canShare({ files: [file] }));
+  async function shareFile(file) {
+    try {
+      await navigator.share({ files: [file], title: text("title", last.auto) || "Mon affiche" });
+      status.textContent = "Affiche partagée. " + STRAVA_TIP;
+      shareReady = null;
+      shareBtn.textContent = "Partager";
+    } catch (err) {
+      if (err && err.name === "AbortError") { status.textContent = ""; return; }
+      if (err && err.name === "NotAllowedError") {
+        // La préparation a pris trop de temps : le navigateur veut un nouveau toucher
+        status.textContent = "L'image est prête : touche encore « Partager maintenant ».";
+        shareBtn.textContent = "Partager maintenant";
+        return;
+      }
+      download(file, file.name);
+      status.textContent = "Image enregistrée. " + STRAVA_TIP;
+    }
+  }
+  shareBtn.addEventListener("click", async () => {
+    if (shareReady && shareReady.key === shareKey()) return shareFile(shareReady.file);
+    const [W, H] = paper(), k = SHARE_PX / Math.max(W, H);
+    shareBtn.disabled = true;
+    status.textContent = "Préparation de l'image…";
+    try {
+      const built = await buildImage(Math.round(W * k), Math.round(H * k));
+      const blob = await new Promise(resolve => built.canvas.toBlob(resolve, "image/jpeg", 0.9));
+      if (!blob) throw new Error("toBlob");
+      const file = new File([blob], fileName("jpg"), { type: "image/jpeg" });
+      if (!canShareFiles(file)) {
+        download(file, file.name);
+        status.textContent = "Image enregistrée (le partage direct n'existe que sur téléphone). " + STRAVA_TIP + missingNote(built);
+        return;
+      }
+      shareReady = { key: shareKey(), file };
+      await shareFile(file);
+    } catch (err) {
+      failure(err);
+    } finally {
+      shareBtn.disabled = false;
     }
   });
 
