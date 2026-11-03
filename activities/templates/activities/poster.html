@@ -173,7 +173,6 @@
           <legend>Détails</legend>
           <div class="toggle-list" role="group" aria-label="Éléments de l'affiche">
             <button type="button" class="toggle" data-toggle="profile" data-not-all>Profil d'altitude<small>Sous le titre, la montée et la descente</small></button>
-            <button type="button" class="toggle" data-toggle="cities">Noms de villes<small>Les villes-étapes ou les plus grandes</small></button>
             <button type="button" class="toggle" data-toggle="borders">Frontières et côtes<small>Pays, régions et littoral</small></button>
             <button type="button" class="toggle" data-toggle="endpoints" data-not-all>Départ et arrivée<small>Un point à chaque bout</small></button>
           </div>
@@ -184,6 +183,43 @@
             <button type="button" class="choice" data-pick-frame="double"><span class="frame-icon double"></span>Double</button>
             <button type="button" class="choice" data-pick-frame="mat"><span class="frame-icon mat"></span>Marge</button>
           </div>
+        </fieldset>
+
+        <fieldset data-step="details" id="cities-box">
+          <legend>Villes</legend>
+          <div id="ends-box">
+            <label class="check"><input type="checkbox" name="endNames"> Nommer le départ et l'arrivée (toujours affichés)</label>
+            <div class="poster-row" data-for-ends>
+              <label>Départ <input class="field" type="text" name="startName" maxlength="60"></label>
+              <label>Arrivée <input class="field" type="text" name="endName" maxlength="60"></label>
+            </div>
+          </div>
+          <p class="vector-label">Autres villes</p>
+          <div class="city-modes" role="group" aria-label="Villes affichées">
+            <button type="button" data-city-mode="none">Aucune</button>
+            <button type="button" data-city-mode="stops">Villes-étapes</button>
+            <button type="button" data-city-mode="near">Proches du parcours</button>
+            <button type="button" data-city-mode="big">Les plus grandes</button>
+          </div>
+          <div class="city-modes small" role="group" aria-label="Distance au tracé" data-for-near>
+            <span class="muted">À moins de</span>
+            <button type="button" data-city-near="5">5 km</button>
+            <button type="button" data-city-near="10">10 km</button>
+            <button type="button" data-city-near="20">20 km</button>
+          </div>
+          <div class="city-modes small" role="group" aria-label="Nombre de villes" data-for-count>
+            <span class="muted">Nombre</span>
+            <button type="button" data-city-count="8">Quelques-unes</button>
+            <button type="button" data-city-count="20">Beaucoup</button>
+            <button type="button" data-city-count="60">Toutes</button>
+          </div>
+          <ul class="city-tags" id="city-tags" aria-label="Villes sur l'affiche"></ul>
+          <label class="poster-search">Ajouter une ville
+            <input class="field" type="search" id="city-search" placeholder="ex. Chamonix" autocomplete="off">
+          </label>
+          <ul class="city-results" id="city-results"></ul>
+          <p class="muted small-print">Villes de plus de 1 000 habitants : GeoNames (CC BY 4.0).</p>
+          <p class="poster-hint" id="place-hint" hidden>Clique sur l'aperçu à l'endroit de « <span></span> ». <button type="button" class="link-button" id="place-cancel">Annuler</button></p>
         </fieldset>
 
         <fieldset data-step="recap" class="steps-only">
@@ -320,10 +356,11 @@
               <select class="field" name="cityMode">
                 <option value="big">Les plus grandes de la zone</option>
                 <option value="stops">Villes-étapes du périple</option>
+                <option value="near">Proches du parcours</option>
               </select>
             </label>
             <label>Nombre maximum <output data-out="cityCount"></output>
-              <input type="range" name="cityCount" min="1" max="40" step="1">
+              <input type="range" name="cityCount" min="1" max="60" step="1">
             </label>
             <label>Taille du texte <output data-out="citySize"></output>
               <input type="range" name="citySize" min="1.5" max="10" step="0.1">
@@ -425,6 +462,7 @@
     </aside>
     <div class="poster-stage" id="poster-stage">
       <canvas id="poster-canvas" role="img" aria-label="Aperçu de l'affiche"
+              data-towns="{% url 'activities:poster_towns' %}"
               data-cities="{% static 'activities/cities.json' %}"
               data-country-shapes="{% static 'activities/countries-shapes.json' %}"
               data-countries="{% static 'activities/borders-countries.json' %}"

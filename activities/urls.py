@@ -38,6 +38,7 @@ urlpatterns = [
     path("periples/<sid:journey_id>/prefere/", views.journey_favorite, name="journey_favorite"),
     path("periples/<sid:journey_id>/ignorer/", views.suggestion_dismiss, name="suggestion_dismiss"),
     path("affiche/", views.poster, name="poster"),
+    path("affiche/villes/", views.poster_towns, name="poster_towns"),
     path("affiche/<int:poster_id>/", views.poster_edit, name="poster_edit"),
     path("affiche/<int:poster_id>/enregistrer/", views.poster_save, name="poster_save"),
     path("affiche/<int:poster_id>/supprimer/", views.poster_delete, name="poster_delete"),

@@ -14,7 +14,7 @@ from django.utils import formats, timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
-from . import book, geo, journeys, places, polyline, sports, strava, webhooks
+from . import book, geo, journeys, places, polyline, sports, strava, towns, webhooks
 from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, Poster, StravaAccount
 from .sync import ensure_photos, sync_activities, sync_photos
 
@@ -525,6 +525,40 @@ def poster(request):
         if _signed(value) in known:
             initial = {"source": key, "id": _signed(value)}
     return render(request, "activities/poster.html", {**ctx, "initial": initial, "creation": None})
+
+
+@login_required
+def poster_towns(request):
+    """Villes pour l'affiche (GeoNames, activities/towns.py).
+
+    ?ids=1,2,3&km=10 : villes à moins de km des tracés (dans l'ordre donné) et noms du départ et de l'arrivée.
+    ?q=chamon&lat=…&lng=… : recherche par nom, les plus proches d'abord.
+    """
+    account = _account_or_none(request)
+    if account is None:
+        return JsonResponse({"error": "non connecté"}, status=403)
+    if "q" in request.GET:
+        try:
+            lat, lng = float(request.GET["lat"]), float(request.GET["lng"])
+        except (KeyError, ValueError):
+            lat = lng = None
+        return JsonResponse({"results": towns.search(request.GET["q"][:60], lat, lng)})
+    ids = [i for i in (_signed(x) for x in request.GET.get("ids", "").split(",")[:2000]) if i is not None]
+    try:
+        km = min(30.0, max(1.0, float(request.GET.get("km", 10))))
+    except ValueError:
+        km = 10.0
+    lines = dict(account.activities.filter(strava_id__in=ids).exclude(summary_polyline="")
+                 .values_list("strava_id", "summary_polyline"))
+    tracks = [polyline.decode(lines[i]) for i in ids if i in lines]
+    tracks = [t for t in tracks if t]
+    # Un point tous les ~1 km suffit : les villes sont cherchées dans un rayon de plusieurs km
+    points = []
+    for t in tracks:
+        step = max(1, len(t) // 400)
+        points += t[::step] + [t[-1]]
+    ends = [towns.nearest(*tracks[0][0]), towns.nearest(*tracks[-1][-1])] if tracks else ["", ""]
+    return JsonResponse({"near": towns.near_track(points, km), "ends": ends})
 
 
 @login_required

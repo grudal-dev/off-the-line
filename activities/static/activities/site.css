@@ -832,3 +832,21 @@ details.advanced form { margin-top: .75rem; }
 .stage-list label:has(input:not(:checked)) .stage-num { background: var(--contour); }
 #stages-all { justify-self: start; }
 #stages-summary { margin: 0; }
+
+/* Affiche : villes (départ et arrivée, choix, retrait, ajout) */
+.city-modes { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.city-modes button { font: inherit; font-size: .8rem; padding: .25rem .65rem; border-radius: 999px; border: 1px solid var(--contour-soft); background: #fff; color: var(--ink); cursor: pointer; }
+.city-modes button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.city-modes.small button { font-size: .75rem; padding: .15rem .55rem; }
+.city-modes .muted { font-size: .78rem; margin-right: .1rem; }
+.city-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.city-tag { display: inline-flex; align-items: center; gap: .35rem; font: inherit; font-size: .78rem; padding: .15rem .3rem .15rem .6rem; border-radius: 999px; border: 1px solid var(--contour-soft); background: var(--paper); color: var(--ink); cursor: pointer; }
+.city-tag span { display: grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 50%; color: var(--slate); }
+.city-tag:hover span { background: var(--contour-soft); color: var(--ink); }
+.city-tag.extra { border-color: var(--route); }
+.city-tag.hidden { border-style: dashed; color: var(--slate); text-decoration: line-through; background: transparent; }
+.city-results { list-style: none; margin: -.3rem 0 0; padding: 0; display: grid; gap: .15rem; }
+.city-results button { width: 100%; display: flex; justify-content: space-between; gap: .5rem; font: inherit; text-align: left; padding: .35rem .5rem; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; }
+.city-results button:hover { background: var(--paper); }
+.city-results .muted { font-size: .78rem; }
+#poster-canvas.is-placing { cursor: crosshair; }

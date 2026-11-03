@@ -68,6 +68,14 @@ Strava vérifie l'adresse avec un jeton (`STRAVA_WEBHOOK_VERIFY_TOKEN`, déduit 
 défini). Ajoute ensuite `STRAVA_WEBHOOK_SUBSCRIPTION_ID` (affiché par `subscribe`) pour refuser les événements d'un
 autre abonnement.
 
+### Villes de l'affiche
+
+Le départ et l'arrivée sont toujours nommés (nom saisi, ville-étape, sinon ville la plus proche), comme les villes
+ajoutées à la main (recherche, ou clic sur l'aperçu) ; une ville peut être retirée d'un clic. « Proches du parcours »
+affiche les villes à moins de 5, 10 ou 20 km du tracé. Ces villes viennent de `activities/data/towns.tsv.gz`
+(GeoNames, plus de 1 000 habitants, CC BY 4.0 : crédit ajouté sur l'affiche), interrogé par le serveur
+(`activities/towns.py`, `/affiche/villes/`). Pour le régénérer : `python scripts/build_towns.py cities1000.json`.
+
 ### Chargement en arrière-plan
 
 Les pages s'affichent sans attendre Strava ni le géocodage. Ce qui manque (photos d'une activité ou d'un

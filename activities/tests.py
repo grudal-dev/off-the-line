@@ -1350,3 +1350,48 @@ class SuggestionFavoriteTests(LoggedInTestCase):
         Poster.objects.all().delete()
         self.client.post(reverse("activities:create"), {"kind": "affiche", "hide": [fam, "nope"]})
         self.assertEqual(Poster.objects.get().settings["hidden"], [fam])
+
+
+class PosterTownsTests(LoggedInTestCase):
+    def setUp(self):
+        super().setUp()
+        # Annecy → Thônes, encodé en polyligne
+        self.track = [[45.8992, 6.1294], [45.8900, 6.2000], [45.8812, 6.3257]]
+        Activity.objects.create(account=self.account, strava_id=300, name="Aravis", sport_type="Ride",
+                                start_date=timezone.now(), distance=30000, summary_polyline=self._encode(self.track))
+
+    @staticmethod
+    def _encode(points):
+        def enc(v):
+            v = ~(v << 1) if v < 0 else v << 1
+            out = ""
+            while v >= 0x20:
+                out += chr((0x20 | (v & 0x1f)) + 63)
+                v >>= 5
+            return out + chr(v + 63)
+        out, plat, plng = "", 0, 0
+        for lat, lng in points:
+            a, b = round(lat * 1e5), round(lng * 1e5)
+            out += enc(a - plat) + enc(b - plng)
+            plat, plng = a, b
+        return out
+
+    def test_near_and_ends(self):
+        data = self.client.get(reverse("activities:poster_towns"), {"ids": "300", "km": "5"}).json()
+        names = [row[0] for row in data["near"]]
+        self.assertIn("Annecy", names)
+        self.assertIn("Thônes", names)
+        self.assertEqual(data["ends"], ["Annecy", "Thônes"])
+
+    def test_other_accounts_tracks_are_ignored(self):
+        other = get_user_model().objects.create(username="strava_7")
+        acc = StravaAccount.objects.create(user=other, athlete_id=7, access_token="t", refresh_token="r",
+                                           expires_at=timezone.now() + timedelta(hours=1))
+        Activity.objects.create(account=acc, strava_id=301, name="Autre", start_date=timezone.now(),
+                                summary_polyline=self._encode(self.track))
+        data = self.client.get(reverse("activities:poster_towns"), {"ids": "301"}).json()
+        self.assertEqual((data["near"], data["ends"]), ([], ["", ""]))
+
+    def test_search_prefers_nearby(self):
+        results = self.client.get(reverse("activities:poster_towns"), {"q": "chamon", "lat": "45.9", "lng": "6.5"}).json()["results"]
+        self.assertEqual(results[0][0], "Chamonix-Mont-Blanc")
