@@ -1098,7 +1098,7 @@ class VectorBasemapTests(LoggedInTestCase):
         keys = [s["key"] for s in VECTOR_STYLES]
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual([l["key"] for l in data["layers"][:len(keys)]], keys)
-        self.assertEqual(data["default"], "rando")
+        self.assertEqual(data["default"], "carnet")
         for layer in data["layers"][:len(keys)]:
             self.assertEqual(layer["vector"], layer["key"])
             self.assertFalse(layer.get("personal"))

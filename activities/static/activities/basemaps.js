@@ -2,7 +2,7 @@
    Les fonds sont fournis par le context processor « basemap » (BASEMAP) : nos styles vectoriels
    (dessinés par mapstyles.js, affichés avec MapLibre) puis les fonds en images (IGN, satellite…). */
 (function () {
-  const STORE = "otl-basemap";
+  const STORE = "otl-basemap-choix";  // fond choisi à la main (nouvelle clé : Carnet par défaut pour tous)
   const RELIEF = "otl-relief";
   const VRELIEF = "otl-vrelief";  // relief des styles vectoriels (activé par défaut)
   const CITIES = "otl-cities";
@@ -233,6 +233,6 @@
     }
 
     // Le fond (et MapLibre) n'est posé qu'une fois la vue de la carte fixée (fitBounds de la page)
-    map.whenReady(() => setBase(current));
+    map.whenReady(() => setBase(current, false));  // mémorisé seulement si on le choisit
   };
 })();

@@ -21,6 +21,9 @@ IGN_ORTHO_CREDIT = '&copy; <a href="https://www.ign.fr/">IGN</a> – BD ORTHO® 
 # casing (routes bordées), waterOutline (contour de l'eau à l'encre), upper (villes en capitales),
 # roadScale (épaisseur des routes).
 VECTOR_STYLES = [
+    {"key": "carnet", "label": "Carnet", "relief": 0.35, "nature": 0.5, "urban": 0.55,
+     "colors": {"land": "#efe5cf", "water": "#b5cac6", "nature": "#9aab7c", "urban": "#b88d69",
+                "road": "#8c674b", "label": "#4a3626", "shadow": "#5e4630"}},
     {"key": "epure", "label": "Épure", "relief": 0, "nature": 0.45, "urban": 0.7, "upper": True,
      "colors": {"land": "#f4f2ed", "water": "#d2dbdf", "nature": "#bccab1", "urban": "#cfc8bc",
                 "road": "#bfb8ab", "label": "#57524a", "shadow": "#5f5a52"}},
@@ -28,9 +31,6 @@ VECTOR_STYLES = [
      "roadScale": 0.75,
      "colors": {"land": "#ffffff", "water": "#eeeeec", "nature": "#ffffff", "urban": "#1c1c1c",
                 "road": "#1c1c1c", "label": "#1c1c1c", "shadow": "#000000"}},
-    {"key": "carnet", "label": "Carnet", "relief": 0.35, "nature": 0.5, "urban": 0.55,
-     "colors": {"land": "#efe5cf", "water": "#b5cac6", "nature": "#9aab7c", "urban": "#b88d69",
-                "road": "#8c674b", "label": "#4a3626", "shadow": "#5e4630"}},
     {"key": "rando", "label": "Rando", "relief": 0.55, "contours": True, "nature": 0.55, "urban": 0.7, "casing": True,
      "colors": {"land": "#f3f1e7", "water": "#95c4dc", "nature": "#7fb36c", "urban": "#d2c1aa",
                 "road": "#e09a4a", "label": "#2e2e2b", "shadow": "#3b3731"}},
@@ -115,4 +115,4 @@ def basemap(request):
     }
     vector = vector_basemap()
     return {"basemap": {"layers": vector_layers(vector["attribution"]) + layers, "hillshade": hillshade,
-                        "default": "rando", "vector": vector}}
+                        "default": "carnet", "vector": vector}}
