@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Activity, ActivityPhoto, Place, StravaAccount
+from .models import Activity, ActivityPhoto, Place, Poster, StravaAccount
 
 TOKEN_RESPONSE = {
     "access_token": "acc-123",
@@ -903,6 +903,14 @@ class PosterTests(LoggedInTestCase):
             self.assertContains(response, f'data-goto="{step}"')
         for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps"):
             self.assertContains(response, f'id="{button}"')
+
+    def test_stage_list_also_for_saved_posters(self):
+        response = self.client.get(reverse("activities:poster"))
+        self.assertContains(response, 'id="stage-list"')
+        poster = Poster.objects.create(account=self.account, settings={"source": "all"})
+        response = self.client.get(reverse("activities:poster_edit", args=[poster.pk]))
+        self.assertContains(response, 'id="stage-list"')
+        self.assertContains(response, 'data-goto="sorties"')
 
     def test_landmark_options_and_data(self):
         from django.contrib.staticfiles import finders

@@ -20,7 +20,7 @@
       <form class="poster-form" id="poster-form" data-mode="steps" autocomplete="off" onsubmit="return false">{% csrf_token %}
 
         <ol class="wizard-steps steps-only" id="wizard-steps" aria-label="Étapes">
-          {% if not creation %}<li><button type="button" data-goto="sorties">Sorties</button></li>{% endif %}
+          <li><button type="button" data-goto="sorties">Sorties</button></li>
           <li><button type="button" data-goto="format">Format</button></li>
           <li><button type="button" data-goto="style">Style</button></li>
           <li><button type="button" data-goto="textes">Textes</button></li>
@@ -74,6 +74,13 @@
             <label class="sr-only" for="activity-select">Activité</label>
             <select class="field" id="activity-select" name="activity"></select>
           </div>
+        </fieldset>
+
+        <fieldset data-step="sorties" id="stages-box" hidden>
+          <legend>Tracés retenus</legend>
+          <p class="muted small-print" id="stages-summary"></p>
+          <ul class="stage-list" id="stage-list"></ul>
+          <button type="button" class="link-button" id="stages-all" hidden>Tout remettre</button>
         </fieldset>
 
         <fieldset data-step="format">

@@ -818,3 +818,17 @@ details.advanced form { margin-top: .75rem; }
 .swatch[aria-pressed="true"], .swatch.custom.on { box-shadow: 0 0 0 2px var(--route); }
 .swatch.custom { position: relative; overflow: hidden; display: block !important; background: conic-gradient(#e63946, #ffd166, #2a9d8f, #457b9d, #9b5de5, #e63946); }
 .swatch.custom input { position: absolute; inset: 0; width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
+
+/* Affiche : tracés retenus (décocher pour retirer une étape) */
+.stage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; max-height: 22rem; overflow-y: auto; }
+.stage-list label.check { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; column-gap: .5rem; align-items: center; padding: .35rem .2rem; border-radius: 6px; cursor: pointer; }
+.stage-list label.check:hover { background: var(--paper); }
+.stage-list input { grid-row: 1 / span 2; }
+.stage-list .stage-num { grid-row: 1 / span 2; display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--ink); color: #fff; font-size: .7rem; font-weight: 600; }
+.stage-list .stage-name { grid-column: 3; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-list .muted { grid-column: 3; font-size: .78rem; }
+.stage-list label:not(:has(.stage-num)) .stage-name, .stage-list label:not(:has(.stage-num)) .muted { grid-column: 2 / span 2; }
+.stage-list label:has(input:not(:checked)) .stage-name { text-decoration: line-through; color: var(--slate); }
+.stage-list label:has(input:not(:checked)) .stage-num { background: var(--contour); }
+#stages-all { justify-self: start; }
+#stages-summary { margin: 0; }

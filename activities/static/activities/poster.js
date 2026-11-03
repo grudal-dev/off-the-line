@@ -45,7 +45,7 @@
     satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
-    source: "all", hidden: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
+    source: "all", hidden: [], excluded: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
     format: "A3", orientation: "portrait", dpi: "200",
     ...PRESETS.paper, relief: false,
     mode: "single", width: 1.7, opacity: 0.85, endpoints: false,
@@ -103,6 +103,8 @@
   }
   // Sélection faite sur la carte (zone) : ids des activités encore présentes
   state.selection = (Array.isArray(state.selection) ? state.selection : []).filter(id => byId.has(id));
+  // Tracés retirés de l'affiche (étapes décochées)
+  state.excluded = (Array.isArray(state.excluded) ? state.excluded : []).filter(id => byId.has(id));
   if (state.source === "selection" && !state.selection.length) state.source = "all";
   if (!LAYERS.some(l => l.key === state.base) || (LAYERS.find(l => l.key === state.base).vector && !VECTOR)) state.base = "";
   if (!state.vColors || typeof state.vColors !== "object") state.vColors = {};
@@ -165,7 +167,28 @@
   for (const r of ROUTES) r.folded = fold(r.name);
   const matches = (r, words) => words.every(w => r.folded.includes(w));
 
+  /** Tracés de l'affiche : ceux de la source choisie, moins les étapes retirées. */
   function selection() {
+    const sel = baseSelection();
+    if (!state.excluded.length) return sel;
+    const out = new Set(state.excluded);
+    const routes = sel.routes.filter(r => !out.has(r.id));
+    const removed = sel.routes.length - routes.length;
+    if (!removed) return sel;
+    const res = { ...sel, routes, removed, transfers: sel.transfers.filter(([a, b]) => !out.has(a.id) && !out.has(b.id)) };
+    // Périple raccourci : dates, nombre de jours et villes-étapes recalculés sur les étapes gardées
+    if (sel.trip) res.trip = { ...sel.trip, days: 0, dates: null, stops: keptStops(sel.trip.stops || [], routes) };
+    return res;
+  }
+  /** Villes-étapes encore au départ ou à l'arrivée d'une étape gardée (à 3 km près). */
+  function keptStops(stops, routes) {
+    const ends = routes.flatMap(r => r.pts.length >= 2 ? [[r.pts[0], r.pts[1]], [r.pts[r.pts.length - 2], r.pts[r.pts.length - 1]]] : []);
+    return stops.filter(([lat, lng]) => {
+      const [x, y] = mercator(lat, lng), tol = 3 / 40075 / Math.cos(lat * Math.PI / 180);
+      return ends.some(([ex, ey]) => Math.hypot(ex - x, ey - y) < tol);
+    });
+  }
+  function baseSelection() {
     if (state.source === "journey") {
       const trip = TRIPS.find(t => t.id === state.journey);
       if (!trip) return { routes: [], transfers: [] };
@@ -289,8 +312,14 @@
     const pays = countries && countries.length > 1 ? ` · ${countries.length} pays` : "";
     const days = new Set(rs.map(r => r.day)).size;
     if (state.source === "journey" && sel.trip) {
+      const first = rs.length ? rs[0].day : "", last = rs.length ? rs[rs.length - 1].day : "";
+      const span = !first ? "" : first === last ? longDate(first)
+        : first.slice(0, 7) === last.slice(0, 7) ? `Du ${+first.slice(8)} au ${longDate(last)}`
+        : first.slice(0, 4) === last.slice(0, 4) ? `Du ${shortDate(first)} au ${longDate(last)}` : `Du ${longDate(first)} au ${longDate(last)}`;
+      // Étapes retirées : « 5 jours à vélo » devient « 3 jours à vélo »
+      const title = sel.removed ? sel.trip.title.replace(/^\d+ jours?\b/i, () => plural(days, "jour")) : sel.trip.title;
       return {
-        title: sel.trip.title, subtitle: sel.trip.dates.replace(/^du /, "Du "),
+        title, subtitle: sel.trip.dates ? sel.trip.dates.replace(/^du /, "Du ") : span,
         stats: `${plural(sel.trip.days || days, "jour")}${pays} · ${nf.format(km)} km${dplus}`,
       };
     }
@@ -1450,7 +1479,7 @@
   function set(changes, reshape) {
     const sourceChange = ["source", "journey", "activity"].some(k => k in changes && changes[k] !== state[k]);
     Object.assign(state, changes);
-    if (sourceChange) Object.assign(state, { title: "", subtitle: "", stats: "" });
+    if (sourceChange) Object.assign(state, { title: "", subtitle: "", stats: "", excluded: changes.excluded || [] });
     if (reshape || sourceChange) state.manual = false;
     syncFields();
     redraw();
@@ -1638,6 +1667,57 @@
   }
 
 
+  // --- Tracés retenus : décocher une étape la retire de l'affiche -------------
+  const MAX_LISTED = 150;
+  const stageBox = document.getElementById("stages-box");
+  const stageList = document.getElementById("stage-list");
+  const stageDate = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
+  const stageDateYear = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  let stageKey = "";
+  function refreshStages() {
+    const base = baseSelection().routes;
+    const out = new Set(state.excluded);
+    const kept = base.filter(r => !out.has(r.id)).length;
+    stageBox.hidden = state.source === "activity" || base.length < 2;
+    if (stageBox.hidden) return;
+    const summary = document.getElementById("stages-summary");
+    document.getElementById("stages-all").hidden = kept === base.length;
+    if (base.length > MAX_LISTED) {
+      summary.textContent = `${nf.format(base.length)} sorties : affine avec les filtres (sport, dates, recherche) pour les choisir une par une.`;
+      stageList.innerHTML = "";
+      stageKey = "";
+      return;
+    }
+    summary.textContent = kept === base.length
+      ? `Décoche une ${state.source === "journey" ? "étape" : "sortie"} pour la retirer de l'affiche.`
+      : `${kept} sur ${base.length} gardée${kept > 1 ? "s" : ""}.`;
+    const key = base.map(r => r.id).join() + "|" + state.excluded.join();
+    if (key === stageKey) return;
+    stageKey = key;
+    const years = new Set(base.map(r => r.day.slice(0, 4))).size > 1;
+    stageList.innerHTML = base.map((r, i) => {
+      const date = (years ? stageDateYear : stageDate).format(new Date(r.day + "T12:00"));
+      const num = state.source === "journey" ? `<span class="stage-num">${i + 1}</span>` : "";
+      return `<li><label class="check"><input type="checkbox" data-stage="${r.id}" ${out.has(r.id) ? "" : "checked"}>
+        ${num}<span class="stage-name">${escapeHtml(r.name || "Sans titre")}</span>
+        <span class="muted">${date} · ${nf1.format(r.km)} km</span></label></li>`;
+    }).join("");
+  }
+  stageList.addEventListener("change", e => {
+    const id = Number(e.target.dataset.stage);
+    if (!e.target.dataset.stage) return;
+    e.stopPropagation();
+    const out = new Set(state.excluded);
+    if (e.target.checked) out.delete(id);
+    else {
+      const left = baseSelection().routes.filter(r => !out.has(r.id) && r.id !== id).length;
+      if (!left) { e.target.checked = true; return; }  // au moins un tracé
+      out.add(id);
+    }
+    set({ excluded: [...out] }, true);
+  });
+  document.getElementById("stages-all").addEventListener("click", () => set({ excluded: [] }, true));
+
   // --- Parcours par étapes ----------------------------------------------------
   // Une étape à la fois (les sorties d'abord, comme avant), l'aperçu suit chaque choix.
   // « Tous les réglages » ouvre le mode libre : le formulaire complet.
@@ -1749,6 +1829,7 @@
     press("pick-frame", state.frame);
     form.querySelectorAll("[data-pick-orientation]").forEach(b => { b.querySelector(".badge").hidden = b.dataset.pickOrientation !== best; });
     refreshTrace();
+    refreshStages();
     form.querySelectorAll("[data-toggle]").forEach(b => {
       const key = b.dataset.toggle;
       b.setAttribute("aria-pressed", key === "borders" ? bordersOn() : !!state[key]);
@@ -1763,7 +1844,9 @@
     ].filter(Boolean);
     const km = sel.routes.reduce((a, r) => a + r.km, 0);
     const rows = [
-      STEPS.includes("sorties") && ["sorties", "Sorties", sel.routes.length ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km` : "aucun tracé"],
+      ["sorties", "Sorties", sel.routes.length
+        ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km${sel.removed ? ` (${sel.removed} retiré${sel.removed > 1 ? "s" : ""})` : ""}`
+        : "aucun tracé"],
       ["format", "Format", `${FORMAT_LABELS[state.format] || state.format}, ${state.orientation === "landscape" ? "paysage" : "portrait"}`],
       ["style", "Style", presetName()],
       ["textes", "Textes", title ? `« ${title} »` : "sans texte"],
