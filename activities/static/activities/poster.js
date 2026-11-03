@@ -45,7 +45,7 @@
     satellite: { bg: "#1a211c", ink: "#f5f1e6", color: "#ffd166", color2: "#ff5d2e", base: "satellite", frameColor: "#f5f1e6", matColor: "#1a211c", hlColor: "#ffffff", glow: true },
   };
   const DEFAULTS = {
-    source: "all", hidden: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
+    source: "all", hidden: [], excluded: [], q: "", from: "", to: "", journey: TRIPS[0] ? TRIPS[0].id : null, activity: null, selection: [],
     format: "A3", orientation: "portrait", dpi: "200",
     ...PRESETS.paper, relief: false,
     mode: "single", width: 1.7, opacity: 0.85, endpoints: false,
@@ -54,7 +54,8 @@
     rotation: 0, view: null, manual: false,
     countries: true, regions: true, coast: true,
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "solid", regionStyle: "solid", borderOpacity: 0.6,
-    cities: false, cityCount: 8, citySize: 5, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
+    cities: false, cityCount: 8, citySize: 5, cityNear: 10,
+    endNames: true, startName: "", endName: "", cityHidden: [], cityExtra: [], cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
     mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: true,
     hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
@@ -103,6 +104,10 @@
   }
   // Sélection faite sur la carte (zone) : ids des activités encore présentes
   state.selection = (Array.isArray(state.selection) ? state.selection : []).filter(id => byId.has(id));
+  // Tracés retirés de l'affiche (étapes décochées)
+  state.excluded = (Array.isArray(state.excluded) ? state.excluded : []).filter(id => byId.has(id));
+  if (!Array.isArray(state.cityHidden)) state.cityHidden = [];
+  if (!Array.isArray(state.cityExtra)) state.cityExtra = [];
   if (state.source === "selection" && !state.selection.length) state.source = "all";
   if (!LAYERS.some(l => l.key === state.base) || (LAYERS.find(l => l.key === state.base).vector && !VECTOR)) state.base = "";
   if (!state.vColors || typeof state.vColors !== "object") state.vColors = {};
@@ -165,7 +170,28 @@
   for (const r of ROUTES) r.folded = fold(r.name);
   const matches = (r, words) => words.every(w => r.folded.includes(w));
 
+  /** Tracés de l'affiche : ceux de la source choisie, moins les étapes retirées. */
   function selection() {
+    const sel = baseSelection();
+    if (!state.excluded.length) return sel;
+    const out = new Set(state.excluded);
+    const routes = sel.routes.filter(r => !out.has(r.id));
+    const removed = sel.routes.length - routes.length;
+    if (!removed) return sel;
+    const res = { ...sel, routes, removed, transfers: sel.transfers.filter(([a, b]) => !out.has(a.id) && !out.has(b.id)) };
+    // Périple raccourci : dates, nombre de jours et villes-étapes recalculés sur les étapes gardées
+    if (sel.trip) res.trip = { ...sel.trip, days: 0, dates: null, stops: keptStops(sel.trip.stops || [], routes) };
+    return res;
+  }
+  /** Villes-étapes encore au départ ou à l'arrivée d'une étape gardée (à 3 km près). */
+  function keptStops(stops, routes) {
+    const ends = routes.flatMap(r => r.pts.length >= 2 ? [[r.pts[0], r.pts[1]], [r.pts[r.pts.length - 2], r.pts[r.pts.length - 1]]] : []);
+    return stops.filter(([lat, lng]) => {
+      const [x, y] = mercator(lat, lng), tol = 3 / 40075 / Math.cos(lat * Math.PI / 180);
+      return ends.some(([ex, ey]) => Math.hypot(ex - x, ey - y) < tol);
+    });
+  }
+  function baseSelection() {
     if (state.source === "journey") {
       const trip = TRIPS.find(t => t.id === state.journey);
       if (!trip) return { routes: [], transfers: [] };
@@ -289,8 +315,14 @@
     const pays = countries && countries.length > 1 ? ` · ${countries.length} pays` : "";
     const days = new Set(rs.map(r => r.day)).size;
     if (state.source === "journey" && sel.trip) {
+      const first = rs.length ? rs[0].day : "", last = rs.length ? rs[rs.length - 1].day : "";
+      const span = !first ? "" : first === last ? longDate(first)
+        : first.slice(0, 7) === last.slice(0, 7) ? `Du ${+first.slice(8)} au ${longDate(last)}`
+        : first.slice(0, 4) === last.slice(0, 4) ? `Du ${shortDate(first)} au ${longDate(last)}` : `Du ${longDate(first)} au ${longDate(last)}`;
+      // Étapes retirées : « 5 jours à vélo » devient « 3 jours à vélo »
+      const title = sel.removed ? sel.trip.title.replace(/^\d+ jours?\b/i, () => plural(days, "jour")) : sel.trip.title;
       return {
-        title: sel.trip.title, subtitle: sel.trip.dates.replace(/^du /, "Du "),
+        title, subtitle: sel.trip.dates ? sel.trip.dates.replace(/^du /, "Du ") : span,
         stats: `${plural(sel.trip.days || days, "jour")}${pays} · ${nf.format(km)} km${dplus}`,
       };
     }
@@ -889,8 +921,10 @@
   // Crédits des données du fond, en petit dans le coin de la carte : couleur du texte de l'affiche,
   // détourée de la couleur du fond pour rester lisible sur une photo satellite
   function attributionText(defs) {
-    return defs.map(d => d.def.vector ? OTLStyles.attribution(d.def.vector, vectorOptions()) : d.def.options.attribution || "")
-      .join(" · ").replace(/<[^>]+>/g, "").replace(/&copy;/g, "©").replace(/&mdash;/g, "—").replace(/&amp;/g, "&");
+    // Villes GeoNames (CC BY 4.0) : départ et arrivée nommés automatiquement, ou villes proches du parcours
+    const towns = (state.cities && state.cityMode === "near") || (state.endNames && state.source !== "all") ? ["Villes © GeoNames"] : [];
+    return [...defs.map(d => d.def.vector ? OTLStyles.attribution(d.def.vector, vectorOptions()) : d.def.options.attribution || "")
+      , ...towns].filter(Boolean).join(" · ").replace(/<[^>]+>/g, "").replace(/&copy;/g, "©").replace(/&mdash;/g, "—").replace(/&amp;/g, "&");
   }
   function drawAttribution(ctx, lay, ppm, defs) {
     if (!defs.length) return;
@@ -1029,7 +1063,9 @@
   }
 
   function drawLabels(ctx, lay, view, ppm, hl, onLoad, sel, atlas = []) {
-    if (!state.cities && !atlas.length && !(hl.length && state.hlLabels)) return;
+    shown = [];
+    const forced = (state.endNames && state.source !== "all") || state.cityExtra.length;
+    if (!state.cities && !forced && !atlas.length && !(hl.length && state.hlLabels)) return;
     const m = lay.map, X = v => v * ppm;
     const mapPx = { w: X(m.w), h: X(m.h) }, s = mapPx.w / view.span;
     const th = state.rotation * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
@@ -1086,22 +1122,21 @@
       const r = o.dot ? o.size * 0.2 : 0;
       const gap = o.dot ? o.size * (o.hideDot ? 0.9 : 0.45) : 0;
       const sides = o.dot ? [1, -1] : [0];
-      // 1er passage : à l'écart du tracé ; sinon (villes-étapes, collées au tracé) posé dessus mais sans halo
-      const passes = o.keep ? [true, false] : [true];
-      for (const clear of passes) for (const side of sides) {
+      const boxes = side => {
         const x0 = side > 0 ? px + gap : side < 0 ? px - gap - w : px - w / 2;
-        const b = { x0: Math.min(x0, px - r) - o.size * 0.2, x1: Math.max(x0 + w, px + r) + o.size * 0.2, y0: py - o.size * 0.62, y1: py + o.size * 0.62 };
-        // Boîte du texte seul (sans le point, posé sur le tracé pour les étapes)
-        const tb = { x0: x0 - o.size * 0.15, x1: x0 + w + o.size * 0.15, y0: py - o.size * 0.55, y1: py + o.size * 0.55 };
-        if (!inside(b) || !free(b) || (o.avoid && o.avoid(b))) continue;
-        const over = !o.noHalo && state.labelHalo && onTrace(tb);
-        if (clear && over) continue;
+        return {
+          x0,
+          b: { x0: Math.min(x0, px - r) - o.size * 0.2, x1: Math.max(x0 + w, px + r) + o.size * 0.2, y0: py - o.size * 0.62, y1: py + o.size * 0.62 },
+          // Boîte du texte seul (sans le point, posé sur le tracé pour les étapes)
+          tb: { x0: x0 - o.size * 0.15, x1: x0 + w + o.size * 0.15, y0: py - o.size * 0.55, y1: py + o.size * 0.55 },
+        };
+      };
+      const draw = (x0, b, over) => {
         placed.push(b);
         ctx.textAlign = "left"; ctx.textBaseline = "middle";
-        // Texte calé sur le pixel et halo fin : des noms nets plutôt qu'entourés d'un flou épais
+        // Texte calé sur le pixel ; double halo couleur du fond : un large et léger qui calme le fond
+        // de carte (frontières, photo), puis un serré et plein qui détache chaque lettre
         const tx = Math.round(x0), ty = Math.round(py + o.size * 0.04);
-        // Double halo couleur du fond : un large et léger qui calme le fond de carte (frontières, photo),
-        // puis un serré et plein qui détache chaque lettre
         if (state.labelHalo && !o.noHalo && !over) {
           ctx.lineJoin = "round"; ctx.miterLimit = 2; ctx.strokeStyle = state.bg;
           ctx.globalAlpha = 0.55; ctx.lineWidth = Math.max(2, o.size * 0.8);
@@ -1118,13 +1153,50 @@
           if (state.labelHalo && !over) { ctx.lineWidth = r * 1.4; ctx.stroke(); }
           ctx.fill();
         }
+        if (o.kind) shown.push({ name: str, kind: o.kind });
         return true;
+      };
+      // 1er passage : à l'écart du tracé ; sinon (villes-étapes, collées au tracé) posé dessus mais sans halo
+      const passes = o.keep || o.force ? [true, false] : [true];
+      for (const clear of passes) for (const side of sides) {
+        const { x0, b, tb } = boxes(side);
+        if (!inside(b) || !free(b) || (o.avoid && o.avoid(b))) continue;
+        const over = !o.noHalo && state.labelHalo && onTrace(tb);
+        if (clear && over) continue;
+        return draw(x0, b, over);
       }
-      return false;
+      if (!o.force) return false;
+      // Nom imposé (départ, arrivée, ville ajoutée) : posé quand même, du côté qui reste dans la carte
+      const left = X(m.x) + edge, right = X(m.x + m.w) - edge;
+      let side = sides[0];
+      if (o.dot && px + gap + w > right) side = -1;
+      let { x0, b } = boxes(side);
+      x0 = Math.min(Math.max(x0, left), right - w);
+      return draw(x0, b, false);
     }
 
     ctx.save();
     ctx.beginPath(); ctx.rect(X(m.x), X(m.y), mapPx.w, mapPx.h); ctx.clip();
+    const hidden = new Set(state.cityHidden);
+    const cityStyle = (factor, kind) => ({
+      size: size * factor, weight: state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
+      color: state.cityColor, dot: state.cityDots, upper: state.cityUpper, kind,
+    });
+    // Départ, arrivée et villes ajoutées d'abord : toujours affichés
+    const ends = state.endNames ? endLabels(sel, onLoad) : [];
+    const named = new Set();
+    for (const e of ends) {
+      if (!e.name) continue;
+      named.add(fold(e.name));
+      const [x, y] = project(e.x, e.y);
+      label(e.name, x, y, { ...cityStyle(1.15, "end"), weight: state.cityUpper ? 700 : 600, dot: true, hideDot: state.endpoints, force: true });
+    }
+    for (const [lat, lng, name] of state.cityExtra) {
+      named.add(fold(name));
+      const [x, y] = project(...mercator(lat, lng));
+      label(name, x, y, { ...cityStyle(1, "extra"), dot: true, force: true });
+    }
+    const skip = name => hidden.has(name) || named.has(fold(name));
     // Atlas : nom des pays traversés, en grandes capitales espacées et discrètes, sans couvrir le tracé
     if (atlas.length) {
       const trace = [];
@@ -1157,31 +1229,75 @@
         const ends = i === 0 || i === stops.length - 1;
         if (!ends && count >= state.cityCount) break;
         const [lat, lng, name] = stops[i];
+        if (skip(name)) continue;
         const [x, y] = project(...mercator(lat, lng));
         if (label(name, x, y, {
-          size: ends ? size * 1.15 : size * 0.95, weight: state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
-          color: state.cityColor, dot: state.cityDots || (ends && state.endpoints), hideDot: ends && state.endpoints, upper: state.cityUpper,
-          keep: true,
+          ...cityStyle(ends ? 1.15 : 0.95, "stop"),
+          dot: state.cityDots || (ends && state.endpoints), hideDot: ends && state.endpoints, keep: true,
         }) && !ends) count++;
       }
     }
-    const rows = state.cities && !stops.length ? geoData("cities", onLoad) : null;
+    // Villes proches du parcours (à quelques km du tracé), sinon les plus grandes du cadre
+    const near = state.cities && state.cityMode === "near" && sel ? nearCities(sel, onLoad) : null;
+    const rows = near || (state.cities && !stops.length && state.cityMode !== "near" ? geoData("cities", onLoad) : null);
     if (rows) {
       const box = viewBox(view, mapPx, s);
       let count = 0;
       for (const c of rows) {
         if (count >= state.cityCount) break;
         const [name, lat, lng, , , capital] = c;
-        if (!visible(box, lng, lat, lng, lat)) continue;
+        if (skip(name) || !visible(box, lng, lat, lng, lat)) continue;
         const [x, y] = project(...mercator(lat, lng));
-        if (label(name, x, y, {
-          size: capital ? size * 1.08 : size, weight: state.cityUpper ? 700 : 600, family: state.cityUpper ? COND : SANS,
-          color: state.cityColor, dot: state.cityDots, upper: state.cityUpper,
-        })) count++;
+        if (label(name, x, y, { ...cityStyle(capital ? 1.08 : 1, near ? "near" : "big"), keep: !!near })) count++;
       }
     }
     if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
     ctx.restore();
+  }
+
+  // --- Villes : départ et arrivée, villes proches du parcours ----------------
+  let shown = [];  // villes posées au dernier dessin (liste du panneau)
+  const kmTol = (km, lat) => km / 40075 / Math.cos(lat * Math.PI / 180);
+  // Villes de plus de 1 000 habitants (GeoNames) : demandées au serveur pour les tracés de l'affiche
+  const townCache = new Map();
+  function townsFor(sel, onLoad) {
+    const ids = sel.routes.slice(-600).map(r => r.id).join(",");  // adresse raisonnable : 600 tracés au plus
+    const key = ids + "|" + state.cityNear;
+    if (!ids) return null;
+    let entry = townCache.get(key);
+    if (!entry) {
+      entry = { data: null, waiting: [] };
+      townCache.set(key, entry);
+      fetch(`${canvas.dataset.towns}?ids=${ids}&km=${state.cityNear || 10}`).then(r => r.ok ? r.json() : { near: [], ends: [] })
+        .catch(() => ({ near: [], ends: [] }))
+        .then(data => { entry.data = data; entry.waiting.splice(0).forEach(fn => fn()); });
+    }
+    if (!entry.data && onLoad && !entry.waiting.includes(onLoad)) entry.waiting.push(onLoad);
+    return entry.data;
+  }
+  /** Départ et arrivée de la sélection : position et nom (saisi, ville-étape, ou ville connue la plus proche). */
+  function endLabels(sel, onLoad) {
+    if (!sel || state.source === "all" || !sel.routes.length) return [];
+    const a = sel.routes[0].pts, z = sel.routes[sel.routes.length - 1].pts;
+    if (a.length < 2 || z.length < 2) return [];
+    const ends = [{ key: "startName", x: a[0], y: a[1] }, { key: "endName", x: z[z.length - 2], y: z[z.length - 1] }];
+    const stops = sel.trip ? sel.trip.stops || [] : [];
+    for (const e of ends) {
+      const [lat] = inverseMercator(e.x, e.y);
+      const stop = stops.find(([slat, slng]) => { const [sx, sy] = mercator(slat, slng); return Math.hypot(sx - e.x, sy - e.y) < kmTol(3, lat); });
+      const town = townsFor(sel, onLoad);
+      e.auto = stop ? stop[2] : town ? town.ends[e.key === "startName" ? 0 : 1] || "" : "";
+      const typed = state[e.key];
+      e.name = typed === "" ? e.auto : typed.trim();  // un espace seul : pas de nom
+    }
+    // Boucle : départ et arrivée au même endroit, un seul nom
+    if (ends[0].name && fold(ends[0].name) === fold(ends[1].name)) ends[1].name = "";
+    return ends;
+  }
+  /** Villes à moins de state.cityNear km du tracé, des plus peuplées aux moins peuplées (serveur). */
+  function nearCities(sel, onLoad) {
+    const town = townsFor(sel, onLoad);
+    return town ? town.near : null;
   }
 
   /** Dessine l'affiche entière sur ctx ; l'échelle (pixels par mm) vient de la largeur du canevas. */
@@ -1306,6 +1422,7 @@
     redraw();
   }
   canvas.addEventListener("pointerdown", e => {
+    if (placeAt(e.clientX, e.clientY)) return;
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, [e.clientX, e.clientY]);
     canvas.classList.add("is-dragging");
@@ -1428,8 +1545,8 @@
     set({ from: y ? `${y}-01-01` : "", to: y ? `${y}-12-31` : "" }, true);
   });
 
-  const NUMERIC = new Set(["vRelief", "vRoadScale", "vDetail", "mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
-  const CHECKS = new Set(["vContours", "vPaths", "vBuildings", "vNature", "vBorders", "atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+  const NUMERIC = new Set(["cityNear", "vRelief", "vRoadScale", "vDetail", "mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
+  const CHECKS = new Set(["endNames", "vContours", "vPaths", "vBuildings", "vNature", "vBorders", "atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
                           "labelHalo", "hl", "hlCasing", "hlLabels"]);
   const RESHAPE = new Set(["air", "profile", "q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
@@ -1450,7 +1567,8 @@
   function set(changes, reshape) {
     const sourceChange = ["source", "journey", "activity"].some(k => k in changes && changes[k] !== state[k]);
     Object.assign(state, changes);
-    if (sourceChange) Object.assign(state, { title: "", subtitle: "", stats: "" });
+    if (sourceChange) Object.assign(state, { title: "", subtitle: "", stats: "", excluded: changes.excluded || [],
+                                             startName: "", endName: "", cityHidden: [], cityExtra: [] });
     if (reshape || sourceChange) state.manual = false;
     syncFields();
     redraw();
@@ -1638,6 +1756,162 @@
   }
 
 
+  // --- Tracés retenus : décocher une étape la retire de l'affiche -------------
+  const MAX_LISTED = 150;
+  const stageBox = document.getElementById("stages-box");
+  const stageList = document.getElementById("stage-list");
+  const stageDate = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
+  const stageDateYear = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  let stageKey = "";
+  function refreshStages() {
+    const base = baseSelection().routes;
+    const out = new Set(state.excluded);
+    const kept = base.filter(r => !out.has(r.id)).length;
+    stageBox.hidden = state.source === "activity" || base.length < 2;
+    if (stageBox.hidden) return;
+    const summary = document.getElementById("stages-summary");
+    document.getElementById("stages-all").hidden = kept === base.length;
+    if (base.length > MAX_LISTED) {
+      summary.textContent = `${nf.format(base.length)} sorties : affine avec les filtres (sport, dates, recherche) pour les choisir une par une.`;
+      stageList.innerHTML = "";
+      stageKey = "";
+      return;
+    }
+    summary.textContent = kept === base.length
+      ? `Décoche une ${state.source === "journey" ? "étape" : "sortie"} pour la retirer de l'affiche.`
+      : `${kept} sur ${base.length} gardée${kept > 1 ? "s" : ""}.`;
+    const key = base.map(r => r.id).join() + "|" + state.excluded.join();
+    if (key === stageKey) return;
+    stageKey = key;
+    const years = new Set(base.map(r => r.day.slice(0, 4))).size > 1;
+    stageList.innerHTML = base.map((r, i) => {
+      const date = (years ? stageDateYear : stageDate).format(new Date(r.day + "T12:00"));
+      const num = state.source === "journey" ? `<span class="stage-num">${i + 1}</span>` : "";
+      return `<li><label class="check"><input type="checkbox" data-stage="${r.id}" ${out.has(r.id) ? "" : "checked"}>
+        ${num}<span class="stage-name">${escapeHtml(r.name || "Sans titre")}</span>
+        <span class="muted">${date} · ${nf1.format(r.km)} km</span></label></li>`;
+    }).join("");
+  }
+  stageList.addEventListener("change", e => {
+    const id = Number(e.target.dataset.stage);
+    if (!e.target.dataset.stage) return;
+    e.stopPropagation();
+    const out = new Set(state.excluded);
+    if (e.target.checked) out.delete(id);
+    else {
+      const left = baseSelection().routes.filter(r => !out.has(r.id) && r.id !== id).length;
+      if (!left) { e.target.checked = true; return; }  // au moins un tracé
+      out.add(id);
+    }
+    set({ excluded: [...out] }, true);
+  });
+  document.getElementById("stages-all").addEventListener("click", () => set({ excluded: [] }, true));
+
+  // --- Villes : départ et arrivée, choix, retrait, ajout ------------------------
+  const cityTags = document.getElementById("city-tags");
+  const citySearch = document.getElementById("city-search");
+  const cityResults = document.getElementById("city-results");
+  const placeHint = document.getElementById("place-hint");
+  let placing = null, tagKey = "";
+  form.querySelectorAll("[data-city-mode]").forEach(b => b.addEventListener("click", () => {
+    const m = b.dataset.cityMode;
+    set(m === "none" ? { cities: false } : { cities: true, cityMode: m });
+  }));
+  form.querySelectorAll("[data-city-near]").forEach(b => b.addEventListener("click", () => set({ cityNear: +b.dataset.cityNear })));
+  form.querySelectorAll("[data-city-count]").forEach(b => b.addEventListener("click", () => set({ cityCount: +b.dataset.cityCount })));
+  cityTags.addEventListener("click", e => {
+    const b = e.target.closest("[data-city]");
+    if (!b) return;
+    const name = b.dataset.city, kind = b.dataset.kind;
+    if (kind === "extra") set({ cityExtra: state.cityExtra.filter(c => c[2] !== name) });
+    else if (kind === "hidden") set({ cityHidden: state.cityHidden.filter(n => n !== name) });
+    else set({ cityHidden: [...state.cityHidden, name] });
+  });
+  function addCity(lat, lng, name) {
+    set({ cityExtra: [...state.cityExtra.filter(c => c[2] !== name), [+lat.toFixed(4), +lng.toFixed(4), name]],
+          cityHidden: state.cityHidden.filter(n => n !== name) });
+    citySearch.value = ""; cityResults.innerHTML = "";
+  }
+  let searchTimer = 0, searchSeq = 0;
+  function searchCities() {
+    clearTimeout(searchTimer);
+    const typed = citySearch.value.trim();
+    if (typed.length < 2) { cityResults.innerHTML = ""; return; }
+    searchTimer = setTimeout(async () => {
+      const seq = ++searchSeq;
+      // Près de l'aperçu d'abord : distance au centre de la carte
+      const v = state.view || { cx: 0.5, cy: 0.5 }, [lat, lng] = inverseMercator(v.cx, v.cy);
+      let found = [];
+      try {
+        const r = await fetch(`${canvas.dataset.towns}?q=${encodeURIComponent(typed)}&lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`);
+        if (r.ok) found = (await r.json()).results || [];
+      } catch (e) { /* hors ligne : on propose seulement de placer le nom */ }
+      if (seq !== searchSeq) return;
+      cityResults.innerHTML = found.slice(0, 6).map(([name, la, ln, , km]) =>
+        `<li><button type="button" data-add="${escapeHtml(name)}" data-lat="${la}" data-lng="${ln}">${escapeHtml(name)}<span class="muted">${nf.format(km ?? 0)} km</span></button></li>`).join("")
+        + `<li><button type="button" data-place="${escapeHtml(typed)}">Placer « ${escapeHtml(typed)} » sur l'aperçu<span class="muted">au clic</span></button></li>`;
+    }, 200);
+  }
+  citySearch.addEventListener("input", searchCities);
+  citySearch.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); cityResults.querySelector("button")?.click(); } });
+  cityResults.addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.add) return addCity(+b.dataset.lat, +b.dataset.lng, b.dataset.add);
+    placing = b.dataset.place;
+    placeHint.querySelector("span").textContent = placing;
+    placeHint.hidden = false;
+    canvas.classList.add("is-placing");
+    cityResults.innerHTML = "";
+  });
+  const stopPlacing = () => { placing = null; placeHint.hidden = true; canvas.classList.remove("is-placing"); };
+  document.getElementById("place-cancel").addEventListener("click", stopPlacing);
+  /** Clic sur l'aperçu en mode « placer une ville » : renvoie true si le clic a été utilisé. */
+  function placeAt(clientX, clientY) {
+    if (!placing || !last) return false;
+    const rect = canvas.getBoundingClientRect(), { ppmCss } = mapScale(), m = last.lay.map;
+    const [dx, dy] = toWorld(clientX - rect.left - (m.x + m.w / 2) * ppmCss, clientY - rect.top - (m.y + m.h / 2) * ppmCss);
+    const [lat, lng] = inverseMercator(state.view.cx + dx, state.view.cy + dy);
+    const name = placing;
+    stopPlacing();
+    citySearch.value = "";
+    addCity(lat, lng, name);
+    return true;
+  }
+
+  function refreshCities(sel) {
+    const endsBox = document.getElementById("ends-box");
+    endsBox.hidden = state.source === "all";
+    form.querySelector("[data-for-ends]").hidden = !state.endNames;
+    if (!endsBox.hidden) {
+      const ends = endLabels(sel, redraw);
+      field("startName").placeholder = (ends[0] && ends[0].auto) || "Nom de la ville";
+      field("endName").placeholder = (ends[1] && ends[1].auto) || "Nom de la ville";
+    }
+    const mode = state.cities ? state.cityMode : "none";
+    const stopsOk = !!(sel.trip && (sel.trip.stops || []).length);
+    form.querySelectorAll("[data-city-mode]").forEach(b => {
+      b.setAttribute("aria-pressed", b.dataset.cityMode === mode);
+      if (b.dataset.cityMode === "stops") b.hidden = !stopsOk && mode !== "stops";
+    });
+    form.querySelector("[data-for-near]").hidden = mode !== "near";
+    form.querySelector("[data-for-count]").hidden = mode === "none";
+    form.querySelectorAll("[data-city-near]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.cityNear === +state.cityNear));
+    const count = +state.cityCount, nearest = [8, 20, 60].reduce((a, c) => Math.abs(c - count) < Math.abs(a - count) ? c : a);
+    form.querySelectorAll("[data-city-count]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.cityCount === nearest));
+    // Villes posées (× pour retirer), ajoutées, retirées (pour les remettre)
+    const tags = [
+      ...shown.filter(c => c.kind !== "end" && c.kind !== "extra").map(c => [c.name, "shown"]),
+      ...state.cityExtra.map(c => [c[2], "extra"]),
+      ...state.cityHidden.map(n => [n, "hidden"]),
+    ];
+    const key = JSON.stringify(tags);
+    if (key === tagKey) return;
+    tagKey = key;
+    cityTags.innerHTML = tags.map(([name, kind]) => `<li><button type="button" class="city-tag ${kind}" data-city="${escapeHtml(name)}" data-kind="${kind}"
+      title="${kind === "hidden" ? "Remettre" : "Retirer"}">${escapeHtml(name)}<span aria-hidden="true">${kind === "hidden" ? "+" : "×"}</span></button></li>`).join("");
+  }
+
   // --- Parcours par étapes ----------------------------------------------------
   // Une étape à la fois (les sorties d'abord, comme avant), l'aperçu suit chaque choix.
   // « Tous les réglages » ouvre le mode libre : le formulaire complet.
@@ -1749,6 +2023,8 @@
     press("pick-frame", state.frame);
     form.querySelectorAll("[data-pick-orientation]").forEach(b => { b.querySelector(".badge").hidden = b.dataset.pickOrientation !== best; });
     refreshTrace();
+    refreshStages();
+    refreshCities(sel);
     form.querySelectorAll("[data-toggle]").forEach(b => {
       const key = b.dataset.toggle;
       b.setAttribute("aria-pressed", key === "borders" ? bordersOn() : !!state[key]);
@@ -1763,7 +2039,9 @@
     ].filter(Boolean);
     const km = sel.routes.reduce((a, r) => a + r.km, 0);
     const rows = [
-      STEPS.includes("sorties") && ["sorties", "Sorties", sel.routes.length ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km` : "aucun tracé"],
+      ["sorties", "Sorties", sel.routes.length
+        ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km${sel.removed ? ` (${sel.removed} retiré${sel.removed > 1 ? "s" : ""})` : ""}`
+        : "aucun tracé"],
       ["format", "Format", `${FORMAT_LABELS[state.format] || state.format}, ${state.orientation === "landscape" ? "paysage" : "portrait"}`],
       ["style", "Style", presetName()],
       ["textes", "Textes", title ? `« ${title} »` : "sans texte"],

@@ -818,3 +818,35 @@ details.advanced form { margin-top: .75rem; }
 .swatch[aria-pressed="true"], .swatch.custom.on { box-shadow: 0 0 0 2px var(--route); }
 .swatch.custom { position: relative; overflow: hidden; display: block !important; background: conic-gradient(#e63946, #ffd166, #2a9d8f, #457b9d, #9b5de5, #e63946); }
 .swatch.custom input { position: absolute; inset: 0; width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
+
+/* Affiche : tracés retenus (décocher pour retirer une étape) */
+.stage-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; max-height: 22rem; overflow-y: auto; }
+.stage-list label.check { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; column-gap: .5rem; align-items: center; padding: .35rem .2rem; border-radius: 6px; cursor: pointer; }
+.stage-list label.check:hover { background: var(--paper); }
+.stage-list input { grid-row: 1 / span 2; }
+.stage-list .stage-num { grid-row: 1 / span 2; display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--ink); color: #fff; font-size: .7rem; font-weight: 600; }
+.stage-list .stage-name { grid-column: 3; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-list .muted { grid-column: 3; font-size: .78rem; }
+.stage-list label:not(:has(.stage-num)) .stage-name, .stage-list label:not(:has(.stage-num)) .muted { grid-column: 2 / span 2; }
+.stage-list label:has(input:not(:checked)) .stage-name { text-decoration: line-through; color: var(--slate); }
+.stage-list label:has(input:not(:checked)) .stage-num { background: var(--contour); }
+#stages-all { justify-self: start; }
+#stages-summary { margin: 0; }
+
+/* Affiche : villes (départ et arrivée, choix, retrait, ajout) */
+.city-modes { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.city-modes button { font: inherit; font-size: .8rem; padding: .25rem .65rem; border-radius: 999px; border: 1px solid var(--contour-soft); background: #fff; color: var(--ink); cursor: pointer; }
+.city-modes button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.city-modes.small button { font-size: .75rem; padding: .15rem .55rem; }
+.city-modes .muted { font-size: .78rem; margin-right: .1rem; }
+.city-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.city-tag { display: inline-flex; align-items: center; gap: .35rem; font: inherit; font-size: .78rem; padding: .15rem .3rem .15rem .6rem; border-radius: 999px; border: 1px solid var(--contour-soft); background: var(--paper); color: var(--ink); cursor: pointer; }
+.city-tag span { display: grid; place-items: center; width: 1.1rem; height: 1.1rem; border-radius: 50%; color: var(--slate); }
+.city-tag:hover span { background: var(--contour-soft); color: var(--ink); }
+.city-tag.extra { border-color: var(--route); }
+.city-tag.hidden { border-style: dashed; color: var(--slate); text-decoration: line-through; background: transparent; }
+.city-results { list-style: none; margin: -.3rem 0 0; padding: 0; display: grid; gap: .15rem; }
+.city-results button { width: 100%; display: flex; justify-content: space-between; gap: .5rem; font: inherit; text-align: left; padding: .35rem .5rem; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer; }
+.city-results button:hover { background: var(--paper); }
+.city-results .muted { font-size: .78rem; }
+#poster-canvas.is-placing { cursor: crosshair; }
