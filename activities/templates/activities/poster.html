@@ -27,9 +27,10 @@
           <li><button type="button" data-goto="details">Détails</button></li>
           <li><button type="button" data-goto="recap">Résumé</button></li>
         </ol>
-        <p class="free-only free-head">
-          <button type="button" class="link-button" id="to-steps">Revenir aux étapes</button>
-        </p>
+        <div class="free-only free-head">
+          <span class="muted">Mode libre</span>
+          <button type="button" class="btn ghost" id="to-steps">← Revenir aux étapes</button>
+        </div>
 
         <fieldset data-step="sorties" {% if creation %}hidden{% endif %}>
           <legend>Sorties</legend>
@@ -126,6 +127,19 @@
             <button type="button" class="preset" data-preset="carnet" style="--bg:#efe5cf;--fg:#b4341b" data-needs-vector>Carnet</button>
             <button type="button" class="preset" data-preset="alpin" style="--bg:#fafaf8;--fg:#d9480f" data-needs-vector>Alpin</button>
             <button type="button" class="preset" data-preset="cyanotype" style="--bg:#1f4f7b;--fg:#ffd166" data-needs-vector>Cyanotype</button>
+          </div>
+          <div class="steps-only trace-step">
+            <p class="vector-label">Tracé</p>
+            <div class="choice-grid" role="group" aria-label="Épaisseur du tracé">
+              <button type="button" class="choice" data-pick-width="fine"><span class="stroke" style="--w:2px"></span>Fin</button>
+              <button type="button" class="choice" data-pick-width="medium"><span class="stroke" style="--w:4px"></span>Moyen</button>
+              <button type="button" class="choice" data-pick-width="bold"><span class="stroke" style="--w:7px"></span>Épais</button>
+            </div>
+            <div class="swatches" role="group" aria-label="Couleur du tracé">
+              <span id="trace-swatches"></span>
+              <label class="swatch custom" title="Autre couleur"><input type="color" id="trace-custom" aria-label="Autre couleur"></label>
+            </div>
+            <button type="button" class="toggle" data-toggle="glow">Halo lumineux<small>Le tracé brille, surtout sur fond sombre</small></button>
           </div>
         </fieldset>
 
