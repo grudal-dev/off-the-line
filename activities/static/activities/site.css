@@ -850,3 +850,8 @@ details.advanced form { margin-top: .75rem; }
 .city-results button:hover { background: var(--paper); }
 .city-results .muted { font-size: .78rem; }
 #poster-canvas.is-placing { cursor: crosshair; }
+/* Télécharger et Partager côte à côte, même hauteur */
+.poster-export { align-items: stretch; }
+.poster-export > .link-button { align-self: center; }
+#export-btn { white-space: nowrap; justify-content: center; }
+#share-btn { flex: 0 0 auto; justify-content: center; padding-inline: 1.1rem; }

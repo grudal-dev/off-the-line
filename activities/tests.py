@@ -901,7 +901,7 @@ class PosterTests(LoggedInTestCase):
         for step in ("sorties", "format", "style", "textes", "details", "recap"):
             self.assertContains(response, f'data-step="{step}"')
             self.assertContains(response, f'data-goto="{step}"')
-        for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps"):
+        for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps", "export-btn", "share-btn"):
             self.assertContains(response, f'id="{button}"')
 
     def test_stage_list_also_for_saved_posters(self):
