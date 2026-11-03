@@ -550,6 +550,7 @@ details.advanced form { margin-top: .75rem; }
   background: var(--bg); color: var(--fg); border: 1px solid var(--contour-soft);
 }
 .preset:hover { outline: 2px solid var(--contour); }
+.preset[aria-pressed="true"] { outline: 2px solid var(--route); outline-offset: 2px; border-color: var(--ink); }
 /* Fond vectoriel de l'affiche : choix du style et personnalisation */
 .vector-panel { display: grid; gap: .6rem; padding: .75rem; margin-top: .1rem; border-radius: 10px; background: var(--paper); border: 1px solid var(--contour-soft); }
 .vector-styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.4rem, 1fr)); gap: .4rem; }

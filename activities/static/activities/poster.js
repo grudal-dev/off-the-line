@@ -52,7 +52,7 @@
     frame: "line", margin: 15,
     textPos: "bottom", title: "", subtitle: "", stats: "",
     rotation: 0, view: null, manual: false,
-    countries: true, regions: true, coast: false,
+    countries: true, regions: true, coast: true,
     borderColor: PRESETS.paper.ink, borderWidth: 0.3, borderStyle: "solid", regionStyle: "solid", borderOpacity: 0.6,
     cities: false, cityCount: 8, citySize: 4, cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
@@ -64,14 +64,10 @@
   };
   const VECTOR = !!(window.OTLStyles && window.OTLRender);
   const isVector = key => VECTOR && !!(LAYERS.find(l => l.key === key) || {}).vector;
-  // Fond par défaut : notre style Rando, l'affiche prenant ses couleurs
-  const DEFAULT_STYLE = VECTOR && OTLStyles.styles.find(v => v.key === "rando");
-  if (DEFAULT_STYLE && LAYERS.some(l => l.key === "rando")) {
-    const c = DEFAULT_STYLE.colors;
-    Object.assign(DEFAULTS, {
-      base: "rando", mute: 0, bg: c.land, ink: c.label, frameColor: c.label, borderColor: c.label, cityColor: c.label,
-      matColor: OTLStyles.mix(c.land, "#ffffff", 0.5),
-    });
+  // Fond par défaut : le thème Satellite (photo aérienne, sans voile), sinon Papier
+  if (LAYERS.some(l => l.key === "satellite")) {
+    const p = PRESETS.satellite;
+    Object.assign(DEFAULTS, { ...p, mute: 0, borderColor: p.ink, cityColor: p.ink });
   }
 
   // --- Données ------------------------------------------------------------
@@ -1576,6 +1572,12 @@
       ? `${esri.join(" et ").replace(/^./, c => c.toUpperCase())} : imagerie Esri, pour un usage personnel uniquement. Pour une affiche vendue, choisis « Satellite libre » (Sentinel-2, EOX) sans relief.`
       : "";
     refreshOrientHint(sel, auto);
+    // Thème en cours : celui dont le fond et les couleurs sont ceux de l'affiche
+    document.querySelectorAll("[data-preset]").forEach(b => {
+      const p = PRESETS[b.dataset.preset];
+      const on = !!p && p.bg === state.bg && p.color === state.color && p.ink === state.ink && (p.base || "") === (state.base || "");
+      b.setAttribute("aria-pressed", on);
+    });
     document.querySelectorAll("[data-family].chip").forEach(c => c.setAttribute("aria-pressed", !state.hidden.includes(c.dataset.family)));
     yearBox.querySelectorAll("[data-year]").forEach(b => {
       const y = b.dataset.year;
