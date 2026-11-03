@@ -185,14 +185,30 @@
       ours.forEach(d => { const b = control._el.querySelector(`[data-base="${d.key}"]`); if (b) b.disabled = true; });
       if (raster) setBase(raster.key, false);
     }
+    // Fond vectoriel en panne (WebGL, serveur de tuiles) : on bascule sur le fond en images.
+    // « Vivant » dès que la source principale répond (description ou première tuile) : sur téléphone,
+    // au premier chargement, toutes les tuiles (carte, relief, courbes) peuvent mettre bien plus de 12 s,
+    // et attendre qu'elles soient toutes là faisait basculer à tort (carte vide jusqu'à la visite suivante).
     function watchVector(layer, key) {
-      const check = () => {
-        if (tiles !== layer) return;
-        if (document.visibilityState !== "visible") return setTimeout(check, 4000);  // onglet caché : on attend
-        const m = layer.getMaplibreMap && layer.getMaplibreMap();
-        if (!m || !m.isStyleLoaded()) { console.error("Fond vectoriel non chargé :", key); fallback(key); }
+      const m = layer.getMaplibreMap && layer.getMaplibreMap();
+      if (!m) return fallback(key);
+      let alive = false, waited = 0;
+      const giveUp = () => {
+        if (tiles !== layer || alive) return;
+        console.error("Fond vectoriel non chargé :", key);
+        fallback(key);
       };
-      setTimeout(check, 12000);
+      m.on("sourcedata", e => { if (e.sourceId === "omt" && (e.sourceDataType === "metadata" || e.tile)) alive = true; });
+      m.once("idle", () => { alive = true; });
+      // Le serveur de la carte refuse ou ne répond pas : inutile d'attendre
+      m.on("error", e => { if (!alive && e && e.sourceId === "omt") setTimeout(giveUp, 3000); });
+      const check = () => {
+        if (tiles !== layer || alive) return;
+        if (document.visibilityState === "visible") waited += 5;  // onglet caché : on attend
+        if (waited >= 30) return giveUp();
+        setTimeout(check, 5000);
+      };
+      setTimeout(check, 5000);
     }
 
     // Style vectoriel : relief et noms font partie du style, que l'on redessine
