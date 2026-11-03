@@ -24,6 +24,7 @@ urlpatterns = [
     path("strava/callback/", views.strava_callback, name="strava_callback"),
     path("strava/logout/", views.strava_logout, name="logout"),
     path("strava/disconnect/", views.strava_disconnect, name="disconnect"),
+    path("strava/webhook/", views.strava_webhook, name="strava_webhook"),
     path("importer/", views.import_files, name="import"),
     path("activites/", views.activity_list, name="list"),
     path("activites/synchroniser/", views.activity_sync, name="sync"),

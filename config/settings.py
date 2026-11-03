@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -44,6 +45,16 @@ STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 STRAVA_REDIRECT_URI = os.environ.get("STRAVA_REDIRECT_URI") or (
     f"https://{PUBLIC_HOST}/strava/callback/" if PUBLIC_HOST else "http://localhost:8000/strava/callback/"
+)
+
+# Webhooks Strava (activities/webhooks.py) : jeton vérifié à la création de l'abonnement,
+# et numéro d'abonnement attendu dans chaque événement (facultatif, conseillé)
+STRAVA_WEBHOOK_VERIFY_TOKEN = os.environ.get("STRAVA_WEBHOOK_VERIFY_TOKEN") or (
+    hashlib.sha256(f"strava-webhook:{SECRET_KEY}".encode()).hexdigest()[:32]
+)
+STRAVA_WEBHOOK_SUBSCRIPTION_ID = os.environ.get("STRAVA_WEBHOOK_SUBSCRIPTION_ID", "")
+STRAVA_WEBHOOK_URL = os.environ.get("STRAVA_WEBHOOK_URL") or (
+    f"https://{PUBLIC_HOST}/strava/webhook/" if PUBLIC_HOST else ""
 )
 
 # En production (DEBUG=False), derrière le proxy HTTPS de l'hébergeur

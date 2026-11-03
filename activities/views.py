@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import timedelta
 
@@ -10,9 +11,10 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import formats, timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods, require_POST
 
-from . import book, geo, journeys, places, polyline, sports, strava
+from . import book, geo, journeys, places, polyline, sports, strava, webhooks
 from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, Poster, StravaAccount
 from .sync import ensure_photos, sync_activities, sync_photos
 
@@ -120,6 +122,29 @@ def strava_disconnect(request):
     else:
         messages.info(request, "Ton compte Strava a été déconnecté du site.")
     return redirect("activities:home")
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def strava_webhook(request):
+    """Webhooks Strava (activities/webhooks.py).
+
+    GET : Strava vérifie l'adresse à la création de l'abonnement (jeton + challenge à renvoyer).
+    POST : un événement ; réponse immédiate (Strava attend moins de 2 s), traitement juste après.
+    """
+    if request.method == "GET":
+        if (request.GET.get("hub.mode") != "subscribe"
+                or not secrets.compare_digest(request.GET.get("hub.verify_token", ""), settings.STRAVA_WEBHOOK_VERIFY_TOKEN)):
+            return JsonResponse({"error": "jeton invalide"}, status=403)
+        return JsonResponse({"hub.challenge": request.GET.get("hub.challenge", "")})
+    try:
+        payload = json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "JSON invalide"}, status=400)
+    event = webhooks.record(payload) if isinstance(payload, dict) else None
+    if event is not None:
+        webhooks.dispatch(event)
+    return JsonResponse({"ok": True})
 
 
 # ---------- Import de fichiers (GPX, FIT, TCX, ZIP) ----------

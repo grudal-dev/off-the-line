@@ -16,3 +16,13 @@ class ActivityAdmin(admin.ModelAdmin):
     list_filter = ("sport_type",)
     search_fields = ("name", "strava_id")
     exclude = ("raw",)
+
+
+from .models import WebhookEvent  # noqa: E402
+
+
+@admin.register(WebhookEvent)
+class WebhookEventAdmin(admin.ModelAdmin):
+    list_display = ("received_at", "object_type", "aspect_type", "object_id", "owner_id", "processed_at", "attempts", "error")
+    list_filter = ("object_type", "aspect_type")
+    readonly_fields = [f.name for f in WebhookEvent._meta.fields]

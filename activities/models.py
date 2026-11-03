@@ -247,3 +247,29 @@ class Poster(models.Model):
 
     def __str__(self):
         return self.title or f"Affiche {self.pk}"
+
+
+class WebhookEvent(models.Model):
+    """Événement reçu de Strava (webhooks) : enregistré tout de suite, traité juste après.
+
+    Strava attend une réponse en moins de 2 secondes ; l'import d'une activité passe par l'API,
+    il est donc fait en arrière-plan. Un événement non traité (quota Strava, erreur) est repris par
+    `python manage.py strava_webhook process`.
+    """
+
+    received_at = models.DateTimeField(auto_now_add=True)
+    object_type = models.CharField(max_length=20)   # activity, athlete
+    aspect_type = models.CharField(max_length=20)   # create, update, delete
+    object_id = models.BigIntegerField()
+    owner_id = models.BigIntegerField()
+    payload = models.JSONField(default=dict)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["received_at"]
+        indexes = [models.Index(fields=["processed_at"])]
+
+    def __str__(self):
+        return f"{self.object_type} {self.aspect_type} {self.object_id} (athlète {self.owner_id})"

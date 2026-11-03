@@ -45,6 +45,29 @@ détails (profil, villes, frontières, cadre) puis un résumé. « Tous les rég
 préparées (thème, cadre, marque) celle qui convient le mieux aux sorties (saison, relief, nombre
 d'étapes), puis règle le sens, le profil et les villes ; chaque clic propose une autre combinaison.
 
+### Webhooks Strava
+
+Strava prévient le site à l'adresse `/strava/webhook/` (`activities/webhooks.py`) :
+
+- **accès révoqué** depuis Strava : toutes les données de l'athlète sont supprimées (comme « Déconnecter Strava ») ;
+- **activité supprimée** : retirée du site ; **renommée** ou changée de sport : mise à jour ;
+- **nouvelle activité** : importée en arrière-plan (Strava attend une réponse en moins de 2 secondes).
+
+Chaque événement est enregistré (`WebhookEvent`, visible dans l'admin). En cas de quota Strava ou d'erreur, il
+reste en attente et est repris au prochain événement réussi, ou avec `python manage.py strava_webhook process`.
+
+Mise en place, une fois le site en ligne (un seul abonnement par application Strava) :
+
+```bash
+python manage.py strava_webhook subscribe          # adresse déduite de l'hébergeur, sinon --url https://…/strava/webhook/
+python manage.py strava_webhook show               # abonnement en cours et événements en attente
+python manage.py strava_webhook unsubscribe <id>
+```
+
+Strava vérifie l'adresse avec un jeton (`STRAVA_WEBHOOK_VERIFY_TOKEN`, déduit de `DJANGO_SECRET_KEY` s'il n'est pas
+défini). Ajoute ensuite `STRAVA_WEBHOOK_SUBSCRIPTION_ID` (affiché par `subscribe`) pour refuser les événements d'un
+autre abonnement.
+
 ### Chargement en arrière-plan
 
 Les pages s'affichent sans attendre Strava ni le géocodage. Ce qui manque (photos d'une activité ou d'un
