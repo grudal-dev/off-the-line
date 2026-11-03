@@ -895,6 +895,15 @@ class PosterTests(LoggedInTestCase):
         self.assertEqual(routes[0]["elev"], 150)
         self.assertEqual(response.context["initial"], {})
 
+    def test_steps_then_free_mode(self):
+        response = self.client.get(reverse("activities:poster"))
+        self.assertContains(response, 'data-mode="steps"')
+        for step in ("sorties", "format", "style", "textes", "details", "recap"):
+            self.assertContains(response, f'data-step="{step}"')
+            self.assertContains(response, f'data-goto="{step}"')
+        for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps"):
+            self.assertContains(response, f'id="{button}"')
+
     def test_landmark_options_and_data(self):
         from django.contrib.staticfiles import finders
         response = self.client.get(reverse("activities:poster"))

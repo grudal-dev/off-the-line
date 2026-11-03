@@ -1467,13 +1467,15 @@
     hidden.has(chip.dataset.family) ? hidden.delete(chip.dataset.family) : hidden.add(chip.dataset.family);
     set({ hidden: [...hidden] }, true);
   }));
-  document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
-    const p = { ...PRESETS[b.dataset.preset] };
+  /** Réglages d'un thème, avec un fond uni si son fond de carte n'est pas disponible ici. */
+  function presetChanges(key) {
+    const p = { ...PRESETS[key] };
     p.borderColor = p.cityColor = p.ink;
     if (p.base && (!LAYERS.some(l => l.key === p.base) || (isVector(p.base) === false && LAYERS.find(l => l.key === p.base).vector))) p.base = "";
     if (isVector(p.base)) Object.assign(p, { vColors: {}, vRelief: null, vContours: null });
-    set(p);
-  }));
+    return p;
+  }
+  document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => set(presetChanges(b.dataset.preset))));
   document.getElementById("reset-btn").addEventListener("click", () => {
     const keep = ["source", "journey", "activity", "selection", "from", "to", "hidden", "q"];
     state = { ...DEFAULTS, ...Object.fromEntries(keep.map(k => [k, state[k]])) };
@@ -1512,7 +1514,8 @@
 
   // Conseil d'orientation : un tracé large remplit mal une affiche en hauteur (et inversement)
   const orientHint = document.getElementById("orient-hint");
-  function refreshOrientHint(sel, auto) {
+  /** Sens qui remplit le mieux l'affiche (null si les deux se valent ou si la carte est tournée). */
+  function betterOrientation(sel, auto) {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const r of sel.routes) for (let i = 0; i < r.pts.length; i += 2) {
       const x = r.pts[i], y = r.pts[i + 1];
@@ -1529,8 +1532,13 @@
       const ratio = m.w / m.h;
       return Math.min(shape / ratio, ratio / shape);
     };
+    if (!isFinite(shape) || !sel.routes.length || state.rotation !== 0) return null;
+    const p = fill("portrait"), l = fill("landscape");
+    return l > p * 1.25 ? "landscape" : p > l * 1.25 ? "portrait" : null;
+  }
+  function refreshOrientHint(sel, auto) {
     const other = state.orientation === "portrait" ? "landscape" : "portrait";
-    const better = isFinite(shape) && sel.routes.length && state.rotation === 0 && fill(other) > fill(state.orientation) * 1.25;
+    const better = betterOrientation(sel, auto) === other;
     orientHint.hidden = !better;
     if (!better) return;
     orientHint.querySelector("span").textContent = "Ce tracé remplirait mieux l'affiche";
@@ -1608,6 +1616,7 @@
     form.querySelector("[data-for-cities]").hidden = !state.cities;
     form.querySelector("[data-for-labels]").hidden = !(state.cities || (state.hl && state.hlLabels && state.source === "all"));
     refreshTrips(sel);
+    refreshSteps(sel, auto);
     const km = sel.routes.reduce((a, r) => a + r.km, 0);
     document.getElementById("poster-summary").textContent = sel.routes.length
       ? `${nf.format(sel.routes.length)} tracé${sel.routes.length > 1 ? "s" : ""}, ${nf.format(km)} km`
@@ -1617,6 +1626,163 @@
       `${nf.format(w)} × ${nf.format(h)} pixels (${nf1.format(w * h / 1e6)} mégapixels)` +
       (w * h > 16.7e6 ? ". Sur iPhone ou iPad, choisis une résolution plus basse." : "");
   }
+
+
+  // --- Parcours par étapes ----------------------------------------------------
+  // Une étape à la fois (les sorties d'abord, comme avant), l'aperçu suit chaque choix.
+  // « Tous les réglages » ouvre le mode libre : le formulaire complet.
+  const MODE_STORE = "otl-poster-mode";
+  const stepBar = document.getElementById("wizard-steps");
+  const STEPS = [...stepBar.querySelectorAll("[data-goto]")].map(b => b.dataset.goto);
+  const LABELS = {
+    paper: "Papier", night: "Nuit", snow: "Encre", ocean: "Océan", forest: "Forêt", satellite: "Satellite",
+    carnet: "Carnet", alpin: "Alpin", cyanotype: "Cyanotype",
+  };
+  const FRAMES = { none: "sans cadre", line: "filet fin", double: "double filet", bold: "cadre épais", mat: "passe-partout" };
+  const FORMAT_LABELS = { "30x40": "30 × 40 cm", "40x50": "40 × 50 cm", "50x70": "50 × 70 cm", "30x30": "carré 30 × 30 cm" };
+  let mode = "steps";
+  try { if (localStorage.getItem(MODE_STORE) === "free") mode = "free"; } catch (e) { /* stockage indisponible */ }
+  // Affiche déjà composée : on arrive sur le résumé ; sorties déjà choisies (périple, activité) : au format
+  const composed = CREATION && Object.keys(CREATION.settings || {}).length > 3;
+  let step = composed ? "recap" : (CREATION || INITIAL.source) ? "format" : STEPS[0];
+  if (!STEPS.includes(step)) step = STEPS[0];
+
+  function goTo(name, free) {
+    if (free !== undefined) {
+      mode = free ? "free" : "steps";
+      try { localStorage.setItem(MODE_STORE, mode); } catch (e) { /* stockage indisponible */ }
+    }
+    if (name) step = name;
+    form.dataset.mode = mode;
+    form.scrollTop = 0;
+    // Sur téléphone, le panneau est sous l'aperçu : on remonte au début de l'étape si elle est hors de vue
+    if (stepBar.getBoundingClientRect().top < 0) stepBar.scrollIntoView({ block: "start", behavior: "smooth" });
+    redraw();
+  }
+  stepBar.addEventListener("click", e => { const b = e.target.closest("[data-goto]"); if (b) goTo(b.dataset.goto); });
+  document.getElementById("wizard-recap").addEventListener("click", e => { const b = e.target.closest("[data-goto]"); if (b) goTo(b.dataset.goto); });
+  document.getElementById("step-prev").addEventListener("click", () => goTo(STEPS[Math.max(0, STEPS.indexOf(step) - 1)]));
+  document.getElementById("step-next").addEventListener("click", () => goTo(STEPS[Math.min(STEPS.length - 1, STEPS.indexOf(step) + 1)]));
+  document.getElementById("to-free").addEventListener("click", () => goTo(null, true));
+  document.getElementById("to-steps").addEventListener("click", () => goTo("recap", false));
+
+  form.querySelectorAll("[data-pick-orientation]").forEach(b => b.addEventListener("click", () => set({ orientation: b.dataset.pickOrientation }, true)));
+  form.querySelectorAll("[data-pick-format]").forEach(b => b.addEventListener("click", () => set({ format: b.dataset.pickFormat }, true)));
+  form.querySelectorAll("[data-pick-frame]").forEach(b => b.addEventListener("click", () => set({ frame: b.dataset.pickFrame }, true)));
+  const bordersOn = () => state.countries || state.regions || state.coast;
+  form.querySelectorAll("[data-toggle]").forEach(b => b.addEventListener("click", () => {
+    const key = b.dataset.toggle;
+    if (key === "borders") { const on = !bordersOn(); return set({ countries: on, regions: on, coast: on }); }
+    set({ [key]: !state[key] }, key === "profile");
+  }));
+
+  function presetName() {
+    const key = Object.keys(PRESETS).find(k => { const p = PRESETS[k]; return p.bg === state.bg && p.color === state.color && (p.base || "") === (state.base || ""); });
+    return key ? LABELS[key] : "personnalisé";
+  }
+  function refreshSteps(sel, auto) {
+    form.dataset.mode = mode;
+    const at = STEPS.indexOf(step);
+    form.querySelectorAll("[data-step]").forEach(el => el.classList.toggle("on", el.dataset.step === step));
+    stepBar.querySelectorAll("[data-goto]").forEach((b, i) => {
+      if (b.dataset.goto === step) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
+      b.classList.toggle("done", i < at);
+    });
+    const recap = mode === "steps" && step === "recap";
+    document.getElementById("step-prev").disabled = at === 0;
+    document.getElementById("step-next").hidden = recap;
+    exportBtn.hidden = mode === "steps" && !recap;
+    document.getElementById("reset-btn").hidden = mode === "steps" && !recap;
+    document.getElementById("surprise-btn").textContent = surprised ? "Une autre idée" : "Surprends-moi";
+
+    const best = betterOrientation(sel, auto);
+    const press = (attr, value) => form.querySelectorAll(`[data-${attr}]`).forEach(b => {
+      b.setAttribute("aria-pressed", b.getAttribute(`data-${attr}`) === value);
+    });
+    press("pick-orientation", state.orientation);
+    press("pick-format", state.format);
+    press("pick-frame", state.frame);
+    form.querySelectorAll("[data-pick-orientation]").forEach(b => { b.querySelector(".badge").hidden = b.dataset.pickOrientation !== best; });
+    form.querySelectorAll("[data-toggle]").forEach(b => {
+      const key = b.dataset.toggle;
+      b.setAttribute("aria-pressed", key === "borders" ? bordersOn() : !!state[key]);
+      if (b.hasAttribute("data-not-all")) b.hidden = state.source === "all";
+    });
+    if (!recap) return;
+
+    const title = state.textPos === "none" ? "" : text("title", auto);
+    const extras = [
+      state.profile && state.source !== "all" && "profil d'altitude", state.cities && "villes", bordersOn() && "frontières",
+      state.endpoints && state.source !== "all" && "départ et arrivée", FRAMES[state.frame],
+    ].filter(Boolean);
+    const km = sel.routes.reduce((a, r) => a + r.km, 0);
+    const rows = [
+      STEPS.includes("sorties") && ["sorties", "Sorties", sel.routes.length ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km` : "aucun tracé"],
+      ["format", "Format", `${FORMAT_LABELS[state.format] || state.format}, ${state.orientation === "landscape" ? "paysage" : "portrait"}`],
+      ["style", "Style", presetName()],
+      ["textes", "Textes", title ? `« ${title} »` : "sans texte"],
+      ["details", "Détails", extras.join(", ").replace(/^./, c => c.toUpperCase())],
+    ].filter(Boolean);
+    document.getElementById("wizard-recap").innerHTML = rows.map(([key, label, value]) => `
+      <div><dt>${label}</dt><dd>${escapeHtml(value)}</dd><dd><button type="button" class="link-button" data-goto="${key}">Modifier</button></dd></div>`).join("");
+  }
+
+  // --- Surprends-moi ------------------------------------------------------------
+  // Pas de réglages tirés au hasard un par un : des combinaisons préparées qui vont bien ensemble,
+  // choisies selon les sorties (saison, relief, nombre d'étapes), puis adaptées (sens, profil, villes).
+  const COMBOS = [
+    { key: "paper-line", preset: "paper", frame: "line", brand: "escape", tags: ["any", "flat"] },
+    { key: "paper-mat", preset: "paper", frame: "mat", brand: "signature", mode: "time", tags: ["any", "multi"] },
+    { key: "night", preset: "night", frame: "none", brand: "stamp", mode: "time", tags: ["summer", "flat", "multi"] },
+    { key: "snow-double", preset: "snow", frame: "double", brand: "gap", tags: ["winter", "mountain"] },
+    { key: "ocean-mat", preset: "ocean", frame: "mat", brand: "signature", tags: ["summer", "flat"] },
+    { key: "forest-line", preset: "forest", frame: "line", brand: "escape", tags: ["mid", "flat"] },
+    { key: "satellite", preset: "satellite", frame: "none", brand: "stamp", tags: ["mountain", "summer"] },
+    { key: "carnet-mat", preset: "carnet", frame: "mat", brand: "signature", tags: ["any", "multi", "mid"] },
+    { key: "alpin-line", preset: "alpin", frame: "line", brand: "escape", tags: ["mountain", "winter"] },
+    { key: "cyanotype", preset: "cyanotype", frame: "bold", brand: "gap", tags: ["winter", "mid"] },
+  ];
+  let surprised = null;
+  const seen = new Set();  // combinaisons déjà proposées : toutes passent avant de revenir à la première
+  function available(combo) {
+    const p = PRESETS[combo.preset];
+    if (!p || !p.base) return true;
+    const layer = LAYERS.find(l => l.key === p.base);
+    return !!layer && (!layer.vector || VECTOR);
+  }
+  function surprise() {
+    const sel = selection(), rs = sel.routes;
+    if (!rs.length) return;
+    const km = rs.reduce((a, r) => a + r.km, 0), elev = rs.reduce((a, r) => a + r.elev, 0);
+    const month = +rs[Math.floor(rs.length / 2)].day.slice(5, 7);  // sortie du milieu
+    const season = [12, 1, 2].includes(month) ? "winter" : [6, 7, 8].includes(month) ? "summer" : "mid";
+    const mountain = km > 0 && elev / km > 15;
+    const tags = new Set(["any", season, mountain ? "mountain" : "flat", rs.length > 1 ? "multi" : "single"]);
+    let pool = COMBOS.filter(c => available(c) && !seen.has(c.key));
+    if (!pool.length) { seen.clear(); pool = COMBOS.filter(c => available(c) && c.key !== surprised); }
+    const scored = pool
+      .map(c => ({ c, score: c.tags.filter(t => tags.has(t)).length + Math.random() * 1.5 }))
+      .sort((a, b) => b.score - a.score);
+    if (!scored.length) return;
+    const combo = scored[0].c;
+    surprised = combo.key;
+    seen.add(combo.key);
+    const auto = autoTexts(sel);
+    const stages = state.source === "journey" || state.source === "selection";
+    set({
+      ...presetChanges(combo.preset),
+      frame: combo.frame, brand: combo.brand,
+      mode: rs.length > 1 && combo.mode ? combo.mode : "single",
+      orientation: betterOrientation(sel, auto) || state.orientation,
+      textPos: "bottom", title: "", subtitle: "", stats: "",
+      profile: state.source !== "all" && elev > 150,
+      cities: stages && rs.length >= 3, cityMode: "stops",
+      endpoints: state.source === "activity",
+      rotation: 0,
+    }, true);
+    if (mode === "steps") goTo("recap");
+  }
+  document.getElementById("surprise-btn").addEventListener("click", surprise);
 
   // --- Export ---------------------------------------------------------------
   function exportSize() {

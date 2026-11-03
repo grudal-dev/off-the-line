@@ -37,6 +37,14 @@ pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses
 un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
 et `strava_*.json` est ignoré par git.
 
+### Affiche : personnalisation par étapes
+
+L'affiche se compose en six étapes, l'aperçu suivant chaque choix : sorties, format, style, textes,
+détails (profil, villes, frontières, cadre) puis un résumé. « Tous les réglages » ouvre le mode libre
+(le formulaire complet), mémorisé dans le navigateur. « Surprends-moi » choisit parmi des combinaisons
+préparées (thème, cadre, marque) celle qui convient le mieux aux sorties (saison, relief, nombre
+d'étapes), puis règle le sens, le profil et les villes ; chaque clic propose une autre combinaison.
+
 ### Chargement en arrière-plan
 
 Les pages s'affichent sans attendre Strava ni le géocodage. Ce qui manque (photos d'une activité ou d'un

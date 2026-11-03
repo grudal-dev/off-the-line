@@ -17,10 +17,22 @@
         {% endif %}
         <p class="poster-summary" id="poster-summary" aria-live="polite"></p>
       </div>
-      <form class="poster-form" id="poster-form" autocomplete="off" onsubmit="return false">{% csrf_token %}
+      <form class="poster-form" id="poster-form" data-mode="steps" autocomplete="off" onsubmit="return false">{% csrf_token %}
 
-        <fieldset {% if creation %}hidden{% endif %}>
-          <legend>Source</legend>
+        <ol class="wizard-steps steps-only" id="wizard-steps" aria-label="Étapes">
+          {% if not creation %}<li><button type="button" data-goto="sorties">Sorties</button></li>{% endif %}
+          <li><button type="button" data-goto="format">Format</button></li>
+          <li><button type="button" data-goto="style">Style</button></li>
+          <li><button type="button" data-goto="textes">Textes</button></li>
+          <li><button type="button" data-goto="details">Détails</button></li>
+          <li><button type="button" data-goto="recap">Résumé</button></li>
+        </ol>
+        <p class="free-only free-head">
+          <button type="button" class="link-button" id="to-steps">Revenir aux étapes</button>
+        </p>
+
+        <fieldset data-step="sorties" {% if creation %}hidden{% endif %}>
+          <legend>Sorties</legend>
           <div class="view-switch" role="group" aria-label="Source">
             <button type="button" data-source="all">Mes sorties</button>
             <button type="button" data-source="journey" {% if not journeys %}disabled title="Aucun périple"{% endif %}>Un périple</button>
@@ -63,9 +75,21 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-step="format">
           <legend>Format</legend>
-          <div class="poster-row">
+          <div class="steps-only choice-grid two" role="group" aria-label="Sens">
+            <button type="button" class="choice" data-pick-orientation="portrait"><span class="sheet portrait"></span>Portrait<small class="badge" hidden>Conseillé</small></button>
+            <button type="button" class="choice" data-pick-orientation="landscape"><span class="sheet landscape"></span>Paysage<small class="badge" hidden>Conseillé</small></button>
+          </div>
+          <div class="steps-only choice-grid" role="group" aria-label="Taille">
+            <button type="button" class="choice" data-pick-format="A4">A4<small>21 × 29,7 cm</small></button>
+            <button type="button" class="choice" data-pick-format="A3">A3<small>29,7 × 42 cm</small></button>
+            <button type="button" class="choice" data-pick-format="A2">A2<small>42 × 59,4 cm</small></button>
+            <button type="button" class="choice" data-pick-format="30x40">30 × 40<small>cm</small></button>
+            <button type="button" class="choice" data-pick-format="50x70">50 × 70<small>cm</small></button>
+            <button type="button" class="choice" data-pick-format="30x30">Carré<small>30 × 30 cm</small></button>
+          </div>
+          <div class="poster-row free-only">
             <label>Taille
               <select class="field" name="format">
                 <option value="A4">A4 (21 × 29,7 cm)</option>
@@ -85,12 +109,12 @@
               </select>
             </label>
           </div>
-          <p class="poster-hint" id="orient-hint" hidden>
+          <p class="poster-hint free-only" id="orient-hint" hidden>
             <span></span> <button type="button" class="link-button" id="orient-btn"></button>
           </p>
         </fieldset>
 
-        <fieldset>
+        <fieldset data-step="style">
           <legend>Style</legend>
           <div class="presets" role="group" aria-label="Thèmes">
             <button type="button" class="preset" data-preset="paper" style="--bg:#f4efe4;--fg:#c2410c">Papier</button>
@@ -105,13 +129,50 @@
           </div>
         </fieldset>
 
-        <fieldset>
-          <legend>Titre</legend>
-            <label class="sr-only" for="poster-title">Titre</label>
+        <fieldset data-step="textes">
+          <legend>Textes</legend>
+          <label>Position
+            <select class="field" name="textPos">
+              <option value="bottom">En bas</option>
+              <option value="top">En haut</option>
+              <option value="none">Aucun texte</option>
+            </select>
+          </label>
+          <div data-for-text>
+            <label for="poster-title">Titre</label>
             <input id="poster-title" class="field" type="text" name="title" maxlength="80" placeholder="Proposé d'après ta sélection">
+            <label>Sous-titre <input class="field" type="text" name="subtitle" maxlength="120"></label>
+            <label>Chiffres <input class="field" type="text" name="stats" maxlength="120"></label>
+            <label class="check free-only"><input type="checkbox" name="profile"> Profil d'altitude (sinon D+ de chaque étape)</label>
+            <p class="muted small-print">Laisse un champ vide pour le texte proposé ; un espace seul l'efface.</p>
+          </div>
         </fieldset>
 
-        <details class="more-settings">
+        <fieldset data-step="details" class="steps-only">
+          <legend>Détails</legend>
+          <div class="toggle-list" role="group" aria-label="Éléments de l'affiche">
+            <button type="button" class="toggle" data-toggle="profile" data-not-all>Profil d'altitude<small>Sous le titre, la montée et la descente</small></button>
+            <button type="button" class="toggle" data-toggle="cities">Noms de villes<small>Les villes-étapes ou les plus grandes</small></button>
+            <button type="button" class="toggle" data-toggle="borders">Frontières et côtes<small>Pays, régions et littoral</small></button>
+            <button type="button" class="toggle" data-toggle="endpoints" data-not-all>Départ et arrivée<small>Un point à chaque bout</small></button>
+          </div>
+          <p class="vector-label">Cadre</p>
+          <div class="choice-grid four" role="group" aria-label="Cadre">
+            <button type="button" class="choice" data-pick-frame="none"><span class="frame-icon none"></span>Sans</button>
+            <button type="button" class="choice" data-pick-frame="line"><span class="frame-icon line"></span>Filet</button>
+            <button type="button" class="choice" data-pick-frame="double"><span class="frame-icon double"></span>Double</button>
+            <button type="button" class="choice" data-pick-frame="mat"><span class="frame-icon mat"></span>Marge</button>
+          </div>
+        </fieldset>
+
+        <fieldset data-step="recap" class="steps-only">
+          <legend>Résumé</legend>
+          <dl class="recap" id="wizard-recap"></dl>
+          <p class="muted small-print">Tout se règle encore plus finement dans le mode libre.</p>
+          <button type="button" class="btn ghost" id="to-free">Tous les réglages</button>
+        </fieldset>
+
+        <details class="more-settings free-only" open>
           <summary>Plus de réglages</summary>
 
         <fieldset>
@@ -301,22 +362,6 @@
           <label class="colors" data-for-frame="mat">Couleur du passe-partout <input type="color" name="matColor"></label>
         </fieldset>
 
-        <fieldset>
-          <legend>Textes</legend>
-          <label>Position
-            <select class="field" name="textPos">
-              <option value="bottom">En bas</option>
-              <option value="top">En haut</option>
-              <option value="none">Aucun texte</option>
-            </select>
-          </label>
-          <div data-for-text>
-            <label>Sous-titre <input class="field" type="text" name="subtitle" maxlength="120"></label>
-            <label>Chiffres <input class="field" type="text" name="stats" maxlength="120"></label>
-            <label class="check"><input type="checkbox" name="profile"> Profil d'altitude (sinon D+ de chaque étape)</label>
-            <p class="muted small-print">Laisse un champ vide pour le texte proposé ; un espace seul l'efface (le titre se règle plus haut).</p>
-          </div>
-        </fieldset>
 
         <fieldset>
           <legend>Cadrage</legend>
@@ -347,6 +392,11 @@
         </details>
       </form>
       <div class="poster-export">
+        <div class="wizard-nav steps-only">
+          <button type="button" class="btn ghost" id="step-prev">Précédent</button>
+          <button type="button" class="btn" id="step-next">Suivant</button>
+          <button type="button" class="link-button" id="surprise-btn">Surprends-moi</button>
+        </div>
         <button type="button" class="btn big" id="export-btn">Télécharger l'image</button>
         <button type="button" class="link-button" id="reset-btn">Réinitialiser</button>
         <p class="muted small-print" id="export-status" aria-live="polite"></p>
