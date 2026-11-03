@@ -593,13 +593,17 @@
     zoneEmpty.hidden = !!inside.length;
     zoneSummary();
     zoneIntro.hidden = true; zoneResult.hidden = false;
+    // Zone tracée : on propose tout de suite l'affiche (Annuler pour décocher des sorties d'abord)
+    if (inside.length) setTimeout(createFromZone, 150);
   }
   zoneList.addEventListener("change", zoneSummary);
-  document.getElementById("zone-create").addEventListener("click", () => {
+  function createFromZone() {
     const ids = [...zoneList.querySelectorAll("input:checked")].map(i => Number(i.value));
+    if (!ids.length) return;
     if (ids.length === 1) openCreate({ activity: ids[0], name: byId.get(ids[0]).route.name });
     else openCreate({ ids, name: `${ids.length} sorties dans la zone` });
-  });
+  }
+  document.getElementById("zone-create").addEventListener("click", createFromZone);
   zoneForm.querySelectorAll("[data-zone-check]").forEach(b => b.addEventListener("click", () => {
     zoneList.querySelectorAll("input").forEach(i => { i.checked = b.dataset.zoneCheck === "1"; });
     zoneSummary();
