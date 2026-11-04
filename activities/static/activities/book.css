@@ -138,44 +138,31 @@ body.book {
 
 /* --- Mode édition (écran uniquement) ------------------------------------ */
 .edit-hint { color: var(--slate); }
-.book-layout-panel {
-  position: sticky; top: 3.4rem; z-index: 1999; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.1rem;
-  padding: .6rem 1.5rem; background: #fff7f2; border-bottom: 1px solid var(--contour-soft); font-size: var(--t-small);
-}
-.book-layout-panel label { display: flex; align-items: center; gap: .35rem; cursor: pointer; }
-.book-layout-panel input { accent-color: var(--route); }
-.book-layout-panel .sep { width: 1px; height: 1.2rem; background: var(--contour); }
 [contenteditable] { outline: 1.5px dashed transparent; outline-offset: 1.5mm; border-radius: 1mm; cursor: text; }
 [contenteditable]:hover { outline-color: var(--contour); }
 [contenteditable]:focus { outline: 2px solid var(--route); background: rgba(252, 76, 2, .04); }
 [contenteditable]:empty::before { content: attr(data-placeholder); color: var(--contour); font-style: italic; }
 
-/* Bac à photos et outils (édition) */
-body.book.editing { padding-right: 300px; }
-.tray {
-  position: fixed; top: 0; right: 0; bottom: 0; width: 300px; z-index: 2100; display: flex; flex-direction: column;
-  background: var(--sheet); border-left: 1px solid var(--contour-soft); font-size: var(--t-small);
-}
+/* Bac à photos (étape « Photos » du panneau) et outils sur les pages */
 .tray.drop-target { box-shadow: inset 0 0 0 3px var(--route); }
-.tray-head { padding: 1rem 1rem .5rem; border-bottom: 1px solid var(--contour-soft); }
-.tray-head h2 { font-size: var(--t-h3); margin: 0 0 .25rem; }
 .tray-target { margin: 0 0 .6rem; color: var(--slate); min-height: 2.6em; }
 .tray-filter { display: inline-flex; padding: 2px; background: var(--paper); border-radius: 7px; }
 .tray-filter button { border: 0; background: none; font: inherit; font-weight: 500; color: var(--slate); padding: .25rem .6rem; border-radius: 5px; cursor: pointer; }
 .tray-filter button[aria-pressed="true"] { background: var(--ink); color: #fff; }
-.tray-grid { list-style: none; margin: 0; padding: .75rem 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; overflow-y: auto; flex: 1; align-content: start; }
+.tray-grid { list-style: none; margin: 0; padding: .75rem 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: .6rem; align-content: start; }
 .tray-item { position: relative; cursor: grab; border-radius: 6px; overflow: hidden; background: var(--contour-soft); }
 .tray-item img { display: block; width: 100%; height: 92px; object-fit: contain; background: #e9ece8; }
 .tray-badge { display: block; padding: .2rem .35rem; font-size: .7rem; color: var(--slate); background: #fff; }
 .tray-actions { position: absolute; top: 4px; left: 4px; right: 4px; display: flex; justify-content: space-between; gap: 4px; opacity: 0; transition: opacity .15s; }
 .tray-item:hover .tray-actions, .tray-item:focus-within .tray-actions { opacity: 1; }
+@media (hover: none) { .tray-actions { opacity: 1; } }
 .tray-actions button { font: inherit; font-size: .7rem; font-weight: 600; border: 0; border-radius: 4px; padding: .15rem .4rem; cursor: pointer; background: rgba(28, 38, 41, .85); color: #fff; }
 .tray-actions button[data-act="add"] { background: var(--route); }
 .tray-empty { grid-column: 1 / -1; padding: 1.25rem .5rem; text-align: center; color: var(--slate); }
-.tray-drop { margin: 0 1rem .75rem; padding: .9rem; border: 2px dashed var(--contour); border-radius: 8px; text-align: center; cursor: pointer; display: grid; gap: .2rem; color: var(--slate); }
+.tray-drop { margin: 0 0 .75rem; padding: .9rem; border: 2px dashed var(--contour); border-radius: 8px; text-align: center; cursor: pointer; display: grid; gap: .2rem; color: var(--slate); }
 .tray-drop strong { color: var(--ink); }
 .tray-drop:hover { border-color: var(--route); }
-.tray-help { margin: 0 1rem 1rem; color: var(--slate); }
+.tray-help { margin: 0; color: var(--slate); }
 .tray-help summary { cursor: pointer; color: var(--water); }
 .tray-help ul { padding-left: 1.1rem; margin: .4rem 0 0; display: grid; gap: .3rem; }
 
@@ -206,10 +193,8 @@ body.dragging-photo .tray { box-shadow: inset 0 0 0 2px var(--contour); }
 }
 
 @media print {
-  body.book.editing { padding-right: 0; }
-  .tray, .toast, .ph-tools, .photo-drop { display: none !important; }
+  .toast, .ph-tools, .photo-drop { display: none !important; }
   .page.is-target, .page.drop-target { box-shadow: none !important; }
-  .book-layout-panel { display: none !important; }
   [contenteditable] { outline: none !important; background: none !important; }
   [contenteditable]:empty { display: none; }
 }
@@ -246,29 +231,107 @@ body.dragging-photo .tray { box-shadow: inset 0 0 0 2px var(--contour); }
 }
 .editing .stop-name.off { opacity: .45; text-decoration: line-through; cursor: pointer; }
 .link-btn { font: inherit; padding: 0; border: 0; background: none; color: var(--water); text-decoration: underline; cursor: pointer; }
-@media print { .stop-name.off { display: none; } }
+@media print { .stop-name.off { display: none !important; } }
 /* Lieux ajoutés à la main : point en losange pour les distinguer des étapes */
 .stop-dot.extra { border-radius: 1px; transform: translate(-50%, -50%) rotate(45deg); width: 8px; height: 8px; }
 
-/* Mode édition : ajouter un lieu sur une carte */
-.add-place-btn {
-  position: absolute; top: 3mm; right: 3mm; z-index: 1000; display: none;
-  font: 600 12px/1 var(--sans); padding: .45rem .7rem; border-radius: 999px; cursor: pointer;
-  border: 1px solid var(--contour); background: var(--sheet); color: var(--ink); box-shadow: 0 1px 4px rgba(28, 38, 41, .25);
+/* Ajouter un lieu : le nom tapé dans le panneau se pose en touchant une carte */
+body.is-placing .book-map { cursor: crosshair; outline: 2px dashed var(--route); outline-offset: 2px; }
+
+/* --- Pages réduites à la largeur de l'écran (book.html, fitPages) ---------- */
+body.book.scaled { overflow-x: clip; }
+body.book.scaled .page {
+  transform: scale(var(--page-scale, 1)); transform-origin: 0 0;
+  margin: 8px 0 calc(297mm * (var(--page-scale, 1) - 1) + 8px) calc((100% - 210mm * var(--page-scale, 1)) / 2);
 }
-.editing .book-map:hover .add-place-btn, .editing .book-map:focus-within .add-place-btn { display: block; }
-.place-add {
-  position: absolute; top: calc(3mm + 2.2rem); right: 3mm; z-index: 1001; width: 17rem;
-  padding: .6rem; border-radius: 10px; background: var(--sheet); box-shadow: 0 6px 24px rgba(28, 38, 41, .3);
-  font-size: 13px; cursor: auto;
+.book-toolbar { padding-inline: clamp(.75rem, 3vw, 1.5rem); gap: .6rem 1.2rem; }
+
+/* --- Personnalisation étape par étape (book_studio.html) ----------------- */
+.studio {
+  position: fixed; z-index: 2100; display: flex; flex-direction: column;
+  background: var(--sheet); font-size: var(--t-small); color: var(--ink);
+  top: 0; right: 0; bottom: 0; width: 340px; border-left: 1px solid var(--contour-soft);
 }
-.place-add input { width: 100%; font: inherit; padding: .45rem .55rem; border: 1px solid var(--contour); border-radius: 6px; }
-.place-add ul { list-style: none; margin: .35rem 0 0; padding: 0; }
-.place-add li button {
-  display: flex; justify-content: space-between; gap: .5rem; width: 100%; padding: .4rem .5rem;
-  font: inherit; text-align: left; border: 0; border-radius: 6px; background: none; color: var(--ink); cursor: pointer;
+body.book.editing { padding-right: 340px; }
+.studio-head { padding: .7rem 1rem .4rem; border-bottom: 1px solid var(--contour-soft); }
+.studio-top { display: flex; align-items: center; gap: .6rem; min-height: 1.6rem; }
+.studio-top > a { white-space: nowrap; }
+.studio-status { flex: 1; min-width: 0; text-align: right; font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.studio-status > span + span:not(:empty)::before { content: " · "; }
+.studio-status button { font-size: .75rem; padding: .15rem .5rem; }
+.studio-min { display: none; font-size: .8rem; }
+.studio .wizard-steps { margin-top: .5rem; }
+.studio-body { flex: 1; overflow-y: auto; padding: .9rem 1rem 1rem; overscroll-behavior: contain; }
+.studio-body section { display: grid; gap: .6rem; align-content: start; }
+.studio-body section[hidden] { display: none; }
+.studio-body h2 { font-size: var(--t-h3, 1.25rem); margin: 0; }
+.studio-body p { margin: 0; }
+.studio-label { margin-top: .4rem !important; font-weight: 600; }
+.studio-hint { font-size: .8rem; }
+.studio-field { display: grid; gap: .25rem; font-weight: 600; }
+.studio-input { width: 100%; box-sizing: border-box; font: inherit; font-weight: 400; padding: .5rem .6rem; border: 1px solid var(--contour); border-radius: 6px; background: #fff; }
+.studio .choice:disabled { opacity: .5; cursor: default; }
+.studio-nav { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .7rem 1rem; border-top: 1px solid var(--contour-soft); }
+.studio-nav .btn { flex: 1; justify-content: center; }
+.studio-nav .btn:disabled { opacity: .4; cursor: default; }
+.studio-nav [hidden] { display: none !important; }
+.studio-nav .link-button { flex-basis: 100%; text-align: center; font-size: .82rem; }
+
+/* Aperçu des fonds : terre, eau, routes */
+.map-swatch {
+  display: block; width: 2.6rem; height: 1.7rem; margin-bottom: .2rem; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+  background: linear-gradient(135deg, var(--a) 0 48%, var(--c) 48% 54%, var(--a) 54% 72%, var(--b) 72%);
 }
-.place-add li button:hover, .place-add li button:focus-visible { background: var(--paper); }
-.place-add p { margin: .4rem .1rem 0; font-size: 12px; line-height: 1.35; }
-.book-map.is-placing { cursor: crosshair; }
-@media print { .add-place-btn, .place-add { display: none !important; } }
+.map-swatch.photo { background: radial-gradient(circle at 30% 35%, #8a9a5b 0 22%, transparent 23%), linear-gradient(135deg, #4c6a3d 0 45%, #9c8a63 45% 62%, #2f4f63 62%); }
+.map-swatch.ign { filter: saturate(1.25) brightness(1.1); }
+.map-swatch.esri { filter: saturate(.8) brightness(.85); }
+
+/* Noms sur les cartes */
+.name-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.name-tag { display: inline-flex; align-items: center; border: 1px solid var(--contour-soft); border-radius: 999px; background: var(--paper); }
+.name-tag button { font: inherit; font-size: .8rem; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.name-tag .tag-label { padding: .25rem .2rem .25rem .65rem; }
+.name-tag .tag-x { display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; color: var(--slate); }
+.name-tag .tag-x:hover { background: var(--contour-soft); color: var(--ink); }
+.name-tag.extra { border-color: var(--route); }
+.name-tag.off { background: transparent; border-style: dashed; }
+.name-tag.off .tag-label { color: var(--slate); text-decoration: line-through; }
+.tag-input { font: inherit; font-size: .8rem; width: 9rem; padding: .2rem .5rem; margin: .1rem; border: 1px solid var(--route); border-radius: 999px; }
+
+/* Ce qu'on peut toucher sur les pages dépend de l'étape :
+   noms des cartes à l'étape « Noms », textes à « Couverture » et « Pages », photos à « Photos » */
+body.editing:not([data-step="noms"]) .stop-name { pointer-events: none !important; }
+body.editing:not([data-step="noms"]) .stop-name.off { display: none; }
+body.editing:not([data-step="couverture"]):not([data-step="pages"]) [data-edit] { pointer-events: none; }
+body.editing:not([data-step="photos"]) :is(.ph-tools, .photo-drop) { display: none !important; }
+body.editing:not([data-step="photos"]) .page[data-stage] { cursor: auto; }
+body.editing:not([data-step="photos"]) .page.is-target { box-shadow: 0 2px 12px rgba(28, 38, 41, .18); }
+@media (hover: none) { .ph-tools { opacity: 1; } }
+
+/* Téléphone et tablette étroite : le panneau devient un tiroir en bas de l'écran */
+@media (max-width: 899px) {
+  body.book.editing { padding-right: 0; padding-bottom: var(--studio-h, 45vh); }
+  .studio {
+    top: auto; left: 0; width: auto; max-height: 52vh; border-left: 0; border-top: 1px solid var(--contour-soft);
+    border-radius: 14px 14px 0 0; box-shadow: 0 -6px 24px rgba(28, 38, 41, .18);
+  }
+  .studio-min { display: inline; }
+  .studio.is-min .studio-body { display: none; }
+  .studio-head { padding: .5rem .8rem .2rem; }
+  .studio-body { padding: .7rem .8rem .8rem; }
+  .studio-nav { padding: .5rem .8rem calc(.5rem + env(safe-area-inset-bottom)); }
+  .studio-nav .link-button { flex-basis: auto; order: 3; }
+  .studio .wizard-steps button { font-size: .68rem; }
+  .studio .choice-grid { grid-template-columns: repeat(4, 1fr); }
+  .studio .choice-grid.two { grid-template-columns: 1fr 1fr; }
+  .studio .choice { font-size: .78rem; padding: .45rem .2rem; }
+  .studio .choice small { font-size: .65rem; }
+}
+
+@media print {
+  .studio, .toast { display: none !important; }
+  body.book.editing { padding: 0 !important; }
+  body.book.scaled .page { transform: none; margin: 0; }
+  body.is-placing .book-map { outline: none; }
+}
+.tray-filter { justify-self: start; }

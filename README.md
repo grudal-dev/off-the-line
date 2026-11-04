@@ -45,6 +45,15 @@ détails (profil, villes, frontières, cadre) puis un résumé. « Tous les rég
 préparées (thème, cadre, marque) celle qui convient le mieux aux sorties (saison, relief, nombre
 d'étapes), puis règle le sens, le profil et les villes ; chaque clic propose une autre combinaison.
 
+### Livre : personnalisation par étapes
+
+« Personnaliser » ouvre un panneau en cinq étapes (`book_studio.html`) : fond de carte, noms sur les cartes
+(villes-étapes, grandes villes, lieux ajoutés), couverture (carte ou photo, titre), pages, puis photos. Le
+panneau est à droite sur ordinateur et en tiroir en bas sur téléphone, où les pages A4 sont réduites à la
+largeur de l'écran (`fitPages`, transformation seulement : le PDF ne change pas). Chaque étape ne rend
+modifiable que ce qui la concerne (noms des cartes, textes ou photos), et l'étape en cours est gardée quand
+le livre se recharge.
+
 ### Webhooks Strava
 
 Strava prévient le site à l'adresse `/strava/webhook/` (`activities/webhooks.py`) :
