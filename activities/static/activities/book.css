@@ -215,3 +215,35 @@ body.dragging-photo .tray { box-shadow: inset 0 0 0 2px var(--contour); }
 }
 
 .transfer-row td { border-bottom-style: dashed; color: var(--ink); }
+
+/* Villes-étapes sur les cartes (book.html, mountStops) : capitales serrées et détourées, comme l'affiche.
+   Texte clair sur les photos et fonds sombres, foncé sur les fonds clairs (data-theme de la carte). */
+.book-map { --stop-ink: #fff; --stop-halo: rgba(12, 18, 20, .9); }
+.book-map[data-theme="light"] { --stop-ink: #2b2118; --stop-halo: rgba(255, 255, 255, .95); }
+.stop-name {
+  position: absolute; white-space: nowrap; pointer-events: none;
+  font: 700 12px/15px "Barlow Condensed", "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--stop-ink);
+  text-shadow:
+    -1.4px -1.4px 0 var(--stop-halo), 1.4px -1.4px 0 var(--stop-halo), -1.4px 1.4px 0 var(--stop-halo), 1.4px 1.4px 0 var(--stop-halo),
+    0 -1.5px 0 var(--stop-halo), 0 1.5px 0 var(--stop-halo), -1.5px 0 0 var(--stop-halo), 1.5px 0 0 var(--stop-halo),
+    0 0 5px var(--stop-halo);
+}
+.stop-name.end { font-size: 14px; line-height: 17px; }
+.stop-dot {
+  position: absolute; width: 9px; height: 9px; transform: translate(-50%, -50%); border-radius: 50%;
+  background: var(--stop-ink); border: 2px solid var(--stop-halo); box-sizing: border-box;
+}
+.stop-dot.end { width: 12px; height: 12px; }
+/* Grandes villes : mêmes couleurs que les villes-étapes, en plus discret */
+.book-map[data-theme="light"] :is(.city b, .country) { --halo: rgba(255, 255, 255, .95); color: #4a3626; }
+.book-map[data-theme="light"] .city i { border-color: #4a3626; background: #fff; box-shadow: 0 0 0 1.5px #fff; }
+/* Mode édition : cliquer un nom pour le renommer ; les noms masqués restent visibles, barrés */
+.editing .stop-name { pointer-events: auto; cursor: text; border-radius: 2px; }
+.editing .stop-name:hover { outline: 1.5px dashed var(--stop-ink); outline-offset: 2px; }
+.editing .stop-name[contenteditable="true"], .editing .stop-name[contenteditable="plaintext-only"] {
+  outline: 2px solid var(--route); outline-offset: 2px; background: var(--stop-halo);
+}
+.editing .stop-name.off { opacity: .45; text-decoration: line-through; cursor: pointer; }
+.link-btn { font: inherit; padding: 0; border: 0; background: none; color: var(--water); text-decoration: underline; cursor: pointer; }
+@media print { .stop-name.off { display: none; } }

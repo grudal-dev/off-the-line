@@ -699,6 +699,15 @@ def create(request):
 POSTER_PROFILE_POINTS = 40
 
 
+def _leg_places(leg):
+    """Départ et arrivée nommés d'une étape : [lat, lng, nom] (un seul point pour une boucle)."""
+    places = []
+    for (lat, lng), name in ((leg.start, leg.start_name), (leg.end, leg.end_name)):
+        if name and all(p[2] != name for p in places):
+            places.append([round(lat, 4), round(lng, 4), name])
+    return places
+
+
 def _stops(journey):
     """Lieux d'étape nommés (départ puis chaque arrivée) : [lat, lng, nom], sans doublon de nom."""
     points = [(journey.legs[0].start, journey.legs[0].start_name)] + [(leg.end, leg.end_name) for leg in journey.legs]
@@ -1002,11 +1011,16 @@ def book_detail(request, book_id):
         cover_photo = next(iter(pool.values()))
 
     maps = [{"id": f"j{c['journey'].id}", "stages": [{"coords": s["coords"], "color": s["color"]} for s in c["stages"]],
-             "transfers": [[t["from"], t["to"]] for t in c["journey"].transfer_list]}
+             "transfers": [[t["from"], t["to"]] for t in c["journey"].transfer_list],
+             "places": _stops(c["journey"])}
             for c in chapters]
-    maps += [{"id": f"s{s['id']}", "stages": [{"coords": s["coords"], "color": s["color"]}]}
-             for c in chapters for s in c["stages"]]
-    maps.append({"id": "cover", "stages": [st for m in maps[:len(chapters)] for st in m["stages"]]})
+    maps += [{"id": f"s{s['id']}", "stages": [{"coords": s["coords"], "color": s["color"]}], "places": _leg_places(leg)}
+             for c in chapters for s, leg in zip(c["stages"], c["journey"].legs)]
+    # Couverture : les villes-étapes d'un seul périple, sinon le départ et l'arrivée de chacun
+    cover_places = (maps[0]["places"] if len(chapters) == 1
+                    else [p for m in maps[:len(chapters)] for p in (m["places"][:1] + m["places"][-1:])])
+    maps.append({"id": "cover", "stages": [st for m in maps[:len(chapters)] for st in m["stages"]],
+                 "places": cover_places})
     # Pour l'édition : toutes les photos du livre, et la sélection de chaque étape
     stages_info = [{"id": s["id"], "n": s["n"], "label": s["label"], "chapter": ci, "photos": s["photo_keys"]}
                    for ci, c in enumerate(chapters) for s in c["stages"]]
@@ -1097,6 +1111,11 @@ def book_update(request, book_id):
             if key in value and isinstance(value[key], type(default)):
                 if key == "imagery" and value[key] not in Book.IMAGERY:
                     continue
+                if key == "cityHidden":
+                    value[key] = [str(n)[:80] for n in value[key] if isinstance(n, str) and n][:200]
+                if key == "cityNames":
+                    value[key] = {str(k)[:80]: v.strip()[:80] for k, v in list(value[key].items())[:200]
+                                  if isinstance(v, str) and v.strip() and v.strip() != k}
                 options[key] = value[key]
         book_obj.options = options
         book_obj.save()

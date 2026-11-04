@@ -30,7 +30,9 @@
     <label><input type="checkbox" data-option="roadbook" {% if opt.roadbook %}checked{% endif %}> Carnet de route</label>
     <label><input type="checkbox" data-option="profiles" {% if opt.profiles %}checked{% endif %}> Profils d'altitude</label>
     <label><input type="checkbox" data-option="back" {% if opt.back %}checked{% endif %}> Dos du livre</label>
-    <label><input type="checkbox" data-option="cities" {% if opt.cities %}checked{% endif %}> Villes sur les cartes</label>
+    <label title="Le nom de chaque lieu d'étape. Clique sur un nom, sur la carte, pour le renommer ; efface-le pour le masquer."><input type="checkbox" data-option="stops" {% if opt.stops %}checked{% endif %}> Villes-étapes</label>
+    <label><input type="checkbox" data-option="cities" {% if opt.cities %}checked{% endif %}> Grandes villes autour</label>
+    <span id="stops-hidden" class="muted" hidden><span></span> <button type="button" class="link-btn">Tout réafficher</button></span>
     <label>Imagerie des cartes
       <select data-option-select="imagery">
         <option value="satellite" {% if opt.imagery == "satellite" %}selected{% endif %}>Satellite Esri (usage personnel)</option>
@@ -333,9 +335,105 @@
     const vectorOk = SATELLITE.vector && window.OTLRender && window.maplibregl && maplibregl.supported?.() !== false;
     if (SATELLITE.vector && !vectorOk) SATELLITE = BASEMAP.layers.find(d => d.key === "eox");
     const instances = [];
+    // Texte des cartes clair sur les photos et fonds sombres, foncé sur les fonds clairs
+    const mapTheme = SATELLITE.theme === "light" ? "light" : "dark";
+
+    // ---------- Villes-étapes : le nom de chaque lieu d'étape, comme sur l'affiche ----------
+    const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const hit = (b, boxes) => boxes.some(o => b[0] < o[2] + 4 && b[2] > o[0] - 4 && b[1] < o[3] + 2 && b[3] > o[1] - 2);
+    // Départ et arrivée d'abord, puis le milieu, puis les quarts… : bien répartis s'il faut en laisser tomber
+    function spread(n) {
+      const out = n ? [0] : [];
+      if (n > 1) out.push(n - 1);
+      const queue = [[0, n - 1]];
+      while (queue.length) {
+        const [a, b] = queue.shift();
+        if (b - a < 2) continue;
+        const mid = (a + b) >> 1;
+        out.push(mid);
+        queue.push([a, mid], [mid, b]);
+      }
+      return out;
+    }
+    // Largeur réelle du nom (mêmes police, taille et espacement que .stop-name dans book.css)
+    const measure = document.createElement("canvas").getContext("2d");
+    function textWidth(label, end) {
+      const px = end ? 14 : 12;
+      measure.font = `700 ${px}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+      const t = label.toUpperCase();
+      return measure.measureText(t).width + t.length * px * 0.05;
+    }
+    // Police chargée après le premier placement : on replace les noms avec les vraies largeurs
+    document.fonts && document.fonts.ready.then(() => (window.bookStops || []).forEach(f => f()));
+    function mountStops(map, m, el) {
+      const places = m.places || [];
+      if (!places.length || BOOK.options.stops === false) return null;
+      map.createPane("stops").style.zIndex = 620;  // au-dessus du tracé et des pastilles
+      if (!BOOK.edit) map.getPane("stops").style.pointerEvents = "none";
+      const layer = L.layerGroup().addTo(map);
+      const pins = m.stages.length > 1 && m.id !== "cover";  // pastilles numérotées au départ de chaque étape
+      function render() {
+        layer.clearLayers();
+        const hidden = new Set(BOOK.options.cityHidden || []), names = BOOK.options.cityNames || {};
+        const size = map.getSize(), boxes = [], taken = new Set();
+        // Pastilles et ronds du tracé : à éviter, sauf celui du lieu qu'on nomme (le nom se pose contre)
+        const marks = (map.cityAvoid || []).map(ll => map.latLngToContainerPoint(ll));
+        for (const q of marks) boxes.push([q.x - 14, q.y - 14, q.x + 14, q.y + 14]);
+        // Couverture : rien sous l'encadré du titre
+        const block = el.parentElement.querySelector(".cover-text");
+        if (block && m.id === "cover") {
+          const r = block.getBoundingClientRect(), o = el.getBoundingClientRect();
+          boxes.push([r.left - o.left, r.top - o.top - 6, r.right - o.left, r.bottom - o.top]);
+        }
+        for (const i of spread(places.length)) {
+          const [lat, lng, name] = places[i];
+          const off = hidden.has(name);
+          if (off && !BOOK.edit) continue;
+          const label = names[name] || name;
+          const end = i === 0 || i === places.length - 1;
+          const p = map.latLngToContainerPoint([lat, lng]);
+          // À côté de la pastille d'étape (13 px de rayon), des ronds de départ et d'arrivée d'une
+          // carte d'étape, ou d'un petit point posé ici (couverture, arrivée du périple)
+          const single = m.stages.length === 1;
+          const dot = !single && (!pins || i === places.length - 1);
+          const gap = pins && !dot ? 17 : single ? 11 : 8;
+          const w = textWidth(label, end) + 6, h = end ? 17 : 15;
+          let spot = null;
+          for (const [x, y] of [[p.x + gap, p.y - h / 2], [p.x - gap - w, p.y - h / 2], [p.x - w / 2, p.y - gap - h], [p.x - w / 2, p.y + gap]]) {
+            const b = [x, y, x + w, y + h];
+            if (x < 4 || y < 4 || b[2] > size.x - 4 || b[3] > size.y - 4) continue;
+            if (hit(b, boxes.filter((o, k) => k >= marks.length || Math.hypot(marks[k].x - p.x, marks[k].y - p.y) > 20))) continue;
+            spot = b;
+            break;
+          }
+          if (!spot) continue;  // pas de place : on n'empile pas les noms
+          boxes.push(spot);
+          taken.add(name.toLowerCase());
+          taken.add(label.toLowerCase());
+          if (dot) {
+            boxes.push([p.x - 6, p.y - 6, p.x + 6, p.y + 6]);
+            L.marker([lat, lng], { pane: "stops", interactive: false, keyboard: false,
+              icon: L.divIcon({ className: "", html: `<i class="stop-dot${end ? " end" : ""}"></i>`, iconSize: [0, 0] }) }).addTo(layer);
+          }
+          const at = map.containerPointToLatLng([spot[0], spot[1]]);
+          const mk = L.marker(at, { pane: "stops", interactive: false, keyboard: false,
+            icon: L.divIcon({ className: "", iconSize: [0, 0], iconAnchor: [0, 0],
+              html: `<span class="stop-name${end ? " end" : ""}${off ? " off" : ""}" data-name="${esc(name)}"`
+                  + `${BOOK.edit ? ` title="${off ? "Clique pour réafficher" : "Clique pour renommer ; vide pour masquer"}"` : ""}>${esc(label)}</span>` }) });
+          mk.addTo(layer);
+        }
+        map.cityAvoidBoxes = boxes;
+        map.cityAvoidNames = taken;
+      }
+      render();
+      map.on("moveend zoomend resize", render);
+      return render;
+    }
+
     for (const m of maps) {
       const el = document.getElementById("map-" + m.id);
       if (!el) continue;
+      el.dataset.theme = mapTheme;
       const map = L.map(el, {
         zoomControl: false, attributionControl: true, dragging: false, scrollWheelZoom: false,
         doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, zoomSnap: 0.1,
@@ -362,13 +460,17 @@
       }
       map.fitBounds(group.getBounds(), { padding: m.id === "cover" ? [60, 60] : [28, 28] });
       if (m.id === "cover") map.panBy([0, 70], { animate: false });  // laisse la place au titre
-      // Quelques grandes villes pour se situer (moins sur les petites cartes d'étape)
+      map.cityAvoid = m.stages.length > 1 && m.id !== "cover"
+        ? m.stages.map(s => s.coords[0])
+        : m.stages.length === 1 ? [m.stages[0].coords[0], m.stages[0].coords[m.stages[0].coords.length - 1]] : [];
+      // Les villes-étapes d'abord (le sujet), puis quelques grandes villes pour se situer, autour
+      const stops = mountStops(map, m, el);
+      let cities = null;
       if (BOOK.options.cities !== false && window.mountCities) {
-        map.cityAvoid = m.stages.length > 1 && m.id !== "cover"
-          ? m.stages.map(s => s.coords[0])
-          : m.stages.length === 1 ? [m.stages[0].coords[0], m.stages[0].coords[m.stages[0].coords.length - 1]] : [];
-        window.mountCities(map, { max: m.id.startsWith("s") ? 6 : 10, extraZoom: 0.5 });
+        const few = m.id.startsWith("s") ? (stops ? 3 : 6) : (stops ? 6 : 10);
+        cities = window.mountCities(map, { max: few, extraZoom: 0.5 });
       }
+      (window.bookStops = window.bookStops || []).push(() => { stops && stops(); cities && cities.refresh(); });
       instances.push({ id: m.id, map, tiles: null });
       (window.bookMaps = window.bookMaps || {})[m.id] = { map, bounds: group.getBounds() };
     }
@@ -453,6 +555,61 @@
 
     bindTexts(document);
     window.bindTexts = bindTexts;
+
+    // ---------- Villes-étapes : renommer, masquer ou réafficher un nom, directement sur la carte ----------
+    // Le choix vaut pour tout le livre (même ville sur la carte du périple et sur celle de l'étape)
+    async function saveNames(hidden, names) {
+      const prev = { cityHidden: BOOK.options.cityHidden, cityNames: BOOK.options.cityNames };
+      Object.assign(BOOK.options, { cityHidden: [...hidden], cityNames: names });
+      (window.bookStops || []).forEach(f => f());
+      if (!await saveBook({ field: "options", value: { cityHidden: [...hidden], cityNames: names } })) {
+        Object.assign(BOOK.options, prev);
+        (window.bookStops || []).forEach(f => f());
+      }
+      updateHiddenNote();
+    }
+    const hiddenNote = document.getElementById("stops-hidden");
+    function updateHiddenNote() {
+      if (!hiddenNote) return;
+      const n = (BOOK.options.cityHidden || []).length;
+      hiddenNote.hidden = !n;
+      hiddenNote.querySelector("span").textContent = `${n} nom${n > 1 ? "s" : ""} masqué${n > 1 ? "s" : ""}`;
+    }
+    hiddenNote && hiddenNote.querySelector("button").addEventListener("click", () => saveNames([], BOOK.options.cityNames || {}));
+    updateHiddenNote();
+
+    document.addEventListener("click", e => {
+      const el = e.target.closest(".stop-name");
+      if (!el || el.isContentEditable) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const name = el.dataset.name;
+      const hidden = new Set(BOOK.options.cityHidden || []);
+      if (hidden.has(name)) { hidden.delete(name); saveNames(hidden, BOOK.options.cityNames || {}); return; }
+      const before = el.textContent;
+      try { el.contentEditable = "plaintext-only"; } catch (err) { el.contentEditable = "true"; }
+      if (el.contentEditable !== "plaintext-only") el.contentEditable = "true";
+      el.focus();
+      getSelection().selectAllChildren(el);
+      const done = cancel => {
+        el.removeEventListener("keydown", keys);
+        el.contentEditable = "false";
+        const value = el.textContent.trim();
+        if (cancel || value === before) { el.textContent = before; return; }
+        const names = { ...(BOOK.options.cityNames || {}) };
+        if (!value) { hidden.add(name); delete names[name]; }
+        else if (value === name) delete names[name];
+        else names[name] = value;
+        saveNames(hidden, names);
+      };
+      const keys = ev => {
+        if (ev.key === "Enter") { ev.preventDefault(); el.blur(); }
+        if (ev.key === "Escape") { ev.preventDefault(); el.removeEventListener("blur", blur); done(true); }
+      };
+      const blur = () => done(false);
+      el.addEventListener("keydown", keys);
+      el.addEventListener("blur", blur, { once: true });
+    }, true);
 
     // ---------- Photos : manipulation directe sur les pages ----------
     const MIME = "application/x-otl-photo";
