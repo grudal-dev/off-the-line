@@ -58,7 +58,8 @@
       const placed = (map.cityAvoid || []).map(ll => {
         const q = map.latLngToContainerPoint(ll);
         return [q.x - 15, q.y - 15, q.x + 15, q.y + 15];
-      });
+      }).concat(map.cityAvoidBoxes || []);  // étiquettes déjà posées par la page (villes-étapes du livre)
+      const taken = map.cityAvoidNames || null;  // noms déjà écrits ailleurs sur la carte
 
       const shownCountries = new Set();
       if (withCountries) {
@@ -84,6 +85,7 @@
         if (count >= max) break;
         if (minZoom > zoom + extra) break;  // triées par zoom minimum : les suivantes aussi
         if (!bounds.contains([lat, lng])) continue;
+        if (taken && taken.has(name.toLowerCase())) continue;
         const p = map.latLngToContainerPoint([lat, lng]);
         const big = capital || pop >= 1000;
         const w = name.length * (big ? 10 : 7.4) + 16, h = big ? 20 : 18;
@@ -139,6 +141,7 @@
     map.on("moveend zoomend resize", render);
     return {
       setEnabled(on) { enabled = on; render(); },
+      refresh: render,
     };
   };
 

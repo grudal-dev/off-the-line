@@ -1065,6 +1065,42 @@ class FreeImageryTests(LoggedInTestCase):
         self.assertIn("Etalab", layers["ign_ortho"]["options"]["attribution"])
         self.assertFalse(layers["ign_ortho"].get("personal"))
 
+    def test_book_stop_names_options(self):
+        from .models import Book
+        b = Book.objects.create(account=self.account, journey_ids=[1])
+        self.assertTrue(b.option("stops"))
+        url = reverse("activities:book_update", args=[b.pk])
+        r = self.client.post(url, {"field": "options", "value": {
+            "stops": False, "cityHidden": ["Faverges", 3, ""],
+            "cityNames": {"Annecy": "  Annecy-le-Vieux ", "Albertville": "Albertville", "Ugine": 5, "Moûtiers": " "},
+        }}, content_type="application/json")
+        self.assertTrue(r.json()["ok"])
+        b.refresh_from_db()
+        self.assertFalse(b.option("stops"))
+        self.assertEqual(b.option("cityHidden"), ["Faverges"])
+        self.assertEqual(b.option("cityNames"), {"Annecy": "Annecy-le-Vieux"})  # inchangés et vides ignorés
+
+    def test_book_extra_places_are_cleaned(self):
+        from .models import Book
+        b = Book.objects.create(account=self.account, journey_ids=[1])
+        url = reverse("activities:book_update", args=[b.pk])
+        self.client.post(url, {"field": "options", "value": {"cityExtra": [
+            [45.81234567, 6.2, " Col de la Forclaz "], ["x", 6, "Faux"], [95, 6, "Hors carte"],
+            [45.7, 6.3, "Col de la Forclaz"], [45.6, 6.1], [45.5, 6.0, ""],
+        ]}}, content_type="application/json")
+        b.refresh_from_db()
+        self.assertEqual(b.option("cityExtra"), [[45.8123, 6.2, "Col de la Forclaz"]])
+
+    def test_leg_places(self):
+        from types import SimpleNamespace
+        from .views import _leg_places
+        trip = SimpleNamespace(start=ANNECY, end=FAVERGES, start_name="Annecy", end_name="Faverges")
+        self.assertEqual([p[2] for p in _leg_places(trip)], ["Annecy", "Faverges"])
+        loop = SimpleNamespace(start=ANNECY, end=ANNECY, start_name="Annecy", end_name="Annecy")
+        self.assertEqual(len(_leg_places(loop)), 1)
+        unnamed = SimpleNamespace(start=ANNECY, end=FAVERGES, start_name=None, end_name="Faverges")
+        self.assertEqual(_leg_places(unnamed), [[45.748, 6.293, "Faverges"]])
+
     def test_book_imagery_option(self):
         from .models import Book
         b = Book.objects.create(account=self.account, journey_ids=[1])
