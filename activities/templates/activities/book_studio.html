@@ -1,0 +1,122 @@
+<!-- Personnalisation du livre, étape par étape : à droite sur ordinateur, en bas sur téléphone.
+     Les trois premières étapes portent sur les cartes ; l'aperçu (les pages) suit chaque choix. -->
+<aside class="studio" id="studio" aria-label="Personnaliser le livre">
+  <div class="studio-head">
+    <div class="studio-top">
+      <a href="{% url 'activities:creations' %}">Mes créations</a>
+      <span class="studio-status">
+        <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
+        <span id="save-status" class="muted" aria-live="polite"></span>
+        {% if photos_pending %}<span id="strava-photos" class="muted" aria-live="polite">Photos et lieux : {{ photos_pending }} élément{{ photos_pending|pluralize }} à récupérer…</span>{% endif %}
+      </span>
+      <button type="button" class="link-button studio-min" id="studio-min" aria-expanded="true" aria-controls="studio-body">Réduire</button>
+    </div>
+    <ol class="wizard-steps" id="book-steps" aria-label="Étapes">
+      <li><button type="button" data-step="fond">Fond de carte</button></li>
+      <li><button type="button" data-step="noms">Noms</button></li>
+      <li><button type="button" data-step="couverture">Couverture</button></li>
+      <li><button type="button" data-step="pages">Pages</button></li>
+      <li><button type="button" data-step="photos">Photos</button></li>
+    </ol>
+  </div>
+
+  <div class="studio-body" id="studio-body">
+    <section data-panel="fond" aria-labelledby="st-fond">
+      <h2 id="st-fond">Fond de carte</h2>
+      <p class="muted">Le même fond pour toutes les cartes du livre.</p>
+      {% if basemap.vector %}
+      <p class="studio-label">Cartes Off the line</p>
+      <div class="choice-grid" role="group" aria-label="Cartes Off the line">
+        {% for s in basemap.vector.styles %}
+          <button type="button" class="choice" data-imagery="{{ s.key }}" aria-pressed="{% if opt.imagery == s.key %}true{% else %}false{% endif %}">
+            <i class="map-swatch" style="--a: {{ s.colors.land }}; --b: {{ s.colors.water }}; --c: {{ s.colors.road }}" aria-hidden="true"></i>{{ s.label }}
+          </button>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <p class="studio-label">Vues aériennes</p>
+      <div class="choice-grid" role="group" aria-label="Vues aériennes">
+        <button type="button" class="choice" data-imagery="eox" aria-pressed="{% if opt.imagery == "eox" %}true{% else %}false{% endif %}">
+          <i class="map-swatch photo" aria-hidden="true"></i>Satellite<small>Sentinel-2</small>
+        </button>
+        <button type="button" class="choice" data-imagery="ign_ortho" aria-pressed="{% if opt.imagery == "ign_ortho" %}true{% else %}false{% endif %}">
+          <i class="map-swatch photo ign" aria-hidden="true"></i>Photo IGN<small>France seulement</small>
+        </button>
+        <button type="button" class="choice" data-imagery="satellite" aria-pressed="{% if opt.imagery == "satellite" %}true{% else %}false{% endif %}">
+          <i class="map-swatch photo esri" aria-hidden="true"></i>Satellite Esri<small>Usage personnel</small>
+        </button>
+      </div>
+    </section>
+
+    <section data-panel="noms" aria-labelledby="st-noms" hidden>
+      <h2 id="st-noms">Noms sur les cartes</h2>
+      <div class="toggle-list" role="group" aria-label="Noms affichés">
+        <button type="button" class="toggle" data-option="stops" aria-pressed="{{ opt.stops|yesno:"true,false" }}">Villes-étapes<small>Le lieu de départ et d'arrivée de chaque étape</small></button>
+        <button type="button" class="toggle" data-option="cities" aria-pressed="{{ opt.cities|yesno:"true,false" }}">Grandes villes autour<small>Pour situer le parcours</small></button>
+      </div>
+      <p class="studio-label">Noms affichés</p>
+      <p class="muted studio-hint">Touche un nom pour le renommer, ✕ pour le masquer.</p>
+      <ul class="name-tags" id="name-tags" aria-label="Noms affichés"></ul>
+      <p class="studio-label"><label for="place-q">Ajouter un lieu</label></p>
+      <input type="search" id="place-q" class="studio-input" placeholder="Col, village, bivouac…" autocomplete="off">
+      <ul class="city-results" id="place-results"></ul>
+      <p class="muted studio-hint" id="place-hint">Choisis un résultat, ou tape un nom puis touche une carte pour le placer.</p>
+    </section>
+
+    <section data-panel="couverture" aria-labelledby="st-couv" hidden>
+      <h2 id="st-couv">Couverture</h2>
+      <div class="choice-grid two" role="group" aria-label="Couverture">
+        <button type="button" class="choice" data-cover="map" aria-pressed="{% if book.cover == "map" %}true{% else %}false{% endif %}">Carte<small>Tout le voyage</small></button>
+        <button type="button" class="choice" data-cover="photo" aria-pressed="{% if book.cover == "photo" %}true{% else %}false{% endif %}" {% if not has_photos %}disabled{% endif %}>Photo<small>{% if has_photos %}Une de tes photos{% else %}Ajoute d'abord des photos{% endif %}</small></button>
+      </div>
+      <label class="studio-field">Titre
+        <input type="text" class="studio-input" data-text="book.title" value="{{ book.title }}" placeholder="Mes périples" maxlength="300">
+      </label>
+      <label class="studio-field">Sous-titre
+        <input type="text" class="studio-input" data-text="book.subtitle" value="{{ book.subtitle }}" placeholder="{{ subtitle }}" maxlength="300">
+      </label>
+    </section>
+
+    <section data-panel="pages" aria-labelledby="st-pages" hidden>
+      <h2 id="st-pages">Pages du livre</h2>
+      <div class="toggle-list" role="group" aria-label="Pages">
+        {% if chapters|length > 1 %}<button type="button" class="toggle" data-option="toc" aria-pressed="{{ opt.toc|yesno:"true,false" }}">Sommaire<small>La liste des périples</small></button>{% endif %}
+        <button type="button" class="toggle" data-option="roadbook" aria-pressed="{{ opt.roadbook|yesno:"true,false" }}">Carnet de route<small>Le récit et le tableau des étapes</small></button>
+        <button type="button" class="toggle" data-option="profiles" aria-pressed="{{ opt.profiles|yesno:"true,false" }}">Profils d'altitude<small>Sous chaque carte</small></button>
+        <button type="button" class="toggle" data-option="back" aria-pressed="{{ opt.back|yesno:"true,false" }}">Dos du livre<small>Les chiffres du voyage</small></button>
+      </div>
+      <p class="muted studio-hint">Pour écrire un récit ou renommer une étape, touche le texte sur la page.</p>
+    </section>
+
+    <section data-panel="photos" class="tray" id="tray" aria-labelledby="tray-title" hidden>
+      <h2 id="tray-title">Photos</h2>
+      <p class="tray-target" id="tray-target" aria-live="polite">Touche une page d'étape pour la choisir.</p>
+      <div class="tray-filter" role="group" aria-label="Photos affichées">
+        <button type="button" data-filter="free" aria-pressed="true">À placer</button>
+        <button type="button" data-filter="all" aria-pressed="false">Toutes</button>
+      </div>
+      <ul class="tray-grid" id="tray-grid"></ul>
+      <label class="tray-drop" id="tray-drop">
+        <input type="file" id="tray-files" accept="image/*" multiple hidden>
+        <strong>Ajouter des photos</strong>
+        <span>Touche ici, glisse des fichiers, ou colle une image.</span>
+      </label>
+      <details class="tray-help">
+        <summary>Comment faire</summary>
+        <ul>
+          <li>Pour <strong>placer</strong> une photo : choisis l'étape (touche sa page), puis « + Étape » sur la photo. Sur ordinateur, tu peux aussi la glisser vers une page.</li>
+          <li>Pour la <strong>retirer</strong> : ✕ sur la photo, ou glisse-la dans ce bac.</li>
+          <li>Pour la <strong>déplacer</strong> vers une autre étape : glisse-la d'une page à l'autre. Avec Alt (⌥), elle est copiée.</li>
+          <li>Pour <strong>changer l'ordre</strong> : ‹ › sur la photo.</li>
+        </ul>
+      </details>
+    </section>
+  </div>
+
+  <div class="studio-nav">
+    <button type="button" class="btn ghost" id="step-prev">Précédent</button>
+    <button type="button" class="btn" id="step-next">Suivant</button>
+    <a class="btn" id="step-done" href="?" hidden>Terminer</a>
+    <button type="button" class="link-button" id="print-btn">Enregistrer en PDF</button>
+  </div>
+</aside>

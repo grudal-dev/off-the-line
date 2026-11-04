@@ -10,45 +10,17 @@
   {% include "activities/leaflet_head.html" %}
 </head>
 <body class="book{% if edit %} editing{% endif %}">
+  {% if not edit %}
   <div class="book-toolbar" role="toolbar" aria-label="Livre">
     <a href="{% url 'activities:creations' %}">Mes créations</a>
-    {% if edit %}
-      <a class="btn" href="?">Terminer</a>
-      <span class="edit-hint">Clique sur un texte pour le modifier. Enregistrement automatique.</span>
-    {% else %}
-      <a class="btn ghost" href="?edition=1">Personnaliser</a>
-    {% endif %}
+    <a class="btn ghost" href="?edition=1">Personnaliser</a>
     <span id="load-status" class="muted" aria-live="polite">Chargement des cartes…</span>
     <span id="save-status" class="muted" aria-live="polite"></span>
     {% if photos_pending %}<span id="strava-photos" class="muted" aria-live="polite">Photos et lieux : {{ photos_pending }} élément{{ photos_pending|pluralize }} à récupérer…</span>{% endif %}
     <button type="button" class="btn" id="print-btn">Enregistrer en PDF</button>
   </div>
-  {% if edit %}
-  <div class="book-layout-panel">
-    <strong>Mise en page</strong>
-    <label><input type="checkbox" data-option="toc" {% if opt.toc %}checked{% endif %}> Sommaire</label>
-    <label><input type="checkbox" data-option="roadbook" {% if opt.roadbook %}checked{% endif %}> Carnet de route</label>
-    <label><input type="checkbox" data-option="profiles" {% if opt.profiles %}checked{% endif %}> Profils d'altitude</label>
-    <label><input type="checkbox" data-option="back" {% if opt.back %}checked{% endif %}> Dos du livre</label>
-    <label title="Le nom de chaque lieu d'étape. Clique sur un nom, sur la carte, pour le renommer ; efface-le pour le masquer."><input type="checkbox" data-option="stops" {% if opt.stops %}checked{% endif %}> Villes-étapes</label>
-    <label><input type="checkbox" data-option="cities" {% if opt.cities %}checked{% endif %}> Grandes villes autour</label>
-    <span id="stops-hidden" class="muted" hidden><span></span> <button type="button" class="link-btn">Tout réafficher</button></span>
-    <label>Imagerie des cartes
-      <select data-option-select="imagery">
-        <option value="satellite" {% if opt.imagery == "satellite" %}selected{% endif %}>Satellite Esri (usage personnel)</option>
-        <option value="eox" {% if opt.imagery == "eox" %}selected{% endif %}>Satellite libre, Sentinel-2 (livre vendu)</option>
-        <option value="ign_ortho" {% if opt.imagery == "ign_ortho" %}selected{% endif %}>Photo IGN, France seulement (livre vendu)</option>
-        {% if basemap.vector %}<optgroup label="Cartes Off the line (livre vendu)">
-          {% for s in basemap.vector.styles %}<option value="{{ s.key }}" {% if opt.imagery == s.key %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
-        </optgroup>{% endif %}
-      </select>
-    </label>
-    <span class="sep"></span>
-    <strong>Couverture</strong>
-    <label><input type="radio" name="cover" value="map" {% if book.cover == "map" %}checked{% endif %}> Carte</label>
-    <label><input type="radio" name="cover" value="photo" {% if book.cover == "photo" %}checked{% endif %} {% if not has_photos %}disabled{% endif %}> Photo</label>
-    {% if not has_photos %}<span class="muted">(ajoute des photos pour l'utiliser)</span>{% endif %}
-  </div>
+  {% else %}
+  {% include "activities/book_studio.html" %}
   {% endif %}
 
   <!-- Couverture -->
@@ -193,36 +165,35 @@
   {% endif %}
 
   {% if edit %}
-  <aside class="tray" id="tray" aria-labelledby="tray-title">
-    <div class="tray-head">
-      <h2 id="tray-title">Photos</h2>
-      <p class="tray-target" id="tray-target" aria-live="polite">Clique sur une page d'étape pour la choisir.</p>
-      <div class="tray-filter" role="group" aria-label="Photos affichées">
-        <button type="button" data-filter="free" aria-pressed="true">À placer</button>
-        <button type="button" data-filter="all" aria-pressed="false">Toutes</button>
-      </div>
-    </div>
-    <ul class="tray-grid" id="tray-grid"></ul>
-    <label class="tray-drop" id="tray-drop">
-      <input type="file" id="tray-files" accept="image/*" multiple hidden>
-      <strong>Ajouter des photos</strong>
-      <span>Clique, glisse des fichiers ici, ou colle une image (Ctrl+V).</span>
-    </label>
-    <details class="tray-help">
-      <summary>Comment faire</summary>
-      <ul>
-        <li>Pour <strong>retirer</strong> une photo d'une page : ✕ sur la photo, ou glisse-la dans ce bac.</li>
-        <li>Pour <strong>placer</strong> une photo : glisse-la du bac vers une page, ou choisis l'étape puis « + ».</li>
-        <li>Pour la <strong>déplacer</strong> vers une autre étape : glisse-la d'une page à l'autre. Avec Alt (⌥), elle est copiée.</li>
-        <li>Pour <strong>changer l'ordre</strong> : glisse-la sur une autre photo de la même étape, ou utilise ‹ ›.</li>
-      </ul>
-    </details>
-  </aside>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   {{ pool|json_script:"pool-data" }}
   {{ stages_info|json_script:"stages-data" }}
   {% endif %}
 
+  <script>
+  // Pages A4 réduites pour tenir dans la largeur de l'écran (téléphone, panneau de personnalisation).
+  // Une transformation ne change pas la taille des cartes ni des photos : l'impression reste identique.
+  (() => {
+    const PAGE_W = 210 * 96 / 25.4, GUTTER = 16;
+    window.fitPages = function () {
+      const studio = document.getElementById("studio");
+      const side = studio && matchMedia("(min-width: 900px)").matches;
+      if (studio) {
+        const h = side ? "0px" : `${studio.offsetHeight}px`;
+        document.body.style.setProperty("--studio-h", h);
+        document.documentElement.style.scrollPaddingBottom = h;  // ce qu'on montre n'est pas caché par le tiroir
+      }
+      const avail = document.documentElement.clientWidth - (side ? studio.offsetWidth : 0) - GUTTER;
+      const s = Math.min(1, avail / PAGE_W);
+      document.body.style.setProperty("--page-scale", s.toFixed(4));
+      document.body.classList.toggle("scaled", s < 1);
+    };
+    window.fitPages();
+    addEventListener("resize", window.fitPages);
+    const studio = document.getElementById("studio");
+    if (studio && window.ResizeObserver) new ResizeObserver(() => window.fitPages()).observe(studio);
+  })();
+  </script>
   <script>
   // Photos sans recadrage : même calcul que book.best_layout côté serveur, mais avec
   // la taille réelle de chaque zone et les vraies proportions des images une fois chargées.
@@ -322,6 +293,7 @@
   function reloadAt(activityId, reopen) {
     try { sessionStorage.setItem("otl-reopen", reopen ? String(activityId) : ""); } catch (e) {}
     if (activityId) location.hash = "etape-" + activityId;
+    else try { sessionStorage.setItem("otl-scroll", String(window.scrollY)); } catch (e) {}
     location.reload();
   }
 
@@ -382,8 +354,9 @@
         // Couverture : rien sous l'encadré du titre
         const block = el.parentElement.querySelector(".cover-text");
         if (block && m.id === "cover") {
-          const r = block.getBoundingClientRect(), o = el.getBoundingClientRect();
-          boxes.push([r.left - o.left, r.top - o.top - 6, r.right - o.left, r.bottom - o.top]);
+          // Positions à l'écran divisées par l'échelle de la page (réduite sur téléphone)
+          const r = block.getBoundingClientRect(), o = el.getBoundingClientRect(), k = o.width / el.offsetWidth || 1;
+          boxes.push([(r.left - o.left) / k, (r.top - o.top) / k - 6, (r.right - o.left) / k, (r.bottom - o.top) / k]);
         }
         // Ordre de pose : départ et arrivée, puis les lieux ajoutés à la main, puis les autres étapes
         const order = spread(places.length).map(i => ({ row: places[i], end: i === 0 || i === places.length - 1, i }));
@@ -548,116 +521,226 @@
     }
     }
 
-    // Mise en page : sections affichées et couverture
-    document.querySelectorAll("[data-option]").forEach(box => box.addEventListener("change", async () => {
-      if (await saveBook({ field: "options", value: { [box.dataset.option]: box.checked } })) reloadAt();
-    }));
-    document.querySelectorAll("[data-option-select]").forEach(sel => sel.addEventListener("change", async () => {
-      if (await saveBook({ field: "options", value: { [sel.dataset.optionSelect]: sel.value } })) reloadAt();
-    }));
-    document.querySelectorAll("input[name=cover]").forEach(r => r.addEventListener("change", async () => {
-      if (await saveBook({ field: "cover", value: r.value })) location.reload();
-    }));
-
     bindTexts(document);
     window.bindTexts = bindTexts;
+    const esc = t => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-    // ---------- Villes-étapes : renommer, masquer ou réafficher un nom, directement sur la carte ----------
+    // ---------- Étapes de la personnalisation ----------
+    // Fond de carte, noms, couverture, pages, photos. L'étape en cours est gardée pendant les
+    // rechargements (changer de fond ou de pages recharge le livre).
+    const STEPS = ["fond", "noms", "couverture", "pages", "photos"];
+    const STEP_KEY = "otl-book-step-{{ book.pk }}";
+    // Page à montrer dans l'aperçu pour chaque étape
+    const SHOW = { fond: ".page.cover", noms: ".page.opener, .stage-page", couverture: ".page.cover",
+                   pages: ".page.roadbook, .page.contents, .page.opener", photos: ".stage-page" };
+    const studio = document.getElementById("studio");
+    const prevBtn = document.getElementById("step-prev"), nextBtn = document.getElementById("step-next");
+    const doneBtn = document.getElementById("step-done");
+    function goStep(step, scroll = true) {
+      if (!STEPS.includes(step)) step = STEPS[0];
+      const k = STEPS.indexOf(step);
+      document.body.dataset.step = step;
+      studio.querySelectorAll("[data-panel]").forEach(p => { p.hidden = p.dataset.panel !== step; });
+      studio.querySelectorAll("[data-step]").forEach((b, i) => {
+        b.toggleAttribute("aria-current", i === k);
+        if (i === k) b.setAttribute("aria-current", "step");
+        b.classList.toggle("done", i < k);
+      });
+      prevBtn.disabled = k === 0;
+      nextBtn.hidden = k === STEPS.length - 1;
+      doneBtn.hidden = k !== STEPS.length - 1;
+      try { sessionStorage.setItem(STEP_KEY, step); } catch (e) {}
+      document.getElementById("studio-body").scrollTop = 0;
+      // Couverture : on montre le bas de la page, là où sont le titre et le sous-titre
+      if (scroll) document.querySelector(SHOW[step])?.scrollIntoView({ block: step === "couverture" ? "end" : "start", behavior: "smooth" });
+      if (step !== "noms") stopPlacing();
+      window.fitPages && window.fitPages();
+    }
+    studio.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => goStep(b.dataset.step)));
+    prevBtn.addEventListener("click", () => goStep(STEPS[STEPS.indexOf(document.body.dataset.step) - 1]));
+    nextBtn.addEventListener("click", () => goStep(STEPS[STEPS.indexOf(document.body.dataset.step) + 1]));
+    // Téléphone : le panneau se réduit pour voir l'aperçu en grand
+    const minBtn = document.getElementById("studio-min");
+    minBtn.addEventListener("click", () => {
+      const min = studio.classList.toggle("is-min");
+      minBtn.textContent = min ? "Ouvrir" : "Réduire";
+      minBtn.setAttribute("aria-expanded", String(!min));
+      window.fitPages && window.fitPages();
+    });
+
+    // Fond de carte, pages affichées, couverture : enregistrés, puis le livre est rechargé
+    async function choose(btn, payload) {
+      btn.closest("[role=group]")?.querySelectorAll("[aria-pressed]").forEach(b => b.setAttribute("aria-pressed", String(b === btn)));
+      if (await saveBook(payload)) reloadAt();
+    }
+    studio.querySelectorAll("[data-imagery]").forEach(b => b.addEventListener("click", () => {
+      if (b.getAttribute("aria-pressed") === "true") return;
+      choose(b, { field: "options", value: { imagery: b.dataset.imagery } });
+    }));
+    studio.querySelectorAll("[data-cover]").forEach(b => b.addEventListener("click", () => {
+      if (b.getAttribute("aria-pressed") === "true") return;
+      choose(b, { field: "cover", value: b.dataset.cover });
+    }));
+    studio.querySelectorAll(".toggle[data-option]").forEach(b => b.addEventListener("click", async () => {
+      const on = b.getAttribute("aria-pressed") !== "true";
+      b.setAttribute("aria-pressed", String(on));
+      if (await saveBook({ field: "options", value: { [b.dataset.option]: on } })) reloadAt();
+      else b.setAttribute("aria-pressed", String(!on));
+    }));
+    // Titre et sous-titre : aussi modifiables sur la couverture
+    studio.querySelectorAll("[data-text]").forEach(input => {
+      const target = document.querySelector(`.cover [data-edit="${input.dataset.text}"]`);
+      let before = input.value.trim();
+      const save = async () => {
+        const value = input.value.trim();
+        if (value === before) return;
+        if (await saveBook({ field: input.dataset.text, value })) {
+          before = value;
+          if (target) target.innerText = value || input.placeholder;
+        }
+      };
+      input.addEventListener("input", () => { if (target) target.innerText = input.value.trim() || input.placeholder; });
+      input.addEventListener("change", save);
+      input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+    });
+
+    // ---------- Villes-étapes : renommer, masquer ou réafficher un nom ----------
     // Le choix vaut pour tout le livre (même ville sur la carte du périple et sur celle de l'étape)
     // Applique tout de suite sur les cartes, enregistre, et revient en arrière si l'enregistrement échoue
     async function saveOpts(patch) {
       const prev = Object.fromEntries(Object.keys(patch).map(k => [k, BOOK.options[k]]));
       Object.assign(BOOK.options, patch);
       (window.bookStops || []).forEach(f => f());
+      renderTags();
       if (!await saveBook({ field: "options", value: patch })) {
         Object.assign(BOOK.options, prev);
         (window.bookStops || []).forEach(f => f());
+        renderTags();
       }
-      updateHiddenNote();
     }
     const saveNames = (hidden, names) => saveOpts({ cityHidden: [...hidden], cityNames: names });
-    const hiddenNote = document.getElementById("stops-hidden");
-    function updateHiddenNote() {
-      if (!hiddenNote) return;
-      const n = (BOOK.options.cityHidden || []).length;
-      hiddenNote.hidden = !n;
-      hiddenNote.querySelector("span").textContent = `${n} nom${n > 1 ? "s" : ""} masqué${n > 1 ? "s" : ""}`;
-    }
-    hiddenNote && hiddenNote.querySelector("button").addEventListener("click", () => saveNames([], BOOK.options.cityNames || {}));
-    updateHiddenNote();
 
-    // ---------- Ajouter un lieu (col, bivouac, village…) : recherche, ou placement au clic ----------
-    const esc = t => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-    const finder = document.createElement("div");
-    finder.className = "place-add";
-    finder.hidden = true;
-    finder.innerHTML = `<input type="search" placeholder="Col, village, lieu de bivouac…" aria-label="Chercher un lieu" autocomplete="off">
-      <ul></ul><p class="muted">Ou tape un nom puis clique sur la carte pour le placer. Échap pour fermer.</p>`;
-    const fInput = finder.querySelector("input"), fList = finder.querySelector("ul");
-    let fMap = null, fTimer = 0, fSeq = 0, placing = null;
-    L.DomEvent.disableClickPropagation(finder);
-    L.DomEvent.disableScrollPropagation(finder);
-    function closeFinder() {
-      finder.hidden = true;
-      fInput.value = "";
-      fList.innerHTML = "";
-      if (fMap) fMap.getContainer().classList.remove("is-placing");
+    // Liste des noms dans le panneau (plus simple que de viser un petit nom sur la carte au téléphone)
+    const allNames = [];
+    for (const m of JSON.parse(document.getElementById("maps-data").textContent)) {
+      for (const [, , name] of (m.places || [])) if (!allNames.includes(name)) allNames.push(name);
+    }
+    const tags = document.getElementById("name-tags");
+    function renderTags() {
+      const hidden = new Set(BOOK.options.cityHidden || []), names = BOOK.options.cityNames || {};
+      const stops = BOOK.options.stops === false ? [] : allNames;
+      const items = stops.map(n => {
+        const off = hidden.has(n);
+        return `<li class="name-tag${off ? " off" : ""}"><button type="button" class="tag-label" data-name="${esc(n)}" title="${off ? "Masqué" : "Renommer"}">${esc(names[n] || n)}</button>`
+          + `<button type="button" class="tag-x" data-name="${esc(n)}" aria-label="${off ? "Réafficher" : "Masquer"} ${esc(names[n] || n)}">${off ? "+" : "✕"}</button></li>`;
+      }).concat((BOOK.options.cityExtra || []).map(([, , n]) =>
+        `<li class="name-tag extra"><button type="button" class="tag-label" data-extra="${esc(n)}" title="Renommer">${esc(n)}</button>`
+        + `<button type="button" class="tag-x" data-extra="${esc(n)}" aria-label="Retirer ${esc(n)}">✕</button></li>`));
+      tags.innerHTML = items.join("") || `<li class="muted">${BOOK.options.stops === false ? "Villes-étapes masquées." : "Aucun nom pour l'instant."}</li>`;
+    }
+    function rename(name, value, extra) {
+      if (extra) {
+        const rows = BOOK.options.cityExtra || [];
+        saveOpts({ cityExtra: value ? rows.map(r => (r[2] === name ? [r[0], r[1], value] : r)) : rows.filter(r => r[2] !== name) });
+        return;
+      }
+      const hidden = new Set(BOOK.options.cityHidden || []), names = { ...(BOOK.options.cityNames || {}) };
+      if (!value) { hidden.add(name); delete names[name]; }
+      else if (value === name) delete names[name];
+      else names[name] = value;
+      saveNames(hidden, names);
+    }
+    tags.addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      const extra = "extra" in b.dataset, name = extra ? b.dataset.extra : b.dataset.name;
+      const hidden = new Set(BOOK.options.cityHidden || []);
+      if (b.classList.contains("tag-x")) {
+        if (extra) return rename(name, "", true);
+        hidden.has(name) ? hidden.delete(name) : hidden.add(name);
+        return saveNames(hidden, BOOK.options.cityNames || {});
+      }
+      if (!extra && hidden.has(name)) { hidden.delete(name); return saveNames(hidden, BOOK.options.cityNames || {}); }
+      // Renommer : le nom devient un champ, Entrée pour valider, Échap pour annuler
+      const input = document.createElement("input");
+      input.className = "tag-input";
+      input.value = b.textContent;
+      input.setAttribute("aria-label", `Nouveau nom pour ${name}`);
+      b.replaceWith(input);
+      input.focus();
+      input.select();
+      let cancelled = false;
+      input.addEventListener("keydown", ev => {
+        if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+        if (ev.key === "Escape") { cancelled = true; input.blur(); }
+      });
+      input.addEventListener("blur", () => {
+        const value = input.value.trim();
+        if (cancelled || value === b.textContent) return renderTags();
+        rename(name, value, extra);
+      }, { once: true });
+    });
+    renderTags();
+
+    // ---------- Ajouter un lieu (col, bivouac, village…) : recherche, ou placement en touchant une carte ----------
+    const fInput = document.getElementById("place-q"), fList = document.getElementById("place-results");
+    let fTimer = 0, fSeq = 0, placing = null;
+    // La carte la plus visible dans l'aperçu : la recherche cherche autour d'elle
+    function visibleMap() {
+      let best = null, most = -1;
+      for (const inst of Object.values(window.bookMaps || {})) {
+        const r = inst.map.getContainer().getBoundingClientRect();
+        const seen = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+        if (seen > most) { most = seen; best = inst.map; }
+      }
+      return best;
+    }
+    function stopPlacing() {
       placing = null;
+      document.body.classList.remove("is-placing");
     }
     function addPlace(lat, lng, name) {
       const rows = (BOOK.options.cityExtra || []).filter(r => r[2] !== name);
       saveOpts({ cityExtra: [...rows, [+lat.toFixed(4), +lng.toFixed(4), name]] });
-      closeFinder();
+      fInput.value = "";
+      fList.innerHTML = "";
+      stopPlacing();
     }
-    for (const [id, inst] of Object.entries(window.bookMaps || {})) {
-      const box = inst.map.getContainer();
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "add-place-btn";
-      btn.textContent = "+ Lieu";
-      btn.title = "Ajouter un lieu sur les cartes du livre";
-      L.DomEvent.disableClickPropagation(btn);
-      btn.addEventListener("click", () => {
-        if (!finder.hidden && fMap === inst.map) return closeFinder();
-        closeFinder();
-        fMap = inst.map;
-        box.appendChild(finder);
-        finder.hidden = false;
-        fInput.focus();
-      });
-      box.appendChild(btn);
+    for (const inst of Object.values(window.bookMaps || {})) {
       inst.map.on("click", e => {
-        if (!placing || fMap !== inst.map) return;
-        addPlace(e.latlng.lat, e.latlng.lng, placing);
+        if (placing && document.body.dataset.step === "noms") addPlace(e.latlng.lat, e.latlng.lng, placing);
       });
     }
     fInput.addEventListener("input", () => {
       clearTimeout(fTimer);
       const typed = fInput.value.trim();
       placing = typed || null;
-      fMap.getContainer().classList.toggle("is-placing", !!placing);
+      document.body.classList.toggle("is-placing", !!placing);
       if (typed.length < 2) { fList.innerHTML = ""; return; }
       fTimer = setTimeout(async () => {
-        const seq = ++fSeq, c = fMap.getCenter();
+        const seq = ++fSeq, map = visibleMap(), c = map ? map.getCenter() : { lat: 46.6, lng: 2.4 };
         let found = [];
         try {
           const r = await fetch(`${BOOK.towns}?q=${encodeURIComponent(typed)}&lat=${c.lat.toFixed(3)}&lng=${c.lng.toFixed(3)}`);
           if (r.ok) found = (await r.json()).results || [];
-        } catch (err) { /* hors ligne : placement au clic seulement */ }
+        } catch (err) { /* hors ligne : placement en touchant la carte seulement */ }
         if (seq !== fSeq) return;
         fList.innerHTML = found.slice(0, 6).map(([name, la, ln, , km]) =>
           `<li><button type="button" data-lat="${la}" data-lng="${ln}" data-name="${esc(name)}">${esc(name)}<span class="muted">${km ?? ""} km</span></button></li>`).join("");
       }, 200);
     });
     fInput.addEventListener("keydown", e => {
-      if (e.key === "Escape") closeFinder();
+      if (e.key === "Escape") { fInput.value = ""; fList.innerHTML = ""; stopPlacing(); }
       if (e.key === "Enter") { e.preventDefault(); fList.querySelector("button")?.click(); }
     });
     fList.addEventListener("click", e => {
       const b = e.target.closest("button");
       if (b) addPlace(+b.dataset.lat, +b.dataset.lng, b.dataset.name);
     });
-    document.addEventListener("keydown", e => { if (e.key === "Escape" && !finder.hidden) closeFinder(); });
+
+    let startStep = null;
+    try { startStep = sessionStorage.getItem(STEP_KEY); } catch (e) {}
+    goStep(startStep || STEPS[0], false);
 
     document.addEventListener("click", e => {
       const el = e.target.closest(".stop-name");
