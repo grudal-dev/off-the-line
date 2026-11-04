@@ -1080,6 +1080,17 @@ class FreeImageryTests(LoggedInTestCase):
         self.assertEqual(b.option("cityHidden"), ["Faverges"])
         self.assertEqual(b.option("cityNames"), {"Annecy": "Annecy-le-Vieux"})  # inchangés et vides ignorés
 
+    def test_book_extra_places_are_cleaned(self):
+        from .models import Book
+        b = Book.objects.create(account=self.account, journey_ids=[1])
+        url = reverse("activities:book_update", args=[b.pk])
+        self.client.post(url, {"field": "options", "value": {"cityExtra": [
+            [45.81234567, 6.2, " Col de la Forclaz "], ["x", 6, "Faux"], [95, 6, "Hors carte"],
+            [45.7, 6.3, "Col de la Forclaz"], [45.6, 6.1], [45.5, 6.0, ""],
+        ]}}, content_type="application/json")
+        b.refresh_from_db()
+        self.assertEqual(b.option("cityExtra"), [[45.8123, 6.2, "Col de la Forclaz"]])
+
     def test_leg_places(self):
         from types import SimpleNamespace
         from .views import _leg_places

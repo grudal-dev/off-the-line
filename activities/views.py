@@ -699,6 +699,20 @@ def create(request):
 POSTER_PROFILE_POINTS = 40
 
 
+def _clean_extra_places(rows):
+    """Lieux ajoutés au livre : [[lat, lng, nom]] valides, sans doublon de nom, 100 au plus."""
+    out, seen = [], set()
+    for row in rows:
+        try:
+            lat, lng, name = float(row[0]), float(row[1]), str(row[2]).strip()[:80]
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if name and -85 <= lat <= 85 and -180 <= lng <= 180 and name not in seen:
+            seen.add(name)
+            out.append([round(lat, 4), round(lng, 4), name])
+    return out[:100]
+
+
 def _leg_places(leg):
     """Départ et arrivée nommés d'une étape : [lat, lng, nom] (un seul point pour une boucle)."""
     places = []
@@ -1113,6 +1127,8 @@ def book_update(request, book_id):
                     continue
                 if key == "cityHidden":
                     value[key] = [str(n)[:80] for n in value[key] if isinstance(n, str) and n][:200]
+                if key == "cityExtra":
+                    value[key] = _clean_extra_places(value[key])
                 if key == "cityNames":
                     value[key] = {str(k)[:80]: v.strip()[:80] for k, v in list(value[key].items())[:200]
                                   if isinstance(v, str) and v.strip() and v.strip() != k}

@@ -296,6 +296,7 @@
   const BOOK = {
     update: "{% url 'activities:book_update' book.pk %}",
     upload: "{% url 'activities:book_upload' book.pk %}",
+    towns: "{% url 'activities:poster_towns' %}",
     edit: {{ edit|yesno:"true,false" }},
     options: JSON.parse(document.getElementById("options-data").textContent),
     csrf: document.querySelector("[name=csrfmiddlewaretoken]").value,
@@ -366,8 +367,7 @@
     // Police chargée après le premier placement : on replace les noms avec les vraies largeurs
     document.fonts && document.fonts.ready.then(() => (window.bookStops || []).forEach(f => f()));
     function mountStops(map, m, el) {
-      const places = m.places || [];
-      if (!places.length || BOOK.options.stops === false) return null;
+      const places = BOOK.options.stops === false ? [] : (m.places || []);
       map.createPane("stops").style.zIndex = 620;  // au-dessus du tracé et des pastilles
       if (!BOOK.edit) map.getPane("stops").style.pointerEvents = "none";
       const layer = L.layerGroup().addTo(map);
@@ -385,18 +385,23 @@
           const r = block.getBoundingClientRect(), o = el.getBoundingClientRect();
           boxes.push([r.left - o.left, r.top - o.top - 6, r.right - o.left, r.bottom - o.top]);
         }
-        for (const i of spread(places.length)) {
-          const [lat, lng, name] = places[i];
-          const off = hidden.has(name);
+        // Ordre de pose : départ et arrivée, puis les lieux ajoutés à la main, puis les autres étapes
+        const order = spread(places.length).map(i => ({ row: places[i], end: i === 0 || i === places.length - 1, i }));
+        const view = map.getBounds();
+        const extras = (BOOK.options.cityExtra || []).filter(([la, ln]) => view.contains([la, ln]))
+          .map(row => ({ row, extra: true }));
+        const queue = [...order.filter(e => e.end), ...extras, ...order.filter(e => !e.end)];
+        for (const { row: [lat, lng, name], end = false, extra = false, i } of queue) {
+          const off = !extra && hidden.has(name);
           if (off && !BOOK.edit) continue;
-          const label = names[name] || name;
-          const end = i === 0 || i === places.length - 1;
+          if (extra && taken.has(name.toLowerCase())) continue;
+          const label = extra ? name : names[name] || name;
           const p = map.latLngToContainerPoint([lat, lng]);
           // À côté de la pastille d'étape (13 px de rayon), des ronds de départ et d'arrivée d'une
-          // carte d'étape, ou d'un petit point posé ici (couverture, arrivée du périple)
+          // carte d'étape, ou d'un petit point posé ici (couverture, arrivée du périple, lieu ajouté)
           const single = m.stages.length === 1;
-          const dot = !single && (!pins || i === places.length - 1);
-          const gap = pins && !dot ? 17 : single ? 11 : 8;
+          const dot = extra || (!single && (!pins || i === places.length - 1));
+          const gap = pins && !dot ? 17 : single && !extra ? 11 : 8;
           const w = textWidth(label, end) + 6, h = end ? 17 : 15;
           let spot = null;
           for (const [x, y] of [[p.x + gap, p.y - h / 2], [p.x - gap - w, p.y - h / 2], [p.x - w / 2, p.y - gap - h], [p.x - w / 2, p.y + gap]]) {
@@ -413,13 +418,13 @@
           if (dot) {
             boxes.push([p.x - 6, p.y - 6, p.x + 6, p.y + 6]);
             L.marker([lat, lng], { pane: "stops", interactive: false, keyboard: false,
-              icon: L.divIcon({ className: "", html: `<i class="stop-dot${end ? " end" : ""}"></i>`, iconSize: [0, 0] }) }).addTo(layer);
+              icon: L.divIcon({ className: "", html: `<i class="stop-dot${end ? " end" : ""}${extra ? " extra" : ""}"></i>`, iconSize: [0, 0] }) }).addTo(layer);
           }
           const at = map.containerPointToLatLng([spot[0], spot[1]]);
           const mk = L.marker(at, { pane: "stops", interactive: false, keyboard: false,
             icon: L.divIcon({ className: "", iconSize: [0, 0], iconAnchor: [0, 0],
-              html: `<span class="stop-name${end ? " end" : ""}${off ? " off" : ""}" data-name="${esc(name)}"`
-                  + `${BOOK.edit ? ` title="${off ? "Clique pour réafficher" : "Clique pour renommer ; vide pour masquer"}"` : ""}>${esc(label)}</span>` }) });
+              html: `<span class="stop-name${end ? " end" : ""}${off ? " off" : ""}${extra ? " extra" : ""}" data-name="${esc(name)}"${extra ? " data-extra" : ""}`
+                  + `${BOOK.edit ? ` title="${off ? "Clique pour réafficher" : extra ? "Clique pour renommer ; vide pour retirer" : "Clique pour renommer ; vide pour masquer"}"` : ""}>${esc(label)}</span>` }) });
           mk.addTo(layer);
         }
         map.cityAvoidBoxes = boxes;
@@ -465,9 +470,10 @@
         : m.stages.length === 1 ? [m.stages[0].coords[0], m.stages[0].coords[m.stages[0].coords.length - 1]] : [];
       // Les villes-étapes d'abord (le sujet), puis quelques grandes villes pour se situer, autour
       const stops = mountStops(map, m, el);
+      const named = BOOK.options.stops !== false && (m.places || []).length;
       let cities = null;
       if (BOOK.options.cities !== false && window.mountCities) {
-        const few = m.id.startsWith("s") ? (stops ? 3 : 6) : (stops ? 6 : 10);
+        const few = m.id.startsWith("s") ? (named ? 3 : 6) : (named ? 6 : 10);
         cities = window.mountCities(map, { max: few, extraZoom: 0.5 });
       }
       (window.bookStops = window.bookStops || []).push(() => { stops && stops(); cities && cities.refresh(); });
@@ -558,16 +564,18 @@
 
     // ---------- Villes-étapes : renommer, masquer ou réafficher un nom, directement sur la carte ----------
     // Le choix vaut pour tout le livre (même ville sur la carte du périple et sur celle de l'étape)
-    async function saveNames(hidden, names) {
-      const prev = { cityHidden: BOOK.options.cityHidden, cityNames: BOOK.options.cityNames };
-      Object.assign(BOOK.options, { cityHidden: [...hidden], cityNames: names });
+    // Applique tout de suite sur les cartes, enregistre, et revient en arrière si l'enregistrement échoue
+    async function saveOpts(patch) {
+      const prev = Object.fromEntries(Object.keys(patch).map(k => [k, BOOK.options[k]]));
+      Object.assign(BOOK.options, patch);
       (window.bookStops || []).forEach(f => f());
-      if (!await saveBook({ field: "options", value: { cityHidden: [...hidden], cityNames: names } })) {
+      if (!await saveBook({ field: "options", value: patch })) {
         Object.assign(BOOK.options, prev);
         (window.bookStops || []).forEach(f => f());
       }
       updateHiddenNote();
     }
+    const saveNames = (hidden, names) => saveOpts({ cityHidden: [...hidden], cityNames: names });
     const hiddenNote = document.getElementById("stops-hidden");
     function updateHiddenNote() {
       if (!hiddenNote) return;
@@ -578,12 +586,85 @@
     hiddenNote && hiddenNote.querySelector("button").addEventListener("click", () => saveNames([], BOOK.options.cityNames || {}));
     updateHiddenNote();
 
+    // ---------- Ajouter un lieu (col, bivouac, village…) : recherche, ou placement au clic ----------
+    const esc = t => t.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const finder = document.createElement("div");
+    finder.className = "place-add";
+    finder.hidden = true;
+    finder.innerHTML = `<input type="search" placeholder="Col, village, lieu de bivouac…" aria-label="Chercher un lieu" autocomplete="off">
+      <ul></ul><p class="muted">Ou tape un nom puis clique sur la carte pour le placer. Échap pour fermer.</p>`;
+    const fInput = finder.querySelector("input"), fList = finder.querySelector("ul");
+    let fMap = null, fTimer = 0, fSeq = 0, placing = null;
+    L.DomEvent.disableClickPropagation(finder);
+    L.DomEvent.disableScrollPropagation(finder);
+    function closeFinder() {
+      finder.hidden = true;
+      fInput.value = "";
+      fList.innerHTML = "";
+      if (fMap) fMap.getContainer().classList.remove("is-placing");
+      placing = null;
+    }
+    function addPlace(lat, lng, name) {
+      const rows = (BOOK.options.cityExtra || []).filter(r => r[2] !== name);
+      saveOpts({ cityExtra: [...rows, [+lat.toFixed(4), +lng.toFixed(4), name]] });
+      closeFinder();
+    }
+    for (const [id, inst] of Object.entries(window.bookMaps || {})) {
+      const box = inst.map.getContainer();
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "add-place-btn";
+      btn.textContent = "+ Lieu";
+      btn.title = "Ajouter un lieu sur les cartes du livre";
+      L.DomEvent.disableClickPropagation(btn);
+      btn.addEventListener("click", () => {
+        if (!finder.hidden && fMap === inst.map) return closeFinder();
+        closeFinder();
+        fMap = inst.map;
+        box.appendChild(finder);
+        finder.hidden = false;
+        fInput.focus();
+      });
+      box.appendChild(btn);
+      inst.map.on("click", e => {
+        if (!placing || fMap !== inst.map) return;
+        addPlace(e.latlng.lat, e.latlng.lng, placing);
+      });
+    }
+    fInput.addEventListener("input", () => {
+      clearTimeout(fTimer);
+      const typed = fInput.value.trim();
+      placing = typed || null;
+      fMap.getContainer().classList.toggle("is-placing", !!placing);
+      if (typed.length < 2) { fList.innerHTML = ""; return; }
+      fTimer = setTimeout(async () => {
+        const seq = ++fSeq, c = fMap.getCenter();
+        let found = [];
+        try {
+          const r = await fetch(`${BOOK.towns}?q=${encodeURIComponent(typed)}&lat=${c.lat.toFixed(3)}&lng=${c.lng.toFixed(3)}`);
+          if (r.ok) found = (await r.json()).results || [];
+        } catch (err) { /* hors ligne : placement au clic seulement */ }
+        if (seq !== fSeq) return;
+        fList.innerHTML = found.slice(0, 6).map(([name, la, ln, , km]) =>
+          `<li><button type="button" data-lat="${la}" data-lng="${ln}" data-name="${esc(name)}">${esc(name)}<span class="muted">${km ?? ""} km</span></button></li>`).join("");
+      }, 200);
+    });
+    fInput.addEventListener("keydown", e => {
+      if (e.key === "Escape") closeFinder();
+      if (e.key === "Enter") { e.preventDefault(); fList.querySelector("button")?.click(); }
+    });
+    fList.addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (b) addPlace(+b.dataset.lat, +b.dataset.lng, b.dataset.name);
+    });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !finder.hidden) closeFinder(); });
+
     document.addEventListener("click", e => {
       const el = e.target.closest(".stop-name");
       if (!el || el.isContentEditable) return;
       e.preventDefault();
       e.stopPropagation();
-      const name = el.dataset.name;
+      const name = el.dataset.name, extra = el.hasAttribute("data-extra");
       const hidden = new Set(BOOK.options.cityHidden || []);
       if (hidden.has(name)) { hidden.delete(name); saveNames(hidden, BOOK.options.cityNames || {}); return; }
       const before = el.textContent;
@@ -596,6 +677,11 @@
         el.contentEditable = "false";
         const value = el.textContent.trim();
         if (cancel || value === before) { el.textContent = before; return; }
+        if (extra) {  // lieu ajouté : on change son nom, ou on le retire
+          const rows = (BOOK.options.cityExtra || []).filter(r => r[2] !== value || r[2] === name);
+          saveOpts({ cityExtra: value ? rows.map(r => (r[2] === name ? [r[0], r[1], value] : r)) : rows.filter(r => r[2] !== name) });
+          return;
+        }
         const names = { ...(BOOK.options.cityNames || {}) };
         if (!value) { hidden.add(name); delete names[name]; }
         else if (value === name) delete names[name];

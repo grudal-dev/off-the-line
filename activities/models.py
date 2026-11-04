@@ -184,7 +184,9 @@ class Book(models.Model):
     DEFAULT_OPTIONS = {"toc": True, "roadbook": True, "profiles": True, "back": True, "basemap": "topo", "relief": False,
                        "cities": True, "imagery": "satellite",
                        # Villes-étapes nommées sur les cartes ; noms masqués et renommés (par nom d'origine)
-                       "stops": True, "cityHidden": [], "cityNames": {}}
+                       "stops": True, "cityHidden": [], "cityNames": {},
+                       # Lieux ajoutés à la main (col, bivouac…) : [[lat, lng, nom]]
+                       "cityExtra": []}
     # Esri (usage personnel), Sentinel-2 2016 d'EOX ou photos IGN (libres, vendables), ou l'un de nos
     # fonds vectoriels (vendables)
     IMAGERY = {"satellite", "eox", "ign_ortho"} | {s["key"] for s in VECTOR_STYLES}
