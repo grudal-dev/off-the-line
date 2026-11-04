@@ -21,21 +21,10 @@ from .sync import ensure_photos, sync_activities, sync_photos
 SESSION_STATE_KEY = "strava_oauth_state"
 
 
-# Affiches d'exemple de la page d'accueil (static/activities/showcase, 760 px de haut en WebP)
-SHOWCASE = [
-    {"src": "activities/showcase/30-jours-france.webp", "w": 538, "h": 760,
-     "alt": "Affiche « 30 jours à vélo » : un tour de France de Harnes au Lavandou, 3 344 km"},
-    {"src": "activities/showcase/annee-2025.webp", "w": 1075, "h": 760,
-     "alt": "Affiche d'une année de sorties, 2025 : 241 sorties et 26 049 km à travers l'Europe"},
-    {"src": "activities/showcase/51-jours-europe.webp", "w": 538, "h": 760,
-     "alt": "Affiche « 51 jours à vélo » : une boucle de 6 369 km à travers 9 pays d'Europe"},
-]
-
-
 def home(request):
     if request.user.is_authenticated and hasattr(request.user, "strava"):
         return redirect("activities:map")
-    return render(request, "activities/home.html", {"showcase": SHOWCASE})
+    return render(request, "activities/home.html")
 
 
 def strava_login(request):
