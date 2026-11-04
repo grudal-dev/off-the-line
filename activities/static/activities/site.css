@@ -132,6 +132,22 @@ main.full .messages { position: absolute; z-index: 1000; top: 4.5rem; right: 1re
 .hero p { font-size: 1.25rem; color: var(--slate); max-width: 30rem; margin: 0 0 2rem; }
 .hero small { display: block; margin-top: 1rem; color: var(--slate); font-size: var(--t-small); }
 
+/* Affiches d'exemple : bandeau qui défile tout seul (CSS seul, deux copies pour boucler) */
+.hero:has(+ .showcase) { min-height: calc(100vh - 57px - 7rem); }
+.showcase {
+  overflow: hidden; padding: 2.5rem 0 3.5rem; background: var(--paper);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.showcase-track { display: flex; width: max-content; animation: showcase 70s linear infinite; }
+.showcase:hover .showcase-track { animation-play-state: paused; }
+.showcase img {
+  display: block; height: clamp(220px, 30vw, 380px); width: auto; margin-right: clamp(1.25rem, 3vw, 2.5rem);
+  border-radius: 2px; background: var(--sheet);
+  box-shadow: 0 1px 2px rgba(28, 38, 41, .08), 0 18px 36px -18px rgba(28, 38, 41, .45);
+}
+@keyframes showcase { to { transform: translateX(-50%); } }
+
 /* Liste d'activités -------------------------------------------------- */
 .toolbar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
 .toolbar form { margin: 0; }
@@ -424,6 +440,11 @@ details.advanced form { margin-top: .75rem; }
 @media (prefers-reduced-motion: reduce) {
   .hero-route path { animation: none; stroke-dashoffset: 0; }
   .hero-route .end { animation: none; opacity: 1; }
+  /* Sans animation : on fait défiler au doigt, la copie de boucle est masquée */
+  .showcase { overflow-x: auto; scroll-snap-type: x mandatory; }
+  .showcase-track { animation: none; padding: 0 6%; }
+  .showcase img { scroll-snap-align: center; }
+  .showcase img[aria-hidden] { display: none; }
 }
 
 /* Corrections d'un périple */

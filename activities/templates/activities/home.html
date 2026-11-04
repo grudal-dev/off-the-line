@@ -1,4 +1,5 @@
 {% extends "activities/base.html" %}
+{% load static %}
 {% block main_class %}full{% endblock %}
 {% block content %}
   <section class="hero">
@@ -17,4 +18,17 @@
       <small>Garmin, Komoot, Coros, Suunto… : fichiers GPX, FIT ou TCX, sans créer de compte. Tu peux supprimer tes données à tout moment.</small>
     </div>
   </section>
+
+  {% if showcase %}
+  <section class="showcase" aria-label="Exemples d'affiches">
+    <div class="showcase-track">
+      {% for copy in "ab" %}
+        {% for p in showcase %}
+          <img src="{% static p.src %}" width="{{ p.w }}" height="{{ p.h }}" loading="lazy" decoding="async"
+               alt="{% if forloop.parentloop.first %}{{ p.alt }}{% endif %}"{% if not forloop.parentloop.first %} aria-hidden="true"{% endif %}>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 {% endblock %}
