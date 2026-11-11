@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Activity, StravaAccount
+from .models import Activity, RemovedActivity, StravaAccount, WebhookEvent
 
 
 @admin.register(StravaAccount)
@@ -18,7 +18,10 @@ class ActivityAdmin(admin.ModelAdmin):
     exclude = ("raw",)
 
 
-from .models import WebhookEvent  # noqa: E402
+@admin.register(RemovedActivity)
+class RemovedActivityAdmin(admin.ModelAdmin):
+    list_display = ("name", "strava_id", "account", "removed_at")
+    search_fields = ("name", "strava_id")
 
 
 @admin.register(WebhookEvent)

@@ -1,9 +1,12 @@
 """Synchronisation des activités Strava vers la base locale."""
 
+from dataclasses import dataclass
+
+from django.db.models import Count
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from . import strava
+from . import journeys, strava
 from .models import Activity, ActivityPhoto
 
 PER_PAGE = 200  # maximum autorisé par Strava
@@ -30,38 +33,109 @@ def _to_fields(data):
     }
 
 
-def sync_activities(account, full=False):
-    """Importe les activités. Par défaut, seulement celles plus récentes que la dernière connue.
+def import_activity(account, strava_id):
+    """Importe une activité précise (un appel Strava) : webhook « activité créée », sortie remise sur le site."""
+    data = strava.activity_detail(account, strava_id)
+    fields = _to_fields(data)
+    fields["description"] = data.get("description") or ""
+    activity, _ = Activity.objects.update_or_create(strava_id=strava_id, defaults={"account": account, **fields})
+    return activity
 
-    Renvoie le nombre d'activités créées ou mises à jour.
+
+# Champs comparés pour savoir si une activité a changé sur Strava (« raw » suit, sans être comparé)
+COMPARED = ("name", "sport_type", "start_date", "start_date_local", "distance", "moving_time", "elapsed_time",
+            "total_elevation_gain", "average_speed", "summary_polyline", "photo_count", "start_lat", "start_lng")
+
+
+@dataclass
+class SyncResult:
+    created: int = 0
+    updated: int = 0
+    removed: int = 0
+
+    @property
+    def changed(self):
+        return self.created + self.updated + self.removed
+
+    def summary(self):
+        """« 3 nouvelles sorties, 1 mise à jour, 2 supprimées » (vide s'il n'y a rien de nouveau)."""
+        parts = []
+        if self.created:
+            parts.append(f"{self.created} nouvelle{'s' if self.created > 1 else ''} sortie{'s' if self.created > 1 else ''}")
+        if self.updated:
+            parts.append(f"{self.updated} mise{'s' if self.updated > 1 else ''} à jour")
+        if self.removed:
+            parts.append(f"{self.removed} supprimée{'s' if self.removed > 1 else ''} sur Strava et retirée{'s' if self.removed > 1 else ''} d'ici")
+        return ", ".join(parts)
+
+
+def sync_activities(account):
+    """Aligne la base sur Strava : nouvelles activités, activités modifiées, activités supprimées.
+
+    Toute la liste est relue (un appel pour 200 activités) : c'est le seul moyen de voir ce qui a été
+    supprimé ou modifié sur Strava quand le webhook n'a pas prévenu (abonnement absent, site arrêté,
+    suppression antérieure à l'abonnement). Les activités inchangées ne sont pas réécrites, les sorties
+    retirées du site par l'utilisateur (RemovedActivity) ne sont pas réimportées, et celles lues dans
+    des fichiers (identifiant négatif) ne sont jamais touchées.
     """
-    params = {"per_page": PER_PAGE}
-    if not full:
-        # La dernière activité venue de Strava (les fichiers déposés ont un identifiant négatif)
-        latest = account.activities.filter(strava_id__gt=0).order_by("-start_date").first()
-        if latest:
-            params["after"] = int(latest.start_date.timestamp())
+    known = {a.strava_id: a for a in account.activities.filter(strava_id__gt=0)
+             .only("account", "strava_id", "photos_synced_at", *COMPARED)}
+    local_photos = dict(ActivityPhoto.objects.filter(activity__account=account)
+                        .values_list("activity__strava_id").annotate(n=Count("id")))
+    ignored = set(account.removed_activities.values_list("strava_id", flat=True))
+    result, seen, complete = SyncResult(), set(), False
 
-    count = 0
     for page in range(1, MAX_PAGES + 1):
-        batch = strava.api_get(account, "/athlete/activities", {**params, "page": page})
+        batch = strava.api_get(account, "/athlete/activities", {"per_page": PER_PAGE, "page": page})
+        if not batch:  # Strava peut renvoyer des pages incomplètes : seule une page vide marque la fin
+            complete = True
+            break
         for data in batch:
-            activity, created = Activity.objects.update_or_create(
-                strava_id=data["id"], defaults={"account": account, **_to_fields(data)}
-            )
-            if not created and activity.photos_synced_at:
-                local = activity.photos.count()
-                if activity.photo_count > local:
+            seen.add(data["id"])
+            if data["id"] in ignored:
+                continue
+            fields = _to_fields(data)
+            activity = known.get(data["id"])
+            if activity is None:
+                Activity.objects.update_or_create(strava_id=data["id"], defaults={"account": account, **fields})
+                result.created += 1
+                continue
+            reset = []
+            if activity.photos_synced_at:
+                local = local_photos.get(activity.strava_id, 0)
+                if fields["photo_count"] > local:
                     # Strava annonce plus de photos que nous n'en avons : on les récupérera à nouveau
-                    Activity.objects.filter(pk=activity.pk).update(photos_synced_at=None)
-                elif activity.photo_count < local:
+                    activity.photos_synced_at = None
+                    reset.append("photos_synced_at")
+                else:
                     # Le compteur de la liste Strava (total_photo_count) vaut souvent 0 à tort :
                     # on garde le nombre réellement importé
-                    Activity.objects.filter(pk=activity.pk).update(photo_count=local)
-            count += 1
-        if len(batch) < PER_PAGE:
-            break
-    return count
+                    fields["photo_count"] = local
+            changed = [k for k in COMPARED if getattr(activity, k) != fields[k]]
+            if not changed and not reset:
+                continue
+            if "summary_polyline" in changed or "distance" in changed:
+                # Tracé recoupé ou corrigé sur Strava : le profil d'altitude sera redemandé
+                activity.details_fetched_at = None
+                reset.append("details_fetched_at")
+            for k in changed:
+                setattr(activity, k, fields[k])
+            activity.raw = data
+            activity.save(update_fields=[*changed, *reset, "raw", "synced_at"])
+            result.updated += 1
+
+    # Suppressions : seulement si la liste a été lue jusqu'au bout. Une liste vide alors qu'on connaît
+    # des activités ressemble plus à une panne qu'à un compte vidé : on ne supprime rien.
+    if complete and (seen or not known):
+        gone = set(known) - seen
+        if gone:
+            result.removed = journeys.forget_activities(account, gone)
+        stale = ignored - seen  # retirées du site puis supprimées sur Strava : plus rien à ignorer
+        if stale:
+            account.removed_activities.filter(strava_id__in=stale).delete()
+    account.synced_at = timezone.now()
+    account.save(update_fields=["synced_at", "updated_at"])
+    return result
 
 
 PHOTO_BATCH = 40  # appels API maximum par synchronisation (limite Strava : 100 / 15 min)

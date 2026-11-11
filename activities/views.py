@@ -1,6 +1,7 @@
 import json
 import secrets
 from datetime import timedelta
+from functools import wraps
 
 from django.conf import settings
 from django.contrib import messages
@@ -11,14 +12,39 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import formats, timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 
 from . import book, geo, journeys, places, polyline, sports, strava, towns, webhooks
-from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, Poster, StravaAccount
-from .sync import ensure_photos, sync_activities, sync_photos
+from .models import Activity, Book, BookPhoto, BookStage, JourneyNote, Poster, RemovedActivity, StravaAccount
+from .sync import ensure_photos, import_activity, sync_activities, sync_photos
 
 SESSION_STATE_KEY = "strava_oauth_state"
+
+
+def _account_or_none(request):
+    return getattr(request.user, "strava", None)
+
+
+def account_required(view):
+    """Vue réservée à un utilisateur connecté qui a un compte (Strava ou « sans Strava ») : reçoit ce compte."""
+    @wraps(view)
+    @login_required
+    def wrapper(request, *args, **kwargs):
+        account = _account_or_none(request)
+        if account is None:
+            return redirect("activities:home")
+        return view(request, account, *args, **kwargs)
+    return wrapper
+
+
+def _back(request, default):
+    """Adresse où revenir après une action (champ « next » du formulaire), si elle est sur ce site."""
+    target = request.POST.get("next", "")
+    if target and url_has_allowed_host_and_scheme(target, allowed_hosts={request.get_host()}):
+        return redirect(target)
+    return redirect(default)
 
 
 def home(request):
@@ -90,12 +116,13 @@ def strava_callback(request):
     account = user.strava
     if not account.activities.exists():
         try:
-            count = sync_activities(account)
-            messages.success(request, f"Bienvenue ! {count} activité(s) importée(s) depuis Strava.")
+            result = sync_activities(account)
+            messages.success(request, f"Bienvenue ! {result.created} sortie{'s' if result.created > 1 else ''} "
+                                      f"importée{'s' if result.created > 1 else ''} depuis Strava.")
             _sync_photos_with_message(request, account)
         except strava.StravaError as exc:
             messages.error(request, f"Connecté, mais l'import des activités a échoué : {exc}")
-    return redirect("activities:list")
+    return redirect("activities:map")
 
 
 @require_POST
@@ -267,7 +294,6 @@ def _complete(account, activities=(), journeys_to_name=(), photo_batch=None):
 @require_POST
 @login_required
 def activity_complete(request, strava_id):
-    from django.http import JsonResponse
     account = _account_or_none(request)
     activity = get_object_or_404(Activity, strava_id=strava_id, account__user=request.user)
     return JsonResponse(_complete(account, [activity]))
@@ -276,7 +302,6 @@ def activity_complete(request, strava_id):
 @require_POST
 @login_required
 def journey_complete(request, journey_id):
-    from django.http import JsonResponse
     account = _account_or_none(request)
     if account is None:
         raise Http404
@@ -287,22 +312,14 @@ def journey_complete(request, journey_id):
 @require_POST
 @login_required
 def journeys_complete(request):
-    from django.http import JsonResponse
     account = _account_or_none(request)
     if account is None:
         raise Http404
     return JsonResponse(_complete(account, journeys_to_name=journeys.for_account(account)))
 
 
-def _account_or_none(request):
-    return getattr(request.user, "strava", None)
-
-
-@login_required
-def activity_list(request):
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
+@account_required
+def activity_list(request, account):
 
     qs = account.activities.all()
     sport = request.GET.get("sport", "")
@@ -315,28 +332,52 @@ def activity_list(request):
         request,
         "activities/list.html",
         {"account": account, "page_obj": page_obj, "sports": sports, "sport": sport,
-         "total": account.activities.count()},
+         "total": account.activities.count(), "removed": account.removed_activities.all()},
     )
 
 
 @require_POST
-@login_required
-def activity_sync(request):
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
-    full = request.POST.get("full") == "1"
+@account_required
+def activity_sync(request, account):
+    """« Synchroniser » : aligne le site sur Strava (nouvelles sorties, modifications, suppressions)."""
     try:
-        count = sync_activities(account, full=full)
+        result = sync_activities(account)
     except strava.StravaError as exc:
         messages.error(request, f"Synchronisation interrompue : {exc}")
     else:
-        if count:
-            messages.success(request, f"{count} activité(s) importée(s) depuis Strava.")
+        text = result.summary()
+        if text:
+            messages.success(request, f"Strava synchronisé : {text}.")
         else:
             messages.info(request, "Rien de nouveau sur Strava.")
         _sync_photos_with_message(request, account)
-    return redirect("activities:list")
+    return _back(request, "activities:map")
+
+
+AUTO_SYNC_EVERY = timedelta(hours=12)
+
+
+def _sync_background(account):
+    """Synchronisation automatique à l'ouverture d'Explorer, si la dernière date de plus de 12 h."""
+    if account.is_local or (account.synced_at and account.synced_at > timezone.now() - AUTO_SYNC_EVERY):
+        return None
+    return {"url": reverse("activities:sync_auto"), "pending": 1, "what": "sorties Strava"}
+
+
+@require_POST
+@login_required
+def activity_sync_auto(request):
+    """Appelée par background.js : même synchronisation, sans message ; la page se recharge s'il y a du nouveau."""
+    account = _account_or_none(request)
+    if account is None or account.is_local:
+        raise Http404
+    try:
+        result = sync_activities(account)
+    except strava.RateLimited as exc:
+        return JsonResponse({"found": 0, "remaining": 1, "error": str(exc), "retry": True})
+    except strava.StravaError as exc:
+        return JsonResponse({"found": 0, "remaining": 0, "error": str(exc), "retry": False})
+    return JsonResponse({"found": result.changed, "remaining": 0, "error": None, "retry": False})
 
 
 def _sync_photos_with_message(request, account):
@@ -347,20 +388,51 @@ def _sync_photos_with_message(request, account):
         messages.error(request, f"Import des photos interrompu : {exc}")
         return
     if photos:
-        messages.success(request, f"{photos} photo(s) importée(s).")
-    elif not account.activities.filter(photo_count__gt=0).exists():
-        messages.info(request, "Strava n'indique aucune photo sur tes activités.")
-    if remaining:
-        messages.info(request, f"{remaining} activité(s) avec photos restent à importer : "
-                               "relance la synchronisation dans quelques minutes.")
-    # Les noms de lieux des nouveaux périples arrivent ensuite en arrière-plan (page Périples)
+        messages.success(request, f"{photos} photo{'s' if photos > 1 else ''} importée{'s' if photos > 1 else ''}.")
+    # Les photos restantes et les noms de lieux arrivent ensuite à la demande, en arrière-plan
 
 
-@login_required
-def activity_detail(request, strava_id):
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
+# ---------- Retirer une sortie du site ----------
+# Une sortie saisie par erreur (trajet en voiture, doublon, GPS fou) fausse la carte, les voyages,
+# les affiches et les livres. L'utilisateur la retire ici ; rien n'est modifié sur Strava.
+
+@require_POST
+@account_required
+def activity_remove(request, account, strava_id):
+    activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
+    if not activity.from_file:  # la synchronisation ne doit pas la ramener
+        RemovedActivity.objects.update_or_create(
+            account=account, strava_id=activity.strava_id,
+            defaults={"name": activity.name, "sport_type": activity.sport_type,
+                      "start_date": activity.start_date, "distance": activity.distance})
+    name = activity.name
+    journeys.forget_activities(account, [activity.strava_id])
+    if activity.from_file:
+        messages.success(request, f"« {name} » supprimée. Pour la retrouver, importe à nouveau son fichier.")
+    else:
+        messages.success(request, f"« {name} » retirée du site (elle reste sur Strava). "
+                                  "Tu peux la remettre depuis « Toutes mes activités ».")
+    return _back(request, "activities:map")
+
+
+@require_POST
+@account_required
+def activity_restore(request, account, strava_id):
+    """Remet une sortie retirée : un appel à Strava, sinon elle reviendra à la prochaine synchronisation."""
+    removed = get_object_or_404(RemovedActivity, account=account, strava_id=strava_id)
+    removed.delete()
+    try:
+        activity = import_activity(account, strava_id)
+    except strava.StravaError:
+        StravaAccount.objects.filter(pk=account.pk).update(synced_at=None)
+        messages.info(request, f"« {removed.name} » reviendra à la prochaine synchronisation avec Strava.")
+    else:
+        messages.success(request, f"« {activity.name} » est de retour.")
+    return _back(request, "activities:list")
+
+
+@account_required
+def activity_detail(request, account, strava_id):
     activity = get_object_or_404(Activity, strava_id=strava_id, account=account)
     route = polyline.decode(activity.summary_polyline) if activity.summary_polyline else []
     background = None
@@ -370,12 +442,9 @@ def activity_detail(request, strava_id):
                   {"activity": activity, "route": route, "photos": activity.photos.all(), "background": background})
 
 
-@login_required
-def all_routes_map(request):
+@account_required
+def all_routes_map(request, account):
     """Carte qui superpose tous les parcours de l'utilisateur."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     # « account » doit être chargé (sinon une requête par activité) ; les tracés partent encodés
     # (format Strava, 3 à 5 fois plus léger) et sont décodés par le navigateur, miniatures comprises.
     qs = account.activities.exclude(summary_polyline="").only(
@@ -416,7 +485,8 @@ def all_routes_map(request):
     years = sorted(by_year.values(), key=lambda y: y["year"], reverse=True)
     return render(request, "activities/map.html",
                   {"routes": routes, "routes_data": routes_data, "families": families, "total_km": total_km,
-                   "journeys": trips, "years": years, "suggestion": suggestion})
+                   "journeys": trips, "years": years, "suggestion": suggestion,
+                   "background": _sync_background(account)})
 
 
 DISMISSED_KEY = "dismissed_suggestions"
@@ -452,13 +522,10 @@ def suggestion_dismiss(request, journey_id):
     return JsonResponse({"ok": True}) if _wants_json(request) else redirect("activities:map")
 
 
-@login_required
+@account_required
 @require_POST
-def journey_favorite(request, journey_id):
+def journey_favorite(request, account, journey_id):
     """L'étoile « Mon préféré » : un seul voyage préféré à la fois."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     if journey_id not in {j.id for j in journeys.for_account(account)}:
         raise Http404
     note, _ = JourneyNote.objects.get_or_create(account=account, journey_id=journey_id)
@@ -501,15 +568,12 @@ def _poster_context(account):
     return {"routes": routes, "families": families, "journeys": trips, "athlete": account.firstname}
 
 
-@login_required
-def poster(request):
+@account_required
+def poster(request, account):
     """Affiche libre (sans enregistrement) : réglages gardés dans le navigateur.
 
     Le parcours habituel passe par Explorer → Créer → Affiche, qui enregistre l'affiche (poster_edit).
     """
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     ctx = _poster_context(account)
     routes, trips = ctx["routes"], ctx["journeys"]
     initial = {}
@@ -561,12 +625,9 @@ def poster_towns(request):
     return JsonResponse({"near": towns.near_track(points, km), "ends": ends})
 
 
-@login_required
-def poster_edit(request, poster_id):
+@account_required
+def poster_edit(request, account, poster_id):
     """Une affiche de « Mes créations » : mêmes outils, réglages enregistrés au fil de l'eau."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     obj = get_object_or_404(Poster, pk=poster_id, account=account)
     creation = {"id": obj.pk, "title": obj.title, "settings": obj.settings,
                 "save": reverse("activities:poster_save", args=[obj.pk])}
@@ -577,8 +638,6 @@ def poster_edit(request, poster_id):
 @require_POST
 @login_required
 def poster_save(request, poster_id):
-    from django.http import JsonResponse
-
     account = _account_or_none(request)
     obj = get_object_or_404(Poster, pk=poster_id, account=account)
     data = _json_body(request)
@@ -602,12 +661,9 @@ def poster_delete(request, poster_id):
     return redirect("activities:creations")
 
 
-@login_required
-def creations(request):
+@account_required
+def creations(request, account):
     """Mes créations : affiches et livres, les plus récents d'abord."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     found = {j.id: j for j in journeys.for_account(account)}
     items = [{"kind": "poster", "obj": p, "updated": p.updated_at,
               "subtitle": f"Affiche {p.settings.get('format', 'A3').replace('x', ' × ')}"}
@@ -624,12 +680,9 @@ def creations(request):
 
 
 @require_POST
-@login_required
-def create(request):
+@account_required
+def create(request, account):
     """Le bouton « Créer » d'Explorer : une sélection (voyage, sortie, année, zone) → affiche ou livre."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     kind = request.POST.get("kind")
     title = request.POST.get("title", "").strip()[:120]
     journey_id, activity_id = _signed(request.POST.get("journey")), _signed(request.POST.get("activity"))
@@ -659,11 +712,7 @@ def create(request):
     if kind == "livre":
         if journey_id is not None:
             j = found[journey_id]
-            new = Book.objects.create(account=account, journey_ids=[j.id], title=title or j.name)
-            _, problem = book.prepare(account, [j])
-            if problem:
-                messages.info(request, problem)
-            return redirect("activities:book_detail", book_id=new.pk)
+            return _open_new_book(request, account, [j], journey_ids=[j.id], title=title or j.name)
         if len(ids) > MAX_BOOK_ACTIVITIES:
             messages.error(request, f"Un livre compte au plus {MAX_BOOK_ACTIVITIES} sorties ({len(ids)} ici) : "
                                     "choisis un voyage, ou trace une zone plus petite.")
@@ -672,12 +721,9 @@ def create(request):
         if journey is None:
             messages.error(request, "Aucune de ces sorties n'a de tracé : impossible de créer le livre.")
             return redirect("activities:map")
-        new = Book.objects.create(account=account, activity_ids=[a.strava_id for a in journey.activities],
-                                  title=title or (name if name != "Ma sélection" else journey.place_name) or "Mon livre")
-        _, problem = book.prepare(account, [journey])
-        if problem:
-            messages.info(request, problem)
-        return redirect("activities:book_detail", book_id=new.pk)
+        return _open_new_book(
+            request, account, [journey], activity_ids=[a.strava_id for a in journey.activities],
+            title=title or (name if name != "Ma sélection" else journey.place_name) or "Mon livre")
 
     if title:
         settings_["title"] = title
@@ -749,12 +795,9 @@ def _stage_colors(n):
     return ["#%02x%02x%02x" % tuple(round(a[k] + (b[k] - a[k]) * i / (n - 1)) for k in range(3)) for i in range(n)]
 
 
-@login_required
-def journey_list(request):
+@account_required
+def journey_list(request, account):
     """Périples : activités enchaînées sur plusieurs jours, détectées automatiquement."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     # Miniature : chaque étape dans sa couleur, dans le même cadre que le tracé complet
     found = journeys.for_account(account)
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j)} for j in found if not j.hidden]
@@ -770,11 +813,8 @@ def _find_journey(account, journey_id, budget=None):
     return journey
 
 
-@login_required
-def journey_detail(request, journey_id):
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
+@account_required
+def journey_detail(request, account, journey_id):
     if request.method == "POST" and "transfer_index" in request.POST:
         found = _find_journey(account, journey_id)
         index, mode = request.POST.get("transfer_index", ""), request.POST.get("mode", "")
@@ -901,12 +941,9 @@ def _correct_stages(request, account, journey):
     messages.success(request, (", ".join(changes) + ".").capitalize() if changes else "Étapes enregistrées.")
 
 
-@login_required
-def book_builder(request):
+@account_required
+def book_builder(request, account):
     """Livre : mes livres enregistrés, et création d'un nouveau livre à partir de périples."""
-    account = _account_or_none(request)
-    if account is None:
-        return redirect("activities:home")
     if request.method == "GET" and not request.GET.getlist("j"):
         return redirect("activities:creations")  # les livres vivent dans « Mes créations »
     found = journeys.for_account(account)
@@ -919,13 +956,8 @@ def book_builder(request):
             messages.error(request, "Choisis au moins un périple pour créer le livre.")
             return redirect("activities:book")
         title = request.POST.get("title", "").strip()[:200]
-        new = Book.objects.create(account=account, journey_ids=[j.id for j in chosen],
-                                  title=title or (chosen[0].name if len(chosen) == 1 else "Mes périples"))
-        _, problem = book.prepare(account, chosen)
-        if problem:
-            messages.info(request, problem)
-        # Les photos sont récupérées ensuite par la page du livre, en arrière-plan (book_fetch_photos)
-        return redirect("activities:book_detail", book_id=new.pk)
+        return _open_new_book(request, account, chosen, journey_ids=[j.id for j in chosen],
+                              title=title or (chosen[0].name if len(chosen) == 1 else "Mes périples"))
     preselected = {v for v in map(_signed, request.GET.getlist("j")) if v is not None}
     items = [{"journey": j, "dates": _date_range(j), "thumb": _journey_thumb(j), "checked": j.id in preselected}
              for j in found if not j.hidden or j.id in preselected]
@@ -938,6 +970,16 @@ def book_builder(request):
 
 
 MAX_BOOK_ACTIVITIES = 150  # une page par étape : au-delà, le livre devient ingérable
+
+
+def _open_new_book(request, account, journey_list, **fields):
+    """Crée le livre, prépare ses étapes (descriptions, profils) et l'ouvre."""
+    new = Book.objects.create(account=account, **fields)
+    _, problem = book.prepare(account, journey_list)
+    if problem:
+        messages.info(request, problem)
+    # Les photos sont récupérées ensuite par la page du livre, en arrière-plan (book_fetch_photos)
+    return redirect("activities:book_detail", book_id=new.pk)
 
 
 def _selected_ids(request):
@@ -956,12 +998,8 @@ def _book_from_selection(request, account):
         messages.error(request, "Aucune des activités choisies n'a de tracé : impossible de créer le livre.")
         return redirect("activities:map")
     title = request.POST.get("title", "").strip()[:200]
-    new = Book.objects.create(account=account, activity_ids=[a.strava_id for a in journey.activities],
-                              title=title or journey.place_name or "Ma sélection")
-    _, problem = book.prepare(account, [journey])
-    if problem:
-        messages.info(request, problem)
-    return redirect("activities:book_detail", book_id=new.pk)
+    return _open_new_book(request, account, [journey], activity_ids=[a.strava_id for a in journey.activities],
+                          title=title or journey.place_name or "Ma sélection")
 
 
 def _journey_thumb(j):
@@ -1040,7 +1078,6 @@ def book_detail(request, book_id):
 
 
 def _json_body(request):
-    import json
     try:
         return json.loads(request.body or b"{}")
     except ValueError:
@@ -1059,8 +1096,6 @@ def _book_activity_ids(account, book_obj):
 @login_required
 def book_update(request, book_id):
     """Enregistre une modification faite dans le mode édition du livre (JSON)."""
-    from django.http import JsonResponse
-
     book_obj, account = _book_or_404(request, book_id)
     data = _json_body(request)
     field, value = data.get("field"), data.get("value")
@@ -1152,8 +1187,6 @@ def book_fetch_photos(request, book_id):
 
     Appelée en boucle par la page du livre tant qu'il reste des étapes à vérifier.
     """
-    from django.http import JsonResponse
-
     book_obj, account = _book_or_404(request, book_id)
     chosen = _book_journeys(account, book_obj)
     result = _complete(account, [a for j in chosen for a in j.activities], chosen, photo_batch=BOOK_PHOTO_BATCH)
@@ -1168,7 +1201,6 @@ def book_upload(request, book_id):
     from io import BytesIO
 
     from django.core.files.base import ContentFile
-    from django.http import JsonResponse
     from PIL import Image, ImageOps, UnidentifiedImageError
 
     book_obj, account = _book_or_404(request, book_id)

@@ -154,8 +154,15 @@
   {% else %}
   <div style="padding: 3rem 1rem;">
     <div class="empty-state" style="margin: 0 auto; max-width: 40rem;">
-      <p>Aucun parcours avec tracé GPS pour l'instant. Synchronise tes activités pour les voir apparaître ici.</p>
-      <a class="btn" href="{% url 'activities:list' %}">Aller aux activités</a>
+      <p>Aucun parcours avec tracé GPS pour l'instant.</p>
+      <div class="page-actions" style="justify-content: center;">
+        {% if not user.strava.is_local %}
+          <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+            <button class="btn" type="submit">Synchroniser avec Strava</button>
+          </form>
+        {% endif %}
+        <a class="btn ghost" href="{% url 'activities:import' %}">Importer des fichiers</a>
+      </div>
     </div>
   </div>
   {% endif %}

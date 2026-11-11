@@ -416,6 +416,41 @@ def _queryset(account):
     ).prefetch_related("photos")
 
 
+def forget_activities(account, strava_ids):
+    """Supprime des activités (supprimées sur Strava, ou retirées du site par l'utilisateur).
+
+    Un voyage est identifié par sa première étape détectée. Si c'est elle qui disparaît, le voyage qui
+    continue avec les étapes restantes change d'identifiant : son titre, son récit et ses corrections
+    (JourneyNote), les livres et les affiches qui l'utilisent sont rattachés au nouvel identifiant.
+    Renvoie le nombre d'activités supprimées.
+    """
+    from .models import JourneyNote
+
+    ids = set(strava_ids)
+    activities = list(_queryset(account))
+    renamed = {j.id: [leg.activity.strava_id for leg in j.legs] for j in detect(activities) if j.id in ids}
+    deleted = account.activities.filter(strava_id__in=ids).delete()[1].get("activities.Activity", 0)
+    if not renamed:
+        return deleted
+    owner = {leg.activity.strava_id: j.id
+             for j in detect([a for a in activities if a.strava_id not in ids]) for leg in j.legs}
+    for old, stages in renamed.items():
+        new = next((owner[s] for s in stages if s in owner), None)
+        if new is None:
+            continue  # il ne reste pas de voyage : rien à rattacher
+        if not JourneyNote.objects.filter(account=account, journey_id=new).exists():
+            JourneyNote.objects.filter(account=account, journey_id=old).update(journey_id=new)
+        for b in account.books.all():
+            if old in (b.journey_ids or []):
+                b.journey_ids = list(dict.fromkeys(new if i == old else i for i in b.journey_ids))
+                b.save(update_fields=["journey_ids"])
+        for p in account.posters.all():
+            if p.settings.get("journey") == old:
+                p.settings["journey"] = new
+                p.save(update_fields=["settings"])
+    return deleted
+
+
 SELECTION_KEY = 0  # identifiant du chapitre d'un livre créé depuis une zone de la carte
 
 

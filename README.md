@@ -54,6 +54,24 @@ largeur de l'écran (`fitPages`, transformation seulement : le PDF ne change pas
 modifiable que ce qui la concerne (noms des cartes, textes ou photos), et l'étape en cours est gardée quand
 le livre se recharge.
 
+### Synchronisation
+
+« Synchroniser Strava » (menu du profil) aligne le site sur Strava : nouvelles sorties, sorties **modifiées**
+(titre, sport, tracé recoupé) et sorties **supprimées** (`sync.sync_activities`). Toute la liste est relue, un appel
+pour 200 activités, car c'est le seul moyen de voir une suppression que le webhook n'a pas annoncée (abonnement absent,
+site arrêté, suppression plus ancienne que l'abonnement). Rien n'est supprimé si Strava répond par une erreur ou une
+liste vide. Explorer lance la même synchronisation en arrière-plan quand la dernière date de plus de 12 h
+(`StravaAccount.synced_at`, `/activites/synchroniser/auto/`), et recharge la page s'il y a du nouveau.
+
+### Retirer une sortie
+
+Sur la page d'une sortie, « Retirer cette sortie du site » l'enlève de la carte, des voyages, des affiches et des
+livres (trajet en voiture enregistré par erreur, doublon, GPS fou). Rien ne change sur Strava : l'identifiant est
+gardé dans `RemovedActivity` pour que ni la synchronisation ni le webhook ne la ramènent. « Toutes mes activités » liste
+les sorties retirées, avec « Remettre » (un appel à Strava). Une sortie lue dans un fichier est simplement supprimée.
+Si la sortie retirée (ou supprimée sur Strava) était la première étape d'un voyage, le titre, le récit, les livres et
+les affiches de ce voyage suivent son nouvel identifiant (`journeys.forget_activities`).
+
 ### Webhooks Strava
 
 Strava prévient le site à l'adresse `/strava/webhook/` (`activities/webhooks.py`) :

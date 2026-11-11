@@ -5,7 +5,8 @@ from unittest import mock
 from django.urls import reverse
 
 from .models import Activity, ActivityPhoto, Book
-from .tests import ALBERTVILLE, ANNECY, FAVERGES, MOUTIERS, SAMPLE_POLYLINE, LoggedInTestCase, fake_response, leg
+from .tests import (ALBERTVILLE, ANNECY, FAVERGES, MOUTIERS, SAMPLE_POLYLINE, LoggedInTestCase, fake_response, leg,
+                    strava_pages)
 
 
 def photos_reply(prefix, n=2):
@@ -131,11 +132,11 @@ class StravaPhotoCounterTests(LoggedInTestCase):
         a.save()
         for i in range(2):
             ActivityPhoto.objects.create(activity=a, unique_id=f"p{i}", url=f"https://img.example.com/{i}.jpg")
-        get.return_value = fake_response(json_data=[{
+        get.side_effect = strava_pages([{
             "id": 1, "name": "Étape 1", "sport_type": "Ride", "start_date": "2026-08-10T08:00:00Z",
             "total_photo_count": 0, "map": {"summary_polyline": ""},
         }])
-        sync_activities(self.account, full=True)
+        sync_activities(self.account)
         a.refresh_from_db()
         self.assertIsNotNone(a.photos_synced_at)  # pas de nouvel import inutile
         self.assertEqual(a.photo_count, 2)

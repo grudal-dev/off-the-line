@@ -855,3 +855,10 @@ details.advanced form { margin-top: .75rem; }
 .poster-export > .link-button { align-self: center; }
 #export-btn { white-space: nowrap; justify-content: center; }
 #share-btn { flex: 0 0 auto; justify-content: center; padding-inline: 1.1rem; }
+
+/* Retirer une sortie du site, et la remettre */
+.remove-activity { margin: 1.5rem 0 0; display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: baseline; font-size: var(--t-small); }
+.removed-activities ul { list-style: none; padding: 0; margin: .5rem 0 0; }
+.removed-activities li form { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; margin: 0; padding: .5rem 0; border-bottom: 1px solid var(--contour-soft); }
+.removed-activities li strong { color: var(--ink); font-weight: 600; margin-right: .5rem; }
+details.advanced + details.advanced { margin-top: 1rem; }
