@@ -126,6 +126,12 @@ class PolylineTests(TestCase):
         self.assertEqual(decode(""), [])
 
 
+def poster_page(test, **settings):
+    """L'éditeur d'une affiche enregistrée (la seule façon d'ouvrir l'éditeur)."""
+    poster = Poster.objects.create(account=test.account, settings={"source": "all", **settings})
+    return test.client.get(reverse("activities:poster_edit", args=[poster.pk]))
+
+
 class LoggedInTestCase(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(username="strava_42")
@@ -141,7 +147,7 @@ class LoggedInTestCase(TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         # Ni de photos à la demande (testées à part dans test_photos_on_demand)
-        self.photos_patcher = mock.patch("activities.views.ensure_photos", return_value=(0, 0, None))
+        self.photos_patcher = mock.patch("activities.views.common.ensure_photos", return_value=(0, 0, None))
         self.photos_patcher.start()
         self.addCleanup(self.photos_patcher.stop)
 
@@ -549,9 +555,9 @@ class JourneyPagesTests(LoggedInTestCase):
             a.save()
 
     def test_list_and_detail(self):
-        response = self.client.get(reverse("activities:journeys"))
-        self.assertContains(response, "2 jours à vélo")
-        self.assertContains(response, reverse("activities:journey", args=[1]))
+        # L'ancienne liste des périples renvoie vers Explorer, où les voyages ont leur onglet
+        self.assertRedirects(self.client.get(reverse("activities:journeys")), reverse("activities:map"))
+        self.assertContains(self.client.get(reverse("activities:map")), 'data-focus-trip="1"')
         detail = self.client.get(reverse("activities:journey", args=[1]))
         self.assertContains(detail, 'id="stages-data"')
         self.assertContains(detail, "Nuit 1")
@@ -562,9 +568,9 @@ class JourneyPagesTests(LoggedInTestCase):
         self.assertEqual(response.context["journeys"][0]["stages"], [1, 2])
         self.assertContains(response, 'data-tab="voyages"')  # les voyages ont leur onglet dans Explorer
 
-    def test_empty_list_explains_rules(self):
-        Activity.objects.all().delete()
-        self.assertContains(self.client.get(reverse("activities:journeys")), "Aucun périple")
+    def test_no_journey_no_tab(self):
+        Activity.objects.filter(strava_id=2).delete()
+        self.assertNotContains(self.client.get(reverse("activities:map")), 'data-tab="voyages"')
 
 
 def fake_http(places=None, photos=None):
@@ -646,11 +652,12 @@ class BookTests(LoggedInTestCase):
         Place.objects.all().delete()
         with mock.patch("activities.places._geopf", side_effect=lambda p: {
                 (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
-            builder = self.client.get(reverse("activities:book"), {"j": "1"})
-            self.assertContains(builder, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
+            StravaAccount.objects.update(synced_at=timezone.now())
+            explorer = self.client.get(reverse("activities:map"))
+            self.assertContains(explorer, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
             self.assertEqual(self.client.post(reverse("activities:journeys_complete")).json()["remaining"], 0)
-            self.assertContains(self.client.get(reverse("activities:book"), {"j": "1"}), "Annecy → Albertville")
-        response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
+            self.assertContains(self.client.get(reverse("activities:map")), "Annecy → Albertville")
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1", "title": "Été 2026"})
         from .models import Book
         created = Book.objects.get()
         self.assertRedirects(response, reverse("activities:book_detail", args=[created.pk]), fetch_redirect_response=False)
@@ -670,13 +677,12 @@ class BookTests(LoggedInTestCase):
 
         # Régénérer ne refait pas d'appels Strava
         calls = get.call_count
-        self.client.post(reverse("activities:book"), {"j": ["1"]})
+        self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1"})
         strava_calls = [c for c in get.call_args_list[calls:] if "strava.com" in c.args[0]]
         self.assertEqual(strava_calls, [])
 
-    def test_builder_requires_a_choice(self):
-        response = self.client.post(reverse("activities:book"), {}, follow=True)
-        self.assertContains(response, "Choisis au moins un périple")
+    def test_old_builder_redirects_to_creations(self):
+        self.assertRedirects(self.client.get(reverse("activities:book"), {"j": "1"}), reverse("activities:creations"))
 
     def test_book_of_unknown_journey_redirects(self):
         from .models import Book
@@ -1043,26 +1049,30 @@ class PosterTests(LoggedInTestCase):
                                 start_date=timezone.now(), summary_polyline="")
 
     def test_page_sends_routes_with_a_trace(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="poster-canvas"')
         self.assertContains(response, "poster.js")
         routes = response.context["routes"]
         self.assertEqual([r["id"] for r in routes], [101, 100])  # du plus ancien au plus récent, sans la salle
         self.assertEqual([r["family"] for r in routes], ["run", "ride"])
         self.assertEqual(routes[0]["elev"], 150)
-        self.assertEqual(response.context["initial"], {})
 
     def test_steps_then_free_mode(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'data-mode="steps"')
-        for step in ("sorties", "format", "style", "textes", "details", "recap"):
+        # Quatre étapes seulement, le style d'abord ; le reste est dans « Plus de réglages »
+        steps = [s for s in ("style", "format", "textes", "sorties")]
+        for step in steps:
             self.assertContains(response, f'data-step="{step}"')
             self.assertContains(response, f'data-goto="{step}"')
+        for gone in ("details", "recap"):
+            self.assertNotContains(response, f'data-goto="{gone}"')
+        self.assertContains(response, 'id="trace-width"')  # l'épaisseur du tracé se règle finement dès l'étape Style
         for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps", "export-btn", "share-btn"):
             self.assertContains(response, f'id="{button}"')
 
     def test_stage_list_also_for_saved_posters(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="stage-list"')
         poster = Poster.objects.create(account=self.account, settings={"source": "all"})
         response = self.client.get(reverse("activities:poster_edit", args=[poster.pk]))
@@ -1071,7 +1081,7 @@ class PosterTests(LoggedInTestCase):
 
     def test_landmark_options_and_data(self):
         from django.contrib.staticfiles import finders
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         for name in ("countries", "regions", "coast"):
             self.assertContains(response, f'name="{name}"')
             self.assertContains(response, f"activities/borders-{name}.json")
@@ -1084,11 +1094,9 @@ class PosterTests(LoggedInTestCase):
         self.assertContains(response, 'id="activity-search"')
         self.assertNotContains(response, 'name="hl"')  # aucun périple : pas d'option de mise en évidence
 
-    def test_preselected_activity(self):
+    def test_old_poster_page_redirects_to_creations(self):
         response = self.client.get(reverse("activities:poster"), {"activite": "101"})
-        self.assertEqual(response.context["initial"], {"source": "activity", "id": 101})
-        unknown = self.client.get(reverse("activities:poster"), {"activite": "999", "periple": "x"})
-        self.assertEqual(unknown.context["initial"], {})
+        self.assertRedirects(response, reverse("activities:creations"))
 
     def test_links_from_activity_and_nav(self):
         response = self.client.get(reverse("activities:detail", args=[100]))
@@ -1097,7 +1105,7 @@ class PosterTests(LoggedInTestCase):
 
     def test_empty_state(self):
         Activity.objects.all().delete()
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, "Aucun parcours avec tracé GPS")
         self.assertNotContains(response, "poster.js")
 
@@ -1121,15 +1129,15 @@ class ZoneSelectionTests(LoggedInTestCase):
         self.assertEqual({r["day"][:10] for r in response.context["routes_data"]}, {"2026-08-10", "2026-08-20"})
 
     def test_poster_from_selection(self):
-        response = self.client.post(reverse("activities:poster"), {"a": ["2", "999"], "title": "Mes Alpes"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["initial"], {"source": "selection", "id": [2], "title": "Mes Alpes"})
-        self.assertContains(response, 'data-source="selection"')
+        response = self.client.post(reverse("activities:create"), {"kind": "affiche", "a": ["2", "1"], "title": "Mes Alpes"})
+        poster = Poster.objects.get()
+        self.assertRedirects(response, reverse("activities:poster_edit", args=[poster.pk]))
+        self.assertEqual((poster.settings["source"], poster.settings["selection"], poster.title), ("selection", [2, 1], "Mes Alpes"))
 
     @mock.patch("activities.strava.requests.get", side_effect=fake_http(PLACE_NAMES))
     def test_book_from_selection(self, get):
         from .models import Book
-        response = self.client.post(reverse("activities:book"), {"a": ["2", "1"]})
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["2", "1"]})
         book_obj = Book.objects.get()
         self.assertRedirects(response, reverse("activities:book_detail", args=[book_obj.pk]), fetch_redirect_response=False)
         self.assertEqual(book_obj.activity_ids, [1, 2])  # ordre chronologique, trajet domicile-travail compris
@@ -1152,11 +1160,11 @@ class ZoneSelectionTests(LoggedInTestCase):
 
     def test_book_selection_limits(self):
         from .models import Book
-        response = self.client.post(reverse("activities:book"), {"a": ["999"]}, follow=True)
-        self.assertContains(response, "Aucune des activités choisies")
-        with mock.patch("activities.views.MAX_BOOK_ACTIVITIES", 1):
-            response = self.client.post(reverse("activities:book"), {"a": ["1", "2"]}, follow=True)
-        self.assertContains(response, "Trop d&#x27;activités")
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["999"]}, follow=True)
+        self.assertContains(response, "Aucune de ces sorties")
+        with mock.patch("activities.views.explorer.MAX_BOOK_ACTIVITIES", 1):
+            response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["1", "2"]}, follow=True)
+        self.assertContains(response, "Un livre compte au plus")
         self.assertFalse(Book.objects.exists())
 
 
@@ -1179,7 +1187,7 @@ class PosterJourneyDataTests(LoggedInTestCase):
             Place.objects.create(lat_key=lat, lng_key=lng, name=name)
 
     def test_trip_stops_days_and_profiles(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         trip = response.context["journeys"][0]
         self.assertEqual(trip["days"], 3)
         # Faverges revient en arrivée : une seule fois, à la fin, au point d'arrivée
@@ -1250,7 +1258,7 @@ class FreeImageryTests(LoggedInTestCase):
 
     def test_leg_places(self):
         from types import SimpleNamespace
-        from .views import _leg_places
+        from .views.books import _leg_places
         trip = SimpleNamespace(start=ANNECY, end=FAVERGES, start_name="Annecy", end_name="Faverges")
         self.assertEqual([p[2] for p in _leg_places(trip)], ["Annecy", "Faverges"])
         loop = SimpleNamespace(start=ANNECY, end=ANNECY, start_name="Annecy", end_name="Annecy")
@@ -1314,11 +1322,10 @@ class VectorBasemapTests(LoggedInTestCase):
         self.assertIsNone(own["dem"])
 
     def test_pages_load_vector_scripts_and_poster_panel(self):
-        for name in ("map", "poster"):
-            response = self.client.get(reverse(f"activities:{name}"))
+        for response in (self.client.get(reverse("activities:map")), poster_page(self)):
             for script in ("maplibre-gl.js", "maplibre-contour.js", "pmtiles.js", "mapstyles.js", "maprender.js"):
                 self.assertContains(response, script)
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="vector-panel"')
         for name in ("vRelief", "vContours", "vRoads", "vRoadScale", "vDetail", "vPaths", "vBuildings", "vNature", "vBorders"):
             self.assertContains(response, f'name="{name}"')
@@ -1393,11 +1400,11 @@ class ImportFilesTests(TestCase):
             # Déposer à nouveau la même sortie ne la duplique pas
             self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file())]})
             self.assertEqual(account.activities.count(), 2)
-            for name in ("list", "map", "poster", "journeys", "creations"):
+            for name in ("list", "map", "creations"):
                 self.assertEqual(self.client.get(reverse(f"activities:{name}")).status_code, 200, name)
             # Un livre se fabrique aussi à partir des sorties importées, sans appel à Strava
             ids = [str(a.strava_id) for a in account.activities.all()]
-            r = self.client.post(reverse("activities:book"), {"a": ids})
+            r = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ids})
             self.assertEqual(r.status_code, 302)
             self.assertEqual(self.client.get(r["Location"]).status_code, 200)
             page = self.client.get(reverse("activities:list"))
@@ -1431,6 +1438,49 @@ class StravaUserImportTests(LoggedInTestCase):
         api.assert_called_once()
         self.assertEqual(self.account.activities.filter(strava_id__lt=0).count(), 1)  # le fichier reste
 
+
+
+class SuspectActivityTests(LoggedInTestCase):
+    """Explorer signale les sorties qui ressemblent à une erreur : vitesse improbable, doublon."""
+
+    def setUp(self):
+        super().setUp()
+        from .sync import _to_fields
+        rows = (
+            {**strava_activity(1, "Vélo normal", start="2026-10-01T08:00:00Z", sport="Ride"), "distance": 60000, "moving_time": 9000},
+            {**strava_activity(2, "Retour en voiture", start="2026-10-02T08:00:00Z", sport="Ride"), "distance": 90000, "moving_time": 3600},
+            {**strava_activity(3, "Footing", start="2026-10-03T08:00:00Z"), "distance": 10000, "moving_time": 3000},
+            {**strava_activity(4, "Footing (montre)", start="2026-10-03T08:00:40Z"), "distance": 10100, "moving_time": 3000},
+        )
+        for data in rows:
+            Activity.objects.create(account=self.account, strava_id=data["id"], **_to_fields(data))
+
+    def test_speed_and_duplicates_are_flagged(self):
+        from . import checks
+        found = checks.suspects(list(Activity.objects.all()))
+        self.assertEqual(set(found), {2, 4})
+        self.assertIn("90 km/h", found[2])
+        self.assertIn("Footing", found[4])
+
+    def test_explorer_lists_them_with_remove_and_keep(self):
+        page = self.client.get(reverse("activities:map"))
+        self.assertEqual([s["id"] for s in page.context["suspects"]], [4, 2])
+        self.assertContains(page, 'data-suspect="2"')
+        self.assertContains(page, 'data-keep="2"')
+        self.assertContains(page, 'class="row-remove" data-remove="1"')  # chaque sortie de la liste peut être retirée
+        self.assertContains(self.client.get(reverse("activities:detail", args=[2])), "À vérifier.")
+        self.assertNotContains(self.client.get(reverse("activities:detail", args=[1])), "À vérifier.")
+
+    def test_keep_stops_the_warning(self):
+        r = self.client.post(reverse("activities:keep", args=[2]), HTTP_ACCEPT="application/json")
+        self.assertTrue(r.json()["ok"])
+        self.assertEqual([s["id"] for s in self.client.get(reverse("activities:map")).context["suspects"]], [4])
+
+    def test_remove_from_explorer_answers_json(self):
+        r = self.client.post(reverse("activities:remove", args=[2]), HTTP_ACCEPT="application/json")
+        self.assertTrue(r.json()["ok"])
+        self.assertFalse(Activity.objects.filter(strava_id=2).exists())
+        self.assertEqual(self.account.removed_activities.count(), 1)
 
 
 class RemoveFirstStageTests(LoggedInTestCase):

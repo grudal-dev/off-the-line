@@ -31,6 +31,13 @@
         <button class="link-button danger" type="submit">{% if activity.from_file %}Supprimer cette sortie{% else %}Retirer cette sortie du site{% endif %}</button>
         <span class="muted">Une erreur de saisie, un trajet en voiture ?</span>
       </form>
+      {% if suspect %}
+        <form method="post" action="{% url 'activities:keep' activity.strava_id %}" class="notice suspect-notice">{% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <strong>À vérifier.</strong> {{ suspect }}
+          <button class="link-button" type="submit">Elle est correcte, la garder</button>
+        </form>
+      {% endif %}
     </div>
 
     {% if route %}

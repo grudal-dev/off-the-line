@@ -78,10 +78,10 @@ class JourneyCorrectionTests(LoggedInTestCase):
 
     def test_hide_and_unhide(self):
         response = self.client.post(self.url, {"action": "hide"})
-        self.assertRedirects(response, reverse("activities:journeys"))
-        listing = self.client.get(reverse("activities:journeys"))
-        self.assertContains(listing, "1 périple masqué")
-        self.assertEqual(self.client.get(reverse("activities:map")).context["journeys"], [])
+        self.assertRedirects(response, reverse("activities:map"))
+        explorer = self.client.get(reverse("activities:map"))
+        self.assertEqual(explorer.context["journeys"], [])
+        self.assertEqual([h["url"] for h in explorer.context["hidden_journeys"]], [self.url])  # de quoi le rétablir
         self.assertContains(self.client.get(self.url), "Rétablir ce périple")
         self.client.post(self.url, {"action": "unhide"})
         self.assertEqual(len(self.client.get(reverse("activities:map")).context["journeys"]), 1)
@@ -102,7 +102,7 @@ class JourneyCorrectionTests(LoggedInTestCase):
 
     def test_book_uses_the_corrected_journey(self):
         self.fix(remove=["4"], name_1="Grand départ")
-        self.client.post(reverse("activities:book"), {"j": ["1"]})
+        self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1"})
         page = self.client.get(reverse("activities:book_detail", args=[Book.objects.get().pk]))
         self.assertContains(page, "Grand départ")
         self.assertNotContains(page, 'id="map-s4"')
@@ -126,7 +126,7 @@ class MapZoneTests(LoggedInTestCase):
         self.assertEqual((trip["days"], trip["stages"]), (3, [1, 2, 3]))
 
     def test_zone_form_creates_a_book(self):
-        response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Autour d'Annecy"})
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1", "title": "Autour d'Annecy"})
         book = Book.objects.get()
         self.assertEqual((book.title, book.journey_ids), ("Autour d'Annecy", [1]))
         self.assertRedirects(response, reverse("activities:book_detail", args=[book.pk]), fetch_redirect_response=False)

@@ -862,3 +862,26 @@ details.advanced form { margin-top: .75rem; }
 .removed-activities li form { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; margin: 0; padding: .5rem 0; border-bottom: 1px solid var(--contour-soft); }
 .removed-activities li strong { color: var(--ink); font-weight: 600; margin-right: .5rem; }
 details.advanced + details.advanced { margin-top: 1rem; }
+
+/* Affiche : réglage fin de l'épaisseur du tracé, lien vers tous les réglages */
+.trace-fine { display: grid; grid-template-columns: 1fr auto; gap: .1rem .5rem; margin-top: .5rem; font-size: var(--t-small); color: var(--slate); }
+.trace-fine input { grid-column: 1 / -1; width: 100%; }
+.wizard-nav .link-button.wizard-more { order: 5; font-weight: 400; margin: .2rem 0 0; }
+
+/* Explorer : sorties à vérifier, retirer une sortie, voyages masqués */
+.suspects { margin: 0 1rem .6rem; padding: .5rem .7rem; border: 1px solid #e6b450; border-radius: 8px; background: #fff8e6; font-size: var(--t-small); }
+.suspects summary { cursor: pointer; font-weight: 600; color: #7a4b00; }
+.suspects p { margin: .4rem 0; }
+.suspects ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; }
+.suspects li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; align-items: center; padding: .4rem 0; border-top: 1px solid #f0dca8; }
+.suspects li a { color: var(--ink); text-decoration: none; }
+.suspects li a strong, .suspects li a span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.suspect-actions { display: flex; gap: .7rem; white-space: nowrap; }
+.suspect-notice { display: block; }
+.row-remove { border: 0; background: none; color: var(--slate); cursor: pointer; font-size: .85rem; padding: .35rem .45rem; border-radius: 6px; line-height: 1; }
+.row-remove:hover, .row-remove:focus-visible { color: #b42318; background: #fbe9e7; }
+#zone-activities li { display: flex; align-items: center; gap: .25rem; }
+#zone-activities li label { flex: 1; min-width: 0; }
+.explorer-hidden { padding: .6rem 1rem; color: var(--slate); font-size: var(--t-small); }
+.explorer-hidden summary { cursor: pointer; }
+.explorer-hidden ul { margin: .4rem 0 0; padding-left: 1.1rem; }

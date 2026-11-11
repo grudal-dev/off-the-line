@@ -65,6 +65,8 @@ class Activity(models.Model):
     start_lat = models.FloatField(null=True, blank=True)
     start_lng = models.FloatField(null=True, blank=True)
     raw = models.JSONField(default=dict, blank=True)
+    # Sortie signalée « à vérifier » (checks.py) que l'utilisateur a choisi de garder
+    confirmed = models.BooleanField(default=False)
 
     synced_at = models.DateTimeField(auto_now=True)
 

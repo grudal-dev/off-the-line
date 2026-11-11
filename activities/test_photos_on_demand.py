@@ -3,6 +3,7 @@
 from unittest import mock
 
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import Activity, ActivityPhoto, Book
 from .tests import (ALBERTVILLE, ANNECY, FAVERGES, MOUTIERS, SAMPLE_POLYLINE, LoggedInTestCase, fake_response, leg,
@@ -70,7 +71,7 @@ class PhotosOnDemandTests(LoggedInTestCase):
         self.assertEqual(data["remaining"], 3 + 4)  # 3 étapes à vérifier + 4 lieux à nommer
         self.assertFalse(Activity.objects.filter(photos_synced_at__isnull=False).exists())
 
-    @mock.patch("activities.views.PHOTO_BATCH_BG", 1)
+    @mock.patch("activities.views.common.PHOTO_BATCH_BG", 1)
     @mock.patch("activities.strava.requests.get", side_effect=strava_get)
     def test_small_batches(self, get):
         self.assertEqual(self.client.post(self.complete).json()["remaining"], 2)
@@ -102,12 +103,14 @@ class PlaceNamesInBackgroundTests(LoggedInTestCase):
     def test_list_names_places_in_background(self):
         names = {(45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville", (45.5, 6.5): "Moûtiers"}
         with mock.patch("activities.places._geopf", side_effect=lambda p: names.get((round(p[0], 1), round(p[1], 1)), "")) as geo:
-            page = self.client.get(reverse("activities:journeys"))
+            self.account.synced_at = timezone.now()  # Strava à jour : la tâche de fond est celle des noms
+            self.account.save()
+            page = self.client.get(reverse("activities:map"))
             self.assertEqual(geo.call_count, 0)
             self.assertContains(page, 'data-url="/periples/completer/"')
             data = self.client.post(reverse("activities:journeys_complete")).json()
             self.assertEqual((data["found"], data["remaining"]), (4, 0))
-        page = self.client.get(reverse("activities:journeys"))
+        page = self.client.get(reverse("activities:map"))
         self.assertContains(page, "Annecy → Moûtiers")
         self.assertNotContains(page, 'id="bg-task"')
 
@@ -173,7 +176,7 @@ class BookPhotosTests(LoggedInTestCase):
         self.assertEqual(get.call_count, 0)  # la page s'affiche tout de suite
         self.assertContains(page, "à récupérer")
         self.assertContains(page, self.fetch)
-        with mock.patch("activities.views.BOOK_PHOTO_BATCH", 2):
+        with mock.patch("activities.views.books.BOOK_PHOTO_BATCH", 2):
             first = self.client.post(self.fetch).json()
             self.assertEqual((first["imported"], first["remaining"], first["error"]), (4, 1, None))
             second = self.client.post(self.fetch).json()

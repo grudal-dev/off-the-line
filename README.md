@@ -37,13 +37,17 @@ pourra ensuite se connecter avec « Se connecter avec Strava » et retrouver ses
 un fichier met simplement les jetons à jour. Les fichiers UTF-16 écrits par PowerShell sont acceptés,
 et `strava_*.json` est ignoré par git.
 
-### Affiche : personnalisation par étapes
+### Affiche : quatre étapes et des réglages de départ adaptés
 
-L'affiche se compose en six étapes, l'aperçu suivant chaque choix : sorties, format, style, textes,
-détails (profil, villes, frontières, cadre) puis un résumé. « Tous les réglages » ouvre le mode libre
-(le formulaire complet), mémorisé dans le navigateur. « Surprends-moi » choisit parmi des combinaisons
-préparées (thème, cadre, marque) celle qui convient le mieux aux sorties (saison, relief, nombre
-d'étapes), puis règle le sens, le profil et les villes ; chaque clic propose une autre combinaison.
+L'éditeur montre quatre étapes, l'aperçu suivant chaque choix : **Style** (thème, épaisseur du tracé en trois crans
+plus un réglage fin, couleur, halo, départ et arrivée, frontières), **Format** (sens, taille, cadre), **Textes**
+(titre, sous-titre, chiffres, profil d'altitude) et **Tracés** (décocher une sortie). « Télécharger » est toujours
+visible ; « Plus de réglages » ouvre le formulaire complet (fond de carte, villes, repères, cadrage, impression).
+
+À la première ouverture, les réglages sont choisis d'après le parcours (`adaptedDefaults` dans `poster.js`) : carte
+**Carnet**, sens portrait ou paysage selon la forme du tracé, épaisseur selon le nombre de tracés (2,2 mm pour une
+sortie, 0,45 mm au-delà de 150), profil d'altitude s'il y a du relief, villes-étapes pour un voyage, départ et arrivée
+pour une sortie seule. « Surprends-moi » propose ensuite d'autres combinaisons préparées.
 
 ### Livre : personnalisation par étapes
 
@@ -63,7 +67,15 @@ site arrêté, suppression plus ancienne que l'abonnement). Rien n'est supprimé
 liste vide. Explorer lance la même synchronisation en arrière-plan quand la dernière date de plus de 12 h
 (`StravaAccount.synced_at`, `/activites/synchroniser/auto/`), et recharge la page s'il y a du nouveau.
 
+### Sorties à vérifier
+
+Explorer signale les sorties qui ressemblent à une erreur (`activities/checks.py`) : vitesse moyenne improbable pour le
+sport (plus de 25 km/h en course, 12 à pied, 60 à vélo) ou doublon (même départ à 2 minutes près, même distance à 5 %).
+« Retirer » l'enlève, « Garder » la valide (`Activity.confirmed`) et on n'en parle plus.
+
 ### Retirer une sortie
+
+Depuis Explorer : ✕ sur chaque ligne de l'onglet Sorties et de la liste d'une zone, sans recharger la carte.
 
 Sur la page d'une sortie, « Retirer cette sortie du site » l'enlève de la carte, des voyages, des affiches et des
 livres (trajet en voiture enregistré par erreur, doublon, GPS fou). Rien ne change sur Strava : l'identifiant est
@@ -163,8 +175,8 @@ Deux espaces seulement, et un seul bouton pour créer.
   changement (`/affiche/<id>/enregistrer/`). L'éditeur n'affiche que Format, Style et Titre ; le reste est dans
   « Plus de réglages ».
 - Menu du profil (avatar) : importer des fichiers, synchroniser Strava, toutes les activités, se déconnecter.
-- Les anciennes pages restent accessibles (`/activites/`, `/periples/`, `/affiche/` sans enregistrement) ;
-  `/livre/` renvoie vers Mes créations.
+- Les anciennes pages ont disparu : `/periples/` renvoie vers Explorer (onglet Voyages, voyages masqués en bas de
+  l'onglet), `/affiche/` et `/livre/` vers Mes créations. Tout se crée depuis Explorer.
 
 ## Import de fichiers (sans Strava)
 
@@ -419,6 +431,10 @@ https://www.strava.com/settings/api. Sur Railway, le domaine généré est lui a
 
 - `config/` : réglages du projet Django
 - `activities/` : app principale (connexion Strava, activités, visualisations)
+- `activities/views/` : les vues par espace (`account`, `activities`, `explorer`, `journeys`, `posters`, `books`,
+  outils partagés dans `common`)
+- `activities/static/activities/book.js`, `book-edit.js`, `book-photos.js` : les scripts du livre (la page ne garde
+  que ses adresses dans `BOOK`)
 - `activities/static/activities/` : feuille de style, icônes, polices Barlow et Leaflet hébergés localement
 
 ## Tests
