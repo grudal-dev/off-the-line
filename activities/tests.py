@@ -22,6 +22,14 @@ def fake_response(status=200, json_data=None):
     return r
 
 
+def strava_pages(*pages):
+    """Réponses de GET /athlete/activities page par page ; au-delà, une page vide (fin de la liste)."""
+    def get(url, params=None, **kwargs):
+        page = (params or {}).get("page", 1)
+        return fake_response(json_data=pages[page - 1] if page <= len(pages) else [])
+    return get
+
+
 @override_settings(STRAVA_CLIENT_ID="1234", STRAVA_CLIENT_SECRET="secret")
 class StravaOAuthTests(TestCase):
     def test_home_ok(self):
@@ -77,7 +85,7 @@ class StravaOAuthTests(TestCase):
     @mock.patch("activities.strava.requests.post")
     def test_callback_creates_user_logs_in_and_imports(self, post, get):
         post.return_value = fake_response(json_data=TOKEN_RESPONSE)
-        get.return_value = fake_response(json_data=[{
+        get.side_effect = strava_pages([{
             "id": 7, "name": "Première sortie", "sport_type": "Run", "distance": 5000,
             "start_date": "2026-10-01T08:00:00Z", "map": {"summary_polyline": ""},
         }])
@@ -86,7 +94,7 @@ class StravaOAuthTests(TestCase):
             reverse("activities:strava_callback"),
             {"state": state, "code": "abc", "scope": "read,activity:read_all"},
         )
-        self.assertRedirects(response, reverse("activities:list"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("activities:map"), fetch_redirect_response=False)
         account = StravaAccount.objects.get(athlete_id=42)
         self.assertEqual(account.access_token, "acc-123")
         self.assertEqual(account.user.username, "strava_42")
@@ -118,6 +126,12 @@ class PolylineTests(TestCase):
         self.assertEqual(decode(""), [])
 
 
+def poster_page(test, **settings):
+    """L'éditeur d'une affiche enregistrée (la seule façon d'ouvrir l'éditeur)."""
+    poster = Poster.objects.create(account=test.account, settings={"source": "all", **settings})
+    return test.client.get(reverse("activities:poster_edit", args=[poster.pk]))
+
+
 class LoggedInTestCase(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create(username="strava_42")
@@ -133,7 +147,7 @@ class LoggedInTestCase(TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         # Ni de photos à la demande (testées à part dans test_photos_on_demand)
-        self.photos_patcher = mock.patch("activities.views.ensure_photos", return_value=(0, 0, None))
+        self.photos_patcher = mock.patch("activities.views.common.ensure_photos", return_value=(0, 0, None))
         self.photos_patcher.start()
         self.addCleanup(self.photos_patcher.stop)
 
@@ -160,33 +174,182 @@ class SyncTests(LoggedInTestCase):
     @mock.patch("activities.strava.requests.get")
     def test_sync_creates_activities_and_is_idempotent(self, get):
         from .sync import sync_activities
-        get.return_value = fake_response(json_data=[strava_activity(1), strava_activity(2, polyline="")])
-        self.assertEqual(sync_activities(self.account), 2)
+        get.side_effect = strava_pages([strava_activity(1), strava_activity(2, polyline="")])
+        self.assertEqual(sync_activities(self.account).created, 2)
         self.assertEqual(Activity.objects.count(), 2)
         a = Activity.objects.get(strava_id=1)
         self.assertEqual(a.summary_polyline, SAMPLE_POLYLINE)
         self.assertEqual(a.start_lat, 38.5)
 
-        # 2e synchro : on ne demande que les activités plus récentes
-        get.return_value = fake_response(json_data=[])
-        sync_activities(self.account)
-        self.assertIn("after", get.call_args.kwargs["params"])
-        self.assertEqual(Activity.objects.count(), 2)
+        # 2e synchro : toute la liste est relue, rien n'a changé, rien n'est réécrit
+        stamp = a.synced_at
+        result = sync_activities(self.account)
+        self.assertEqual(result.changed, 0)
+        self.assertNotIn("after", get.call_args.kwargs["params"])
+        self.assertEqual(Activity.objects.get(strava_id=1).synced_at, stamp)
+        self.account.refresh_from_db()
+        self.assertIsNotNone(self.account.synced_at)
 
     @mock.patch("activities.strava.requests.get")
-    def test_sync_paginates(self, get):
+    def test_sync_paginates_until_an_empty_page(self, get):
         from .sync import PER_PAGE, sync_activities
-        page1 = [strava_activity(i) for i in range(PER_PAGE)]
-        page2 = [strava_activity(PER_PAGE + 1)]
-        get.side_effect = [fake_response(json_data=page1), fake_response(json_data=page2)]
-        self.assertEqual(sync_activities(self.account), PER_PAGE + 1)
-        self.assertEqual(get.call_count, 2)
+        # Strava peut renvoyer une page incomplète avant la fin : seule une page vide arrête la lecture
+        get.side_effect = strava_pages([strava_activity(i) for i in range(1, PER_PAGE)], [strava_activity(PER_PAGE + 1)])
+        self.assertEqual(sync_activities(self.account).created, PER_PAGE)
+        self.assertEqual(get.call_count, 3)
 
     @mock.patch("activities.strava.requests.get")
     def test_sync_view_shows_rate_limit_error(self, get):
         get.return_value = fake_response(status=429)
         response = self.client.post(reverse("activities:sync"), follow=True)
         self.assertContains(response, "Limite de requêtes Strava")
+
+    @mock.patch("activities.strava.requests.get")
+    def test_activity_deleted_on_strava_is_removed(self, get):
+        """Le bug : une sortie supprimée sur Strava restait sur la carte (la synchro ne lisait que les nouvelles)."""
+        from .sync import sync_activities
+        get.side_effect = strava_pages([strava_activity(1), strava_activity(2), strava_activity(3)])
+        sync_activities(self.account)
+        get.side_effect = strava_pages([strava_activity(1), strava_activity(3)])
+        result = sync_activities(self.account)
+        self.assertEqual((result.created, result.updated, result.removed), (0, 0, 1))
+        self.assertEqual(set(Activity.objects.values_list("strava_id", flat=True)), {1, 3})
+        self.assertNotContains(self.client.get(reverse("activities:map")), 'data-route="2"')
+
+    @mock.patch("activities.strava.requests.get")
+    def test_sync_view_reports_deletions(self, get):
+        get.side_effect = strava_pages([strava_activity(1), strava_activity(2)])
+        self.client.post(reverse("activities:sync"))
+        get.side_effect = strava_pages([strava_activity(1)])
+        response = self.client.post(reverse("activities:sync"), {"next": reverse("activities:list")}, follow=True)
+        self.assertRedirects(response, reverse("activities:list"))
+        self.assertContains(response, "1 supprimée sur Strava")
+
+    @mock.patch("activities.strava.requests.get")
+    def test_activity_changed_on_strava_is_updated(self, get):
+        from .sync import sync_activities
+        get.side_effect = strava_pages([strava_activity(1, "Sortie")])
+        sync_activities(self.account)
+        Activity.objects.update(details_fetched_at=timezone.now(), profile=[[0, 100]])
+        get.side_effect = strava_pages([strava_activity(1, "Tour du lac", polyline="_p~iF~ps|U_ulLnnqC")])
+        self.assertEqual(sync_activities(self.account).updated, 1)
+        a = Activity.objects.get(strava_id=1)
+        self.assertEqual(a.name, "Tour du lac")
+        self.assertIsNone(a.details_fetched_at)  # tracé modifié : le profil sera redemandé
+
+    @mock.patch("activities.strava.requests.get")
+    def test_nothing_deleted_when_strava_fails_or_returns_nothing(self, get):
+        from . import strava
+        from .sync import sync_activities
+        get.side_effect = strava_pages([strava_activity(1), strava_activity(2)])
+        sync_activities(self.account)
+        get.side_effect = strava_pages()  # liste vide : plutôt une panne qu'un compte vidé
+        self.assertEqual(sync_activities(self.account).removed, 0)
+        get.side_effect = [fake_response(json_data=[strava_activity(1)]), fake_response(status=500)]
+        with self.assertRaises(strava.StravaError):
+            sync_activities(self.account)
+        self.assertEqual(Activity.objects.count(), 2)
+
+    @mock.patch("activities.strava.requests.get")
+    def test_files_are_never_removed_by_sync(self, get):
+        from .sync import _to_fields, sync_activities
+        Activity.objects.create(account=self.account, strava_id=-5, **_to_fields(strava_activity(-5)))
+        get.side_effect = strava_pages([strava_activity(1)])
+        sync_activities(self.account)
+        sync_activities(self.account)
+        self.assertEqual(set(Activity.objects.values_list("strava_id", flat=True)), {-5, 1})
+
+    @mock.patch("activities.strava.requests.get")
+    def test_explorer_syncs_in_background_when_stale(self, get):
+        get.side_effect = strava_pages([strava_activity(1)])
+        page = self.client.get(reverse("activities:map"))
+        self.assertContains(page, f'data-url="{reverse("activities:sync_auto")}"')
+        data = self.client.post(reverse("activities:sync_auto")).json()
+        self.assertEqual((data["found"], data["remaining"], data["error"]), (1, 0, None))
+        self.assertNotContains(self.client.get(reverse("activities:map")), 'id="bg-task"')  # à jour pour 12 h
+        get.side_effect = None
+        get.return_value = fake_response(status=429)
+        self.assertTrue(self.client.post(reverse("activities:sync_auto")).json()["retry"])
+
+
+class RemoveActivityTests(LoggedInTestCase):
+    """Une sortie saisie par erreur se retire du site, sans revenir à la synchronisation suivante."""
+
+    def setUp(self):
+        super().setUp()
+        from .sync import _to_fields
+        for data in (strava_activity(1, "Trajet en voiture"), strava_activity(2, "Vélo", sport="Ride")):
+            Activity.objects.create(account=self.account, strava_id=data["id"], **_to_fields(data))
+        Activity.objects.create(account=self.account, strava_id=-9, **_to_fields(strava_activity(-9, "Fichier")))
+
+    def test_detail_offers_to_remove(self):
+        page = self.client.get(reverse("activities:detail", args=[1]))
+        self.assertContains(page, reverse("activities:remove", args=[1]))
+        self.assertContains(page, "Retirer cette sortie du site")
+        self.assertContains(self.client.get(reverse("activities:detail", args=[-9])), "Supprimer cette sortie")
+
+    @mock.patch("activities.strava.requests.get")
+    def test_removed_activity_leaves_the_site_and_does_not_come_back(self, get):
+        from .models import RemovedActivity
+        from .sync import sync_activities
+        response = self.client.post(reverse("activities:remove", args=[1]), follow=True)
+        self.assertRedirects(response, reverse("activities:map"))
+        self.assertContains(response, "retirée du site")
+        self.assertNotContains(response, 'data-route="1"')
+        self.assertEqual(self.client.get(reverse("activities:detail", args=[1])).status_code, 404)
+        self.assertContains(self.client.get(reverse("activities:list")), "Sorties retirées du site (1)")
+
+        get.side_effect = strava_pages([strava_activity(1, "Trajet en voiture"), strava_activity(2, "Vélo", sport="Ride")])
+        self.assertEqual(sync_activities(self.account).changed, 0)
+        self.assertFalse(Activity.objects.filter(strava_id=1).exists())
+        # Supprimée ensuite sur Strava : plus rien à retenir
+        get.side_effect = strava_pages([strava_activity(2, "Vélo", sport="Ride")])
+        sync_activities(self.account)
+        self.assertFalse(RemovedActivity.objects.exists())
+
+    def test_webhook_does_not_bring_it_back(self):
+        from . import webhooks
+        from .models import WebhookEvent
+        self.client.post(reverse("activities:remove", args=[1]))
+        event = WebhookEvent.objects.create(object_type="activity", aspect_type="create", object_id=1, owner_id=42)
+        with mock.patch("activities.strava.activity_detail") as detail:
+            self.assertTrue(webhooks.process(event))
+            detail.assert_not_called()
+        self.assertFalse(Activity.objects.filter(strava_id=1).exists())
+
+    def test_restore_fetches_it_again(self):
+        self.client.post(reverse("activities:remove", args=[1]))
+        with mock.patch("activities.strava.activity_detail", return_value=strava_activity(1, "Trajet en voiture")):
+            response = self.client.post(reverse("activities:restore", args=[1]), follow=True)
+        self.assertContains(response, "est de retour")
+        self.assertTrue(Activity.objects.filter(strava_id=1, account=self.account).exists())
+        self.assertNotContains(response, "Sorties retirées du site")
+
+    def test_restore_waits_for_next_sync_when_strava_is_down(self):
+        from . import strava
+        self.client.post(reverse("activities:remove", args=[1]))
+        self.account.synced_at = timezone.now()
+        self.account.save()
+        with mock.patch("activities.strava.activity_detail", side_effect=strava.RateLimited("quota")):
+            response = self.client.post(reverse("activities:restore", args=[1]), follow=True)
+        self.assertContains(response, "reviendra à la prochaine synchronisation")
+        self.account.refresh_from_db()
+        self.assertIsNone(self.account.synced_at)  # Explorer relancera la synchronisation
+
+    def test_file_activity_is_deleted_for_good(self):
+        from .models import RemovedActivity
+        self.client.post(reverse("activities:remove", args=[-9]))
+        self.assertFalse(Activity.objects.filter(strava_id=-9).exists())
+        self.assertFalse(RemovedActivity.objects.exists())
+
+    def test_cannot_remove_someone_else_s_activity(self):
+        other = get_user_model().objects.create(username="strava_99")
+        other_acc = StravaAccount.objects.create(
+            user=other, athlete_id=99, access_token="x", refresh_token="y", expires_at=timezone.now())
+        from .sync import _to_fields
+        Activity.objects.create(account=other_acc, strava_id=500, **_to_fields(strava_activity(500)))
+        self.assertEqual(self.client.post(reverse("activities:remove", args=[500])).status_code, 404)
+        self.assertTrue(Activity.objects.filter(strava_id=500).exists())
 
 
 def strava_photo(uid, caption=""):
@@ -392,9 +555,9 @@ class JourneyPagesTests(LoggedInTestCase):
             a.save()
 
     def test_list_and_detail(self):
-        response = self.client.get(reverse("activities:journeys"))
-        self.assertContains(response, "2 jours à vélo")
-        self.assertContains(response, reverse("activities:journey", args=[1]))
+        # L'ancienne liste des périples renvoie vers Explorer, où les voyages ont leur onglet
+        self.assertRedirects(self.client.get(reverse("activities:journeys")), reverse("activities:map"))
+        self.assertContains(self.client.get(reverse("activities:map")), 'data-focus-trip="1"')
         detail = self.client.get(reverse("activities:journey", args=[1]))
         self.assertContains(detail, 'id="stages-data"')
         self.assertContains(detail, "Nuit 1")
@@ -405,9 +568,9 @@ class JourneyPagesTests(LoggedInTestCase):
         self.assertEqual(response.context["journeys"][0]["stages"], [1, 2])
         self.assertContains(response, 'data-tab="voyages"')  # les voyages ont leur onglet dans Explorer
 
-    def test_empty_list_explains_rules(self):
-        Activity.objects.all().delete()
-        self.assertContains(self.client.get(reverse("activities:journeys")), "Aucun périple")
+    def test_no_journey_no_tab(self):
+        Activity.objects.filter(strava_id=2).delete()
+        self.assertNotContains(self.client.get(reverse("activities:map")), 'data-tab="voyages"')
 
 
 def fake_http(places=None, photos=None):
@@ -489,11 +652,12 @@ class BookTests(LoggedInTestCase):
         Place.objects.all().delete()
         with mock.patch("activities.places._geopf", side_effect=lambda p: {
                 (45.9, 6.1): "Annecy", (45.7, 6.3): "Faverges", (45.7, 6.4): "Albertville"}[(round(p[0], 1), round(p[1], 1))]):
-            builder = self.client.get(reverse("activities:book"), {"j": "1"})
-            self.assertContains(builder, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
+            StravaAccount.objects.update(synced_at=timezone.now())
+            explorer = self.client.get(reverse("activities:map"))
+            self.assertContains(explorer, 'data-url="/periples/completer/"')  # noms récupérés en arrière-plan
             self.assertEqual(self.client.post(reverse("activities:journeys_complete")).json()["remaining"], 0)
-            self.assertContains(self.client.get(reverse("activities:book"), {"j": "1"}), "Annecy → Albertville")
-        response = self.client.post(reverse("activities:book"), {"j": ["1"], "title": "Été 2026"})
+            self.assertContains(self.client.get(reverse("activities:map")), "Annecy → Albertville")
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1", "title": "Été 2026"})
         from .models import Book
         created = Book.objects.get()
         self.assertRedirects(response, reverse("activities:book_detail", args=[created.pk]), fetch_redirect_response=False)
@@ -513,13 +677,12 @@ class BookTests(LoggedInTestCase):
 
         # Régénérer ne refait pas d'appels Strava
         calls = get.call_count
-        self.client.post(reverse("activities:book"), {"j": ["1"]})
+        self.client.post(reverse("activities:create"), {"kind": "livre", "journey": "1"})
         strava_calls = [c for c in get.call_args_list[calls:] if "strava.com" in c.args[0]]
         self.assertEqual(strava_calls, [])
 
-    def test_builder_requires_a_choice(self):
-        response = self.client.post(reverse("activities:book"), {}, follow=True)
-        self.assertContains(response, "Choisis au moins un périple")
+    def test_old_builder_redirects_to_creations(self):
+        self.assertRedirects(self.client.get(reverse("activities:book"), {"j": "1"}), reverse("activities:creations"))
 
     def test_book_of_unknown_journey_redirects(self):
         from .models import Book
@@ -819,7 +982,7 @@ class ImportStravaTokensCommandTests(TestCase):
 
     @mock.patch("activities.strava.requests.get")
     def test_sync_option_imports_activities(self, get):
-        get.return_value = fake_response(json_data=[{
+        get.side_effect = strava_pages([{
             "id": 7, "name": "Sortie", "sport_type": "Ride", "distance": 20000,
             "start_date": "2026-10-01T08:00:00Z", "map": {"summary_polyline": ""},
         }])
@@ -886,26 +1049,30 @@ class PosterTests(LoggedInTestCase):
                                 start_date=timezone.now(), summary_polyline="")
 
     def test_page_sends_routes_with_a_trace(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="poster-canvas"')
         self.assertContains(response, "poster.js")
         routes = response.context["routes"]
         self.assertEqual([r["id"] for r in routes], [101, 100])  # du plus ancien au plus récent, sans la salle
         self.assertEqual([r["family"] for r in routes], ["run", "ride"])
         self.assertEqual(routes[0]["elev"], 150)
-        self.assertEqual(response.context["initial"], {})
 
     def test_steps_then_free_mode(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'data-mode="steps"')
-        for step in ("sorties", "format", "style", "textes", "details", "recap"):
+        # Quatre étapes seulement, le style d'abord ; le reste est dans « Plus de réglages »
+        steps = [s for s in ("style", "format", "textes", "sorties")]
+        for step in steps:
             self.assertContains(response, f'data-step="{step}"')
             self.assertContains(response, f'data-goto="{step}"')
+        for gone in ("details", "recap"):
+            self.assertNotContains(response, f'data-goto="{gone}"')
+        self.assertContains(response, 'id="trace-width"')  # l'épaisseur du tracé se règle finement dès l'étape Style
         for button in ("step-prev", "step-next", "surprise-btn", "to-free", "to-steps", "export-btn", "share-btn"):
             self.assertContains(response, f'id="{button}"')
 
     def test_stage_list_also_for_saved_posters(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="stage-list"')
         poster = Poster.objects.create(account=self.account, settings={"source": "all"})
         response = self.client.get(reverse("activities:poster_edit", args=[poster.pk]))
@@ -914,7 +1081,7 @@ class PosterTests(LoggedInTestCase):
 
     def test_landmark_options_and_data(self):
         from django.contrib.staticfiles import finders
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         for name in ("countries", "regions", "coast"):
             self.assertContains(response, f'name="{name}"')
             self.assertContains(response, f"activities/borders-{name}.json")
@@ -927,11 +1094,9 @@ class PosterTests(LoggedInTestCase):
         self.assertContains(response, 'id="activity-search"')
         self.assertNotContains(response, 'name="hl"')  # aucun périple : pas d'option de mise en évidence
 
-    def test_preselected_activity(self):
+    def test_old_poster_page_redirects_to_creations(self):
         response = self.client.get(reverse("activities:poster"), {"activite": "101"})
-        self.assertEqual(response.context["initial"], {"source": "activity", "id": 101})
-        unknown = self.client.get(reverse("activities:poster"), {"activite": "999", "periple": "x"})
-        self.assertEqual(unknown.context["initial"], {})
+        self.assertRedirects(response, reverse("activities:creations"))
 
     def test_links_from_activity_and_nav(self):
         response = self.client.get(reverse("activities:detail", args=[100]))
@@ -940,7 +1105,7 @@ class PosterTests(LoggedInTestCase):
 
     def test_empty_state(self):
         Activity.objects.all().delete()
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, "Aucun parcours avec tracé GPS")
         self.assertNotContains(response, "poster.js")
 
@@ -964,15 +1129,15 @@ class ZoneSelectionTests(LoggedInTestCase):
         self.assertEqual({r["day"][:10] for r in response.context["routes_data"]}, {"2026-08-10", "2026-08-20"})
 
     def test_poster_from_selection(self):
-        response = self.client.post(reverse("activities:poster"), {"a": ["2", "999"], "title": "Mes Alpes"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["initial"], {"source": "selection", "id": [2], "title": "Mes Alpes"})
-        self.assertContains(response, 'data-source="selection"')
+        response = self.client.post(reverse("activities:create"), {"kind": "affiche", "a": ["2", "1"], "title": "Mes Alpes"})
+        poster = Poster.objects.get()
+        self.assertRedirects(response, reverse("activities:poster_edit", args=[poster.pk]))
+        self.assertEqual((poster.settings["source"], poster.settings["selection"], poster.title), ("selection", [2, 1], "Mes Alpes"))
 
     @mock.patch("activities.strava.requests.get", side_effect=fake_http(PLACE_NAMES))
     def test_book_from_selection(self, get):
         from .models import Book
-        response = self.client.post(reverse("activities:book"), {"a": ["2", "1"]})
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["2", "1"]})
         book_obj = Book.objects.get()
         self.assertRedirects(response, reverse("activities:book_detail", args=[book_obj.pk]), fetch_redirect_response=False)
         self.assertEqual(book_obj.activity_ids, [1, 2])  # ordre chronologique, trajet domicile-travail compris
@@ -995,11 +1160,11 @@ class ZoneSelectionTests(LoggedInTestCase):
 
     def test_book_selection_limits(self):
         from .models import Book
-        response = self.client.post(reverse("activities:book"), {"a": ["999"]}, follow=True)
-        self.assertContains(response, "Aucune des activités choisies")
-        with mock.patch("activities.views.MAX_BOOK_ACTIVITIES", 1):
-            response = self.client.post(reverse("activities:book"), {"a": ["1", "2"]}, follow=True)
-        self.assertContains(response, "Trop d&#x27;activités")
+        response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["999"]}, follow=True)
+        self.assertContains(response, "Aucune de ces sorties")
+        with mock.patch("activities.views.explorer.MAX_BOOK_ACTIVITIES", 1):
+            response = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ["1", "2"]}, follow=True)
+        self.assertContains(response, "Un livre compte au plus")
         self.assertFalse(Book.objects.exists())
 
 
@@ -1022,7 +1187,7 @@ class PosterJourneyDataTests(LoggedInTestCase):
             Place.objects.create(lat_key=lat, lng_key=lng, name=name)
 
     def test_trip_stops_days_and_profiles(self):
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         trip = response.context["journeys"][0]
         self.assertEqual(trip["days"], 3)
         # Faverges revient en arrivée : une seule fois, à la fin, au point d'arrivée
@@ -1093,7 +1258,7 @@ class FreeImageryTests(LoggedInTestCase):
 
     def test_leg_places(self):
         from types import SimpleNamespace
-        from .views import _leg_places
+        from .views.books import _leg_places
         trip = SimpleNamespace(start=ANNECY, end=FAVERGES, start_name="Annecy", end_name="Faverges")
         self.assertEqual([p[2] for p in _leg_places(trip)], ["Annecy", "Faverges"])
         loop = SimpleNamespace(start=ANNECY, end=ANNECY, start_name="Annecy", end_name="Annecy")
@@ -1157,11 +1322,10 @@ class VectorBasemapTests(LoggedInTestCase):
         self.assertIsNone(own["dem"])
 
     def test_pages_load_vector_scripts_and_poster_panel(self):
-        for name in ("map", "poster"):
-            response = self.client.get(reverse(f"activities:{name}"))
+        for response in (self.client.get(reverse("activities:map")), poster_page(self)):
             for script in ("maplibre-gl.js", "maplibre-contour.js", "pmtiles.js", "mapstyles.js", "maprender.js"):
                 self.assertContains(response, script)
-        response = self.client.get(reverse("activities:poster"))
+        response = poster_page(self)
         self.assertContains(response, 'id="vector-panel"')
         for name in ("vRelief", "vContours", "vRoads", "vRoadScale", "vDetail", "vPaths", "vBuildings", "vNature", "vBorders"):
             self.assertContains(response, f'name="{name}"')
@@ -1236,11 +1400,11 @@ class ImportFilesTests(TestCase):
             # Déposer à nouveau la même sortie ne la duplique pas
             self.client.post(reverse("activities:import"), {"files": [F("a.gpx", gpx_file())]})
             self.assertEqual(account.activities.count(), 2)
-            for name in ("list", "map", "poster", "journeys", "creations"):
+            for name in ("list", "map", "creations"):
                 self.assertEqual(self.client.get(reverse(f"activities:{name}")).status_code, 200, name)
             # Un livre se fabrique aussi à partir des sorties importées, sans appel à Strava
             ids = [str(a.strava_id) for a in account.activities.all()]
-            r = self.client.post(reverse("activities:book"), {"a": ids})
+            r = self.client.post(reverse("activities:create"), {"kind": "livre", "a": ids})
             self.assertEqual(r.status_code, 302)
             self.assertEqual(self.client.get(r["Location"]).status_code, 200)
             page = self.client.get(reverse("activities:list"))
@@ -1271,8 +1435,83 @@ class StravaUserImportTests(LoggedInTestCase):
         with mock.patch("activities.strava.api_get", return_value=[]) as api:
             from .sync import sync_activities
             sync_activities(self.account)
-        self.assertNotIn("after", api.call_args.args[2])  # le fichier ne décale pas la synchronisation
+        api.assert_called_once()
+        self.assertEqual(self.account.activities.filter(strava_id__lt=0).count(), 1)  # le fichier reste
 
+
+
+class SuspectActivityTests(LoggedInTestCase):
+    """Explorer signale les sorties qui ressemblent à une erreur : vitesse improbable, doublon."""
+
+    def setUp(self):
+        super().setUp()
+        from .sync import _to_fields
+        rows = (
+            {**strava_activity(1, "Vélo normal", start="2026-10-01T08:00:00Z", sport="Ride"), "distance": 60000, "moving_time": 9000},
+            {**strava_activity(2, "Retour en voiture", start="2026-10-02T08:00:00Z", sport="Ride"), "distance": 90000, "moving_time": 3600},
+            {**strava_activity(3, "Footing", start="2026-10-03T08:00:00Z"), "distance": 10000, "moving_time": 3000},
+            {**strava_activity(4, "Footing (montre)", start="2026-10-03T08:00:40Z"), "distance": 10100, "moving_time": 3000},
+        )
+        for data in rows:
+            Activity.objects.create(account=self.account, strava_id=data["id"], **_to_fields(data))
+
+    def test_speed_and_duplicates_are_flagged(self):
+        from . import checks
+        found = checks.suspects(list(Activity.objects.all()))
+        self.assertEqual(set(found), {2, 4})
+        self.assertIn("90 km/h", found[2])
+        self.assertIn("Footing", found[4])
+
+    def test_explorer_lists_them_with_remove_and_keep(self):
+        page = self.client.get(reverse("activities:map"))
+        self.assertEqual([s["id"] for s in page.context["suspects"]], [4, 2])
+        self.assertContains(page, 'data-suspect="2"')
+        self.assertContains(page, 'data-keep="2"')
+        self.assertContains(page, 'class="row-remove" data-remove="1"')  # chaque sortie de la liste peut être retirée
+        self.assertContains(self.client.get(reverse("activities:detail", args=[2])), "À vérifier.")
+        self.assertNotContains(self.client.get(reverse("activities:detail", args=[1])), "À vérifier.")
+
+    def test_keep_stops_the_warning(self):
+        r = self.client.post(reverse("activities:keep", args=[2]), HTTP_ACCEPT="application/json")
+        self.assertTrue(r.json()["ok"])
+        self.assertEqual([s["id"] for s in self.client.get(reverse("activities:map")).context["suspects"]], [4])
+
+    def test_remove_from_explorer_answers_json(self):
+        r = self.client.post(reverse("activities:remove", args=[2]), HTTP_ACCEPT="application/json")
+        self.assertTrue(r.json()["ok"])
+        self.assertFalse(Activity.objects.filter(strava_id=2).exists())
+        self.assertEqual(self.account.removed_activities.count(), 1)
+
+
+class RemoveFirstStageTests(LoggedInTestCase):
+    """Un voyage est identifié par sa première étape : la retirer ne doit pas orphéliner livre, affiche et récit."""
+
+    def setUp(self):
+        super().setUp()
+        stops = (ANNECY, FAVERGES, ALBERTVILLE, MOUTIERS, BOURG)
+        for i in range(4):
+            a = leg(i + 1, 10 + i, 8, stops[i], stops[i + 1])
+            a.account, a.summary_polyline = self.account, SAMPLE_POLYLINE
+            a.photos_synced_at = a.details_fetched_at = timezone.now()
+            a.save()
+
+    def test_book_poster_and_note_follow_the_journey(self):
+        from . import journeys
+        from .models import Book, JourneyNote
+        self.assertEqual([j.id for j in journeys.for_account(self.account)], [1])
+        book = Book.objects.create(account=self.account, journey_ids=[1], title="Tarentaise")
+        poster = Poster.objects.create(account=self.account, settings={"source": "journey", "journey": 1})
+        JourneyNote.objects.create(account=self.account, journey_id=1, title="Mon tour", story="Récit")
+
+        self.client.post(reverse("activities:remove", args=[1]))
+        self.assertEqual([j.id for j in journeys.for_account(self.account)], [2])
+        book.refresh_from_db()
+        poster.refresh_from_db()
+        self.assertEqual(book.journey_ids, [2])
+        self.assertEqual(poster.settings["journey"], 2)
+        self.assertEqual(JourneyNote.objects.get().journey_id, 2)
+        self.assertEqual(self.client.get(reverse("activities:book_detail", args=[book.pk])).status_code, 200)
+        self.assertContains(self.client.get(reverse("activities:journey", args=[2])), "Mon tour")
 
 
 @mock.patch("activities.journeys.MIN_DAYS", 2)

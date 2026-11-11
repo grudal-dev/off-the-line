@@ -31,7 +31,7 @@
           {% if user.strava.firstname %}<p class="muted">{{ user.strava.firstname }} {{ user.strava.lastname }}</p>{% endif %}
           <a href="{% url 'activities:import' %}">Importer des fichiers</a>
           {% if not user.strava.is_local %}
-            <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}<button class="link-button" type="submit">Synchroniser Strava</button></form>
+            <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="link-button" type="submit">Synchroniser Strava</button></form>
           {% endif %}
           <a href="{% url 'activities:list' %}">Toutes mes activités</a>
           {% if not user.strava.is_local %}

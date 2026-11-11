@@ -94,7 +94,7 @@ class Command(BaseCommand):
 
         if options["sync"]:
             try:
-                count = sync_activities(account)
+                count = sync_activities(account).created
                 photos, remaining = sync_photos(account)
             except strava.StravaError as exc:
                 raise CommandError(f"Jetons importés, mais l'appel à Strava a échoué : {exc}")

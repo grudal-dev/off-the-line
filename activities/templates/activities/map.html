@@ -48,6 +48,25 @@
         </div>
       </div>
 
+      {% if suspects %}
+      {# Sorties qui ressemblent à une erreur (checks.py) : à retirer avant de créer une affiche ou un livre #}
+      <details class="suspects" id="suspects">
+        <summary><span id="suspects-count">{{ suspects|length }}</span> sortie{{ suspects|pluralize }} à vérifier</summary>
+        <p class="muted">Vitesse improbable ou doublon. Retire-les avant de créer une affiche ou un livre : rien ne change sur Strava.</p>
+        <ul>
+          {% for s in suspects %}
+            <li data-suspect="{{ s.id }}">
+              <a href="{% url 'activities:detail' s.id %}"><strong>{{ s.name }}</strong><span class="muted">{{ s.date }} · {{ s.why }}</span></a>
+              <span class="suspect-actions">
+                <button type="button" class="link-button danger" data-remove="{{ s.id }}" data-name="{{ s.name }}">Retirer</button>
+                <button type="button" class="link-button" data-keep="{{ s.id }}">Garder</button>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+
       {% if journeys %}
       <ul class="explorer-list" id="trip-list" data-list="voyages">
         {% for t in journeys %}
@@ -61,6 +80,16 @@
             <button type="button" class="btn small ghost" data-create='{"journey": {{ t.id }}, "name": "{{ t.title|escapejs }}"}'>Créer</button>
           </li>
         {% endfor %}
+        {% if hidden_journeys %}
+          <li class="explorer-hidden">
+            <details>
+              <summary>{{ hidden_journeys|length }} voyage{{ hidden_journeys|pluralize }} masqué{{ hidden_journeys|pluralize }}</summary>
+              <ul>
+                {% for h in hidden_journeys %}<li><a href="{{ h.url }}">{{ h.title }}</a> <span class="muted">{{ h.dates }}</span></li>{% endfor %}
+              </ul>
+            </details>
+          </li>
+        {% endif %}
       </ul>
       {% endif %}
 
@@ -96,6 +125,7 @@
               <span><strong>{{ r.name }}</strong><span>{{ r.sport }}, {{ r.date }}, {{ r.km|floatformat:1 }} km</span></span>
             </a>
             <button type="button" class="btn small ghost" data-create='{"activity": {{ r.id }}, "name": "{{ r.name|escapejs }}"}'>Créer</button>
+            <button type="button" class="row-remove" data-remove="{{ r.id }}" data-name="{{ r.name }}" title="Retirer cette sortie du site" aria-label="Retirer {{ r.name }} du site">✕</button>
           </li>
         {% endfor %}
       </ul>
@@ -154,8 +184,15 @@
   {% else %}
   <div style="padding: 3rem 1rem;">
     <div class="empty-state" style="margin: 0 auto; max-width: 40rem;">
-      <p>Aucun parcours avec tracé GPS pour l'instant. Synchronise tes activités pour les voir apparaître ici.</p>
-      <a class="btn" href="{% url 'activities:list' %}">Aller aux activités</a>
+      <p>Aucun parcours avec tracé GPS pour l'instant.</p>
+      <div class="page-actions" style="justify-content: center;">
+        {% if not user.strava.is_local %}
+          <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
+            <button class="btn" type="submit">Synchroniser avec Strava</button>
+          </form>
+        {% endif %}
+        <a class="btn ghost" href="{% url 'activities:import' %}">Importer des fichiers</a>
+      </div>
     </div>
   </div>
   {% endif %}
@@ -165,6 +202,7 @@
 (() => {
   const routes = JSON.parse(document.getElementById("routes-data").textContent);
   const PERIPLES = "{% url 'activities:journey' 0 %}".replace(/0\/$/, "");
+  const ACTIVITES = "{% url 'activities:detail' 0 %}".replace(/0\/$/, "");
   const MAX_BOOK = 150;  // un livre compte au plus 150 sorties (une page par étape)
   // Tracés encodés (format Strava) : décodés ici plutôt que côté serveur, page bien plus légère
   function decode(str) {
@@ -305,7 +343,7 @@
     );
     line.on("mouseover", () => highlight(r.id, true));
     line.on("mouseout", () => highlight(r.id, false));
-    line.on("click", () => { window.location = `/activites/${r.id}/`; });
+    line.on("click", () => { window.location = `${ACTIVITES}${r.id}/`; });
     line.addTo(group);
     byId.set(r.id, line);
   }
@@ -440,6 +478,38 @@
     });
   }));
   dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });
+
+  // Retirer une sortie (liste Sorties, zone, « à vérifier ») : elle quitte la carte et les listes tout de suite.
+  // Si elle faisait partie d'un voyage, la page se recharge : les voyages sont recalculés par le serveur.
+  const inTrip = id => trips.some(t => t.stages.includes(id));
+  function dropSuspect(id) {
+    const row = document.querySelector(`[data-suspect="${id}"]`);
+    if (!row) return;
+    row.remove();
+    const left = document.querySelectorAll("[data-suspect]").length;
+    if (left) document.getElementById("suspects-count").textContent = left;
+    else document.getElementById("suspects").remove();
+  }
+  async function removeActivity(id, name) {
+    if (!confirm(`Retirer « ${name} » du site ?\nElle disparaîtra de la carte, des voyages, des affiches et des livres. `
+                 + (id > 0 ? "Rien ne change sur Strava, et tu pourras la remettre depuis « Toutes mes activités »." : "Pour la retrouver, il faudra réimporter son fichier."))) return;
+    const r = await post(`${ACTIVITES}${id}/retirer/`).catch(() => null);
+    if (!r || !r.ok) return alert("Impossible de retirer cette sortie pour l'instant.");
+    if (inTrip(id)) return location.reload();
+    const line = byId.get(id);
+    if (line) { group.removeLayer(line); byId.delete(id); }
+    if (active === id) highlight(id, false);
+    document.querySelectorAll(`[data-remove="${id}"]`).forEach(b => { const li = b.closest("li"); if (li && !li.dataset.suspect) li.remove(); });
+    dropSuspect(id);
+    refreshLines(false);
+    if (zoneList.children.length) zoneSummary();
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-remove]");
+    if (b) { e.preventDefault(); removeActivity(Number(b.dataset.remove), b.dataset.name); return; }
+    const k = e.target.closest("[data-keep]");
+    if (k) post(`${ACTIVITES}${k.dataset.keep}/garder/`).then(r => r.ok && dropSuspect(k.dataset.keep));
+  });
 
   document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
     mode = b.dataset.mode;
@@ -588,7 +658,7 @@
     zoneList.innerHTML = inside.map(r => `
       <li><label><input type="checkbox" name="a" value="${r.id}" checked>
         <span><strong>${escapeHtml(r.name)}</strong><span class="muted">${escapeHtml(r.sport)}, ${r.date}, ${r.km.toLocaleString("fr-FR")} km</span></span>
-      </label></li>`).join("");
+      </label><button type="button" class="row-remove" data-remove="${r.id}" data-name="${escapeHtml(r.name)}" title="Retirer cette sortie du site" aria-label="Retirer ${escapeHtml(r.name)} du site">✕</button></li>`).join("");
     zoneForm.hidden = !inside.length;
     zoneEmpty.hidden = !!inside.length;
     zoneSummary();

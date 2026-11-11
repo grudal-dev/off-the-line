@@ -10,7 +10,8 @@
     <div class="page-actions">
       {% if not account.is_local %}
         <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
-          <button class="btn" type="submit">Synchroniser avec Strava</button>
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <button class="btn" type="submit" title="Nouvelles sorties, modifications et suppressions faites sur Strava">Synchroniser avec Strava</button>
         </form>
       {% endif %}
       <a class="btn {% if not account.is_local %}ghost{% endif %}" href="{% url 'activities:import' %}">Importer des fichiers</a>
@@ -81,6 +82,24 @@
     </div>
   {% endif %}
 
+  {% if removed %}
+    <details class="advanced removed-activities">
+      <summary>Sorties retirées du site ({{ removed|length }})</summary>
+      <p class="muted">Elles restent sur Strava mais n'apparaissent plus ici, ni sur la carte, ni dans tes créations.</p>
+      <ul>
+        {% for r in removed %}
+          <li>
+            <form method="post" action="{% url 'activities:restore' r.strava_id %}">{% csrf_token %}
+              <span><strong>{{ r.name|default:"Sortie" }}</strong>
+                <span class="muted">{{ r.sport_type|sport_label }}{% if r.start_date %}, {{ r.start_date|date:"j F Y" }}{% endif %}{% if r.distance %}, {{ r.distance_km }} km{% endif %}</span></span>
+              <button class="link-button" type="submit">Remettre</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+
   <details class="advanced">
     <summary>Options avancées</summary>
     {% if account.is_local %}
@@ -88,10 +107,6 @@
         <button class="btn ghost" type="submit">Supprimer toutes mes données</button>
       </form>
     {% else %}
-      <form method="post" action="{% url 'activities:sync' %}">{% csrf_token %}
-        <input type="hidden" name="full" value="1">
-        <button class="btn ghost" type="submit">Tout réimporter depuis Strava</button>
-      </form>
       <form method="post" action="{% url 'activities:disconnect' %}">{% csrf_token %}
         <button class="btn ghost" type="submit">Retirer l'accès Strava et supprimer mes données</button>
       </form>

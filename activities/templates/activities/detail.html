@@ -25,6 +25,19 @@
           <input type="hidden" name="activity" value="{{ activity.strava_id }}">
           <button class="link-button" type="submit" name="kind" value="affiche">Créer une affiche</button>
         </form>{% endif %}
+      {# Sortie saisie par erreur (voiture, doublon, GPS fou) : on la retire avant de créer une affiche ou un livre #}
+      <form method="post" action="{% url 'activities:remove' activity.strava_id %}" class="remove-activity"
+            onsubmit="return confirm('{% if activity.from_file %}Supprimer cette sortie ? Elle disparaîtra de la carte, des voyages, des affiches et des livres.{% else %}Retirer cette sortie du site ? Elle disparaîtra de la carte, des voyages, des affiches et des livres. Rien ne change sur Strava, et tu pourras la remettre.{% endif %}')">{% csrf_token %}
+        <button class="link-button danger" type="submit">{% if activity.from_file %}Supprimer cette sortie{% else %}Retirer cette sortie du site{% endif %}</button>
+        <span class="muted">Une erreur de saisie, un trajet en voiture ?</span>
+      </form>
+      {% if suspect %}
+        <form method="post" action="{% url 'activities:keep' activity.strava_id %}" class="notice suspect-notice">{% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <strong>À vérifier.</strong> {{ suspect }}
+          <button class="link-button" type="submit">Elle est correcte, la garder</button>
+        </form>
+      {% endif %}
     </div>
 
     {% if route %}

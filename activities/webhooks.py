@@ -18,9 +18,9 @@ from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.utils import timezone
 
-from . import strava
+from . import journeys, strava
 from .models import Activity, StravaAccount, WebhookEvent
-from .sync import _to_fields
+from .sync import import_activity
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,8 @@ def _apply(event):
         return
     activities = Activity.objects.filter(account=account, strava_id=event.object_id)
     if event.aspect_type == "delete":
-        activities.delete()
+        journeys.forget_activities(account, [event.object_id])
+        account.removed_activities.filter(strava_id=event.object_id).delete()
     elif event.aspect_type == "update":
         changes = {}
         if "title" in updates:
@@ -115,10 +116,9 @@ def _apply(event):
         if changes:
             activities.update(**changes)
     elif event.aspect_type == "create":
-        data = strava.activity_detail(account, event.object_id)
-        fields = _to_fields(data)
-        fields["description"] = data.get("description") or ""
-        Activity.objects.update_or_create(strava_id=event.object_id, defaults={"account": account, **fields})
+        if account.removed_activities.filter(strava_id=event.object_id).exists():
+            return  # retirée du site par l'utilisateur : on ne la réimporte pas
+        import_activity(account, event.object_id)
 
 
 def process_pending(limit=200):

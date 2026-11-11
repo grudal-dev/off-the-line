@@ -23,6 +23,8 @@ class StravaAccount(models.Model):
     # Compte sans Strava : créé au premier dépôt de fichiers (GPX, FIT…), lié au navigateur.
     # Aucun appel à l'API Strava n'est fait pour lui (pas de jetons).
     is_local = models.BooleanField(default=False)
+    # Dernière synchronisation complète avec Strava (nouvelles sorties, modifications, suppressions)
+    synced_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -63,6 +65,8 @@ class Activity(models.Model):
     start_lat = models.FloatField(null=True, blank=True)
     start_lng = models.FloatField(null=True, blank=True)
     raw = models.JSONField(default=dict, blank=True)
+    # Sortie signalée « à vérifier » (checks.py) que l'utilisateur a choisi de garder
+    confirmed = models.BooleanField(default=False)
 
     synced_at = models.DateTimeField(auto_now=True)
 
@@ -101,6 +105,34 @@ class Activity(models.Model):
     @property
     def has_route(self):
         return bool(self.summary_polyline)
+
+
+class RemovedActivity(models.Model):
+    """Sortie Strava retirée du site par l'utilisateur (saisie par erreur, doublon, trajet en voiture…).
+
+    L'activité elle-même est supprimée ; cette ligne empêche la synchronisation de la réimporter,
+    et garde de quoi la reconnaître pour la remettre. Les sorties lues dans un fichier n'en ont pas
+    besoin : rien ne les réimporte.
+    """
+
+    account = models.ForeignKey(StravaAccount, on_delete=models.CASCADE, related_name="removed_activities")
+    strava_id = models.BigIntegerField()
+    name = models.CharField(max_length=255, blank=True)
+    sport_type = models.CharField(max_length=50, blank=True)
+    start_date = models.DateTimeField(null=True, blank=True)
+    distance = models.FloatField(default=0, help_text="mètres")
+    removed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-removed_at"]
+        unique_together = [("account", "strava_id")]
+
+    def __str__(self):
+        return f"{self.name or self.strava_id} (retirée)"
+
+    @property
+    def distance_km(self):
+        return round(self.distance / 1000, 2)
 
 
 class ActivityPhoto(models.Model):

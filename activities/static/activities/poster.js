@@ -1926,9 +1926,7 @@
   const FRAMES = { none: "sans cadre", line: "filet fin", double: "double filet", bold: "cadre épais", mat: "passe-partout" };
   const FORMAT_LABELS = { "30x40": "30 × 40 cm", "40x50": "40 × 50 cm", "50x70": "50 × 70 cm", "30x30": "carré 30 × 30 cm" };
   let mode = "steps";
-  // Sans mémoire : affiche déjà composée → résumé ; sorties déjà choisies (périple, activité) → format
-  const composed = CREATION && Object.keys(CREATION.settings || {}).length > 3;
-  let step = composed ? "recap" : (CREATION || INITIAL.source) ? "format" : STEPS[0];
+  let step = STEPS[0];
   let remembered = null;
   try { remembered = JSON.parse(localStorage.getItem(MODE_STORE) || "null"); } catch (e) { /* stockage indisponible */ }
   // Une nouvelle sélection (lien depuis un périple, une activité ou une zone) repart du début
@@ -1950,11 +1948,10 @@
     redraw();
   }
   stepBar.addEventListener("click", e => { const b = e.target.closest("[data-goto]"); if (b) goTo(b.dataset.goto); });
-  document.getElementById("wizard-recap").addEventListener("click", e => { const b = e.target.closest("[data-goto]"); if (b) goTo(b.dataset.goto); });
   document.getElementById("step-prev").addEventListener("click", () => goTo(STEPS[Math.max(0, STEPS.indexOf(step) - 1)]));
   document.getElementById("step-next").addEventListener("click", () => goTo(STEPS[Math.min(STEPS.length - 1, STEPS.indexOf(step) + 1)]));
   document.getElementById("to-free").addEventListener("click", () => goTo(null, true));
-  document.getElementById("to-steps").addEventListener("click", () => goTo("recap", false));
+  document.getElementById("to-steps").addEventListener("click", () => goTo(STEPS[0], false));
 
   form.querySelectorAll("[data-pick-orientation]").forEach(b => b.addEventListener("click", () => set({ orientation: b.dataset.pickOrientation }, true)));
   form.querySelectorAll("[data-pick-format]").forEach(b => b.addEventListener("click", () => set({ format: b.dataset.pickFormat }, true)));
@@ -1982,6 +1979,9 @@
   const customColor = document.getElementById("trace-custom");
   let swatchKey = "";
   form.querySelectorAll("[data-pick-width]").forEach(b => b.addEventListener("click", () => set({ width: WIDTHS[b.dataset.pickWidth] })));
+  // Réglage fin de l'épaisseur (sans nom : le champ « width » du formulaire complet reste la référence)
+  const fineWidth = document.getElementById("trace-width"), fineWidthOut = document.getElementById("trace-width-out");
+  fineWidth.addEventListener("input", e => { e.stopPropagation(); set({ width: parseFloat(fineWidth.value) }); });
   // Une couleur choisie : un tracé de cette couleur (le mode « par sport » l'ignorerait)
   const traceColor = c => set({ color: c, ...(state.mode === "sport" ? { mode: "single" } : {}) });
   swatchBox.addEventListener("click", e => { const b = e.target.closest("[data-swatch]"); if (b) traceColor(b.dataset.swatch); });
@@ -1997,7 +1997,9 @@
     customColor.value = state.color;
     customColor.closest("label").classList.toggle("on", !sport && !list.includes(current));
     const w = widthStep();
-    form.querySelectorAll("[data-pick-width]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pickWidth === w));
+    form.querySelectorAll("[data-pick-width]").forEach(b => b.setAttribute("aria-pressed", b.dataset.pickWidth === w && Math.abs(WIDTHS[w] - state.width) < 0.03));
+    fineWidth.value = state.width;
+    fineWidthOut.textContent = `${state.width.toFixed(2).replace(".", ",")} mm`;
   }
   function refreshSteps(sel, auto) {
     form.dataset.mode = mode;
@@ -2007,12 +2009,9 @@
       if (b.dataset.goto === step) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
       b.classList.toggle("done", i < at);
     });
-    const recap = mode === "steps" && step === "recap";
+    // Le téléchargement est toujours à portée de main : plus d'étape « Résumé » à atteindre
     document.getElementById("step-prev").disabled = at === 0;
-    document.getElementById("step-next").hidden = recap;
-    exportBtn.hidden = mode === "steps" && !recap;
-    shareBtn.hidden = exportBtn.hidden;
-    document.getElementById("reset-btn").hidden = mode === "steps" && !recap;
+    document.getElementById("step-next").disabled = at === STEPS.length - 1;
     document.getElementById("surprise-btn").textContent = surprised ? "Une autre idée" : "Surprends-moi";
 
     const best = betterOrientation(sel, auto);
@@ -2031,25 +2030,6 @@
       b.setAttribute("aria-pressed", key === "borders" ? bordersOn() : !!state[key]);
       if (b.hasAttribute("data-not-all")) b.hidden = state.source === "all";
     });
-    if (!recap) return;
-
-    const title = state.textPos === "none" ? "" : text("title", auto);
-    const extras = [
-      state.profile && state.source !== "all" && "profil d'altitude", state.cities && "villes", bordersOn() && "frontières",
-      state.endpoints && state.source !== "all" && "départ et arrivée", FRAMES[state.frame],
-    ].filter(Boolean);
-    const km = sel.routes.reduce((a, r) => a + r.km, 0);
-    const rows = [
-      ["sorties", "Sorties", sel.routes.length
-        ? `${plural(sel.routes.length, "tracé")}, ${nf.format(km)} km${sel.removed ? ` (${sel.removed} retiré${sel.removed > 1 ? "s" : ""})` : ""}`
-        : "aucun tracé"],
-      ["format", "Format", `${FORMAT_LABELS[state.format] || state.format}, ${state.orientation === "landscape" ? "paysage" : "portrait"}`],
-      ["style", "Style", presetName()],
-      ["textes", "Textes", title ? `« ${title} »` : "sans texte"],
-      ["details", "Détails", extras.join(", ").replace(/^./, c => c.toUpperCase())],
-    ].filter(Boolean);
-    document.getElementById("wizard-recap").innerHTML = rows.map(([key, label, value]) => `
-      <div><dt>${label}</dt><dd>${escapeHtml(value)}</dd><dd><button type="button" class="link-button" data-goto="${key}">Modifier</button></dd></div>`).join("");
   }
 
   // --- Surprends-moi ------------------------------------------------------------
@@ -2067,6 +2047,31 @@
     { key: "alpin-line", preset: "alpin", frame: "line", brand: "escape", tags: ["mountain", "winter"] },
     { key: "cyanotype", preset: "cyanotype", frame: "bold", brand: "gap", tags: ["winter", "mid"] },
   ];
+  /** Épaisseur du tracé (mm) selon le nombre de tracés : un seul parcours se lit épais, des centaines fins. */
+  function adaptedWidth(n) {
+    return n <= 1 ? 2.2 : n <= 8 ? 1.7 : n <= 40 ? 1.1 : n <= 150 ? 0.7 : 0.45;
+  }
+  /** Première ouverture d'une affiche : réglages choisis d'après le parcours, sur la carte Carnet.
+   *  Sens selon la forme du tracé, épaisseur selon le nombre de tracés, profil s'il y a du relief,
+   *  villes-étapes pour un voyage, départ et arrivée pour une sortie seule. */
+  function adaptedDefaults() {
+    const sel = selection(), rs = sel.routes;
+    if (!rs.length) return {};
+    const elev = rs.reduce((a, r) => a + r.elev, 0);
+    const stages = state.source === "journey" || state.source === "selection";
+    const theme = available({ preset: "carnet" }) ? presetChanges("carnet") : {};
+    Object.assign(state, theme);  // le sens conseillé dépend de la mise en page du thème
+    return {
+      ...theme,
+      width: adaptedWidth(rs.length),
+      opacity: rs.length > 40 ? 0.6 : 0.85,
+      orientation: betterOrientation(sel, autoTexts(sel)) || state.orientation,
+      profile: state.source !== "all" && elev > 150,
+      cities: stages && rs.length >= 3, cityMode: "stops",
+      endpoints: state.source === "activity",
+      stageDots: stages && rs.length <= 40,
+    };
+  }
   let surprised = null;
   const seen = new Set();  // combinaisons déjà proposées : toutes passent avant de revenir à la première
   function available(combo) {
@@ -2105,7 +2110,6 @@
       endpoints: state.source === "activity",
       rotation: 0,
     }, true);
-    if (mode === "steps") goTo("recap");
   }
   document.getElementById("surprise-btn").addEventListener("click", surprise);
 
@@ -2286,6 +2290,8 @@
     document.fonts.load(`600 40px "Barlow"`), document.fonts.load(`500 40px "Barlow"`), document.fonts.load(`400 40px "Barlow"`),
   ]).catch(() => null);
   fillActivities();
+  // Affiche tout juste créée (aucun réglage de style enregistré) : on part de réglages adaptés au parcours
+  if (CREATION && !("bg" in (CREATION.settings || {}))) Object.assign(state, adaptedDefaults());
   syncFields();
   fonts.then(redraw);
   redraw();
