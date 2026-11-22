@@ -1379,6 +1379,7 @@ class TrackFileTests(TestCase):
         from . import polyline
         self.assertEqual(polyline.decode(gpx["summary_polyline"])[0], [45.9, 6.12])
         self.assertEqual(gpx["raw"]["source"], "file")
+        self.assertEqual(polyline.decode(gpx["detailed_polyline"])[0], [45.9, 6.12])  # tracé pour l'impression
         self.assertEqual((fit["name"], fit["sport_type"]), ("Sortie gravel du 16/06/2025", "GravelRide"))
         self.assertEqual([s[0] for s in skipped], ["notes.txt", "plan.gpx"])
 

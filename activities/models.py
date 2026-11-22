@@ -56,6 +56,10 @@ class Activity(models.Model):
     total_elevation_gain = models.FloatField(default=0, help_text="mètres")
     average_speed = models.FloatField(default=0, help_text="m/s")
     summary_polyline = models.TextField(blank=True)
+    # Tracé détaillé, pour l'impression : polyligne complète de Strava (récupérée à la demande),
+    # ou trace du fichier simplifiée à ~2 m. Le « summary polyline » (quelques centaines de points)
+    # suffit à l'écran, mais ses virages deviennent des angles sur une affiche A3.
+    detailed_polyline = models.TextField(blank=True)
     photo_count = models.PositiveIntegerField(default=0)
     photos_synced_at = models.DateTimeField(null=True, blank=True)
     # Récupérés à la demande (livre) : description saisie sur Strava et profil d'altitude

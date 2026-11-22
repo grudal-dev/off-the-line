@@ -59,10 +59,11 @@ def prepare(account, journeys, max_calls=60):
             except strava.StravaError as exc:
                 return done, f"Données Strava incomplètes ({exc}). Le livre est généré avec ce qui est disponible."
             activity.description = (detail.get("description") or "").strip()
+            activity.detailed_polyline = (detail.get("map") or {}).get("polyline") or activity.detailed_polyline
             activity.profile = _downsample((streams.get("distance") or {}).get("data") or [],
                                            (streams.get("altitude") or {}).get("data") or [])
             activity.details_fetched_at = timezone.now()
-            activity.save(update_fields=["description", "profile", "details_fetched_at"])
+            activity.save(update_fields=["description", "profile", "details_fetched_at", "detailed_polyline"])
             done += 1
     return done, None
 

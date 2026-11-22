@@ -45,6 +45,7 @@ urlpatterns = [
     path("periples/<sid:journey_id>/ignorer/", views.suggestion_dismiss, name="suggestion_dismiss"),
     path("affiche/", RedirectView.as_view(pattern_name="activities:creations"), name="poster"),
     path("affiche/villes/", views.poster_towns, name="poster_towns"),
+    path("affiche/traces/", views.poster_traces, name="poster_traces"),
     path("affiche/<int:poster_id>/", views.poster_edit, name="poster_edit"),
     path("affiche/<int:poster_id>/enregistrer/", views.poster_save, name="poster_save"),
     path("affiche/<int:poster_id>/supprimer/", views.poster_delete, name="poster_delete"),

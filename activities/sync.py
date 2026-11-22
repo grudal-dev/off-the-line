@@ -118,6 +118,9 @@ def sync_activities(account):
                 # Tracé recoupé ou corrigé sur Strava : le profil d'altitude sera redemandé
                 activity.details_fetched_at = None
                 reset.append("details_fetched_at")
+                if activity.detailed_polyline:  # tracé détaillé à redemander lui aussi
+                    activity.detailed_polyline = ""
+                    reset.append("detailed_polyline")
             for k in changed:
                 setattr(activity, k, fields[k])
             activity.raw = data

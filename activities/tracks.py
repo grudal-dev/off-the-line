@@ -18,6 +18,8 @@ from pathlib import PurePosixPath
 from xml.etree import ElementTree
 
 MAX_TRACK_POINTS = 600     # points gardés pour le tracé (comme un « summary polyline » Strava)
+DETAIL_TOLERANCE = 2.0     # mètres : écart toléré pour le tracé détaillé (impression)
+MAX_DETAIL_POINTS = 12000  # au-delà, la tolérance augmente
 PROFILE_POINTS = 120       # points du profil d'altitude
 ELEVATION_STEP = 3.0       # mètres : en dessous, une variation est du bruit de mesure
 MOVING_SPEED = 0.5         # m/s : en dessous, on considère l'arrêt
@@ -229,6 +231,46 @@ def _sample(items, n):
     return [items[round(i * step)] for i in range(n)]
 
 
+def _simplify(points, tolerance):
+    """Douglas-Peucker : garde les points qui s'écartent de plus de `tolerance` mètres de la ligne.
+
+    Contrairement à un échantillonnage régulier, les virages serrés sont conservés et les lignes
+    droites ne coûtent que deux points.
+    """
+    if len(points) < 3:
+        return list(points)
+    lat0 = math.radians(sum(p[0] for p in points) / len(points))
+    k = 6371000.0 * math.pi / 180
+    xy = [(p[1] * k * math.cos(lat0), p[0] * k) for p in points]
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = xy[a], xy[b]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy)
+        worst, index = 0.0, None
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            d = abs(dx * (ay - py) - dy * (ax - px)) / norm if norm else math.hypot(px - ax, py - ay)
+            if d > worst:
+                worst, index = d, i
+        if index is not None and worst > tolerance:
+            keep[index] = True
+            stack += [(a, index), (index, b)]
+    return [p for p, k in zip(points, keep) if k]
+
+
+def detailed(points):
+    """Tracé pour l'impression : simplifié à ~2 m, et jamais plus de MAX_DETAIL_POINTS points."""
+    tolerance, out = DETAIL_TOLERANCE, _simplify(points, DETAIL_TOLERANCE)
+    while len(out) > MAX_DETAIL_POINTS:
+        tolerance *= 1.6
+        out = _simplify(points, tolerance)
+    return out
+
+
 def _meaningful(stem):
     """Un nom de fichier qui dit quelque chose (« Col_de_la_Forclaz »), pas « 12345678_ACTIVITY »."""
     words = re.sub(r"[\d_\-.\s]+", " ", stem.lower()).split()
@@ -284,7 +326,8 @@ def summarize(track, filename=""):
     if any(p[2] is not None for p in points):
         pairs = [(c, p[2]) for c, p in zip(cumul, points) if p[2] is not None]
         profile = [[round(c / 1000, 3), round(e, 1)] for c, e in _sample(pairs, PROFILE_POINTS)]
-    trace = _sample([(p[0], p[1]) for p in points], MAX_TRACK_POINTS)
+    latlng = [(p[0], p[1]) for p in points]
+    trace = _sample(latlng, MAX_TRACK_POINTS)
     return {
         "name": name[:255],
         "sport_type": sport,
@@ -296,6 +339,7 @@ def summarize(track, filename=""):
         "total_elevation_gain": round(gain, 1),
         "average_speed": round(distance / moving, 3) if moving else 0,
         "summary_polyline": _encode(trace),
+        "detailed_polyline": _encode(detailed(latlng)),
         "start_lat": points[0][0],
         "start_lng": points[0][1],
         "profile": profile,
