@@ -93,6 +93,63 @@
   for (const r of ROUTES) { r.pts = decode(r.poly); delete r.poly; }
   const byId = new Map(ROUTES.map(r => [r.id, r]));
 
+  // --- Tracés détaillés (impression) ---------------------------------------
+  // La page arrive avec des tracés allégés (quelques centaines de points par sortie) : assez pour
+  // l'écran, mais les virages deviennent des angles visibles sur un A3. Pour une affiche de quelques
+  // dizaines de sorties au plus, on charge les tracés complets ; s'il n'y en a pas (ancien fichier
+  // importé, limite Strava atteinte), on lisse le tracé allégé.
+  const DETAIL_MAX = 80;
+  function chaikin(p, rounds = 2) {
+    for (let k = 0; k < rounds && p.length >= 6; k++) {
+      const out = [p[0], p[1]];
+      for (let i = 0; i + 3 < p.length; i += 2) {
+        const x0 = p[i], y0 = p[i + 1], x1 = p[i + 2], y1 = p[i + 3];
+        out.push(0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1, 0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1);
+      }
+      out.push(p[p.length - 2], p[p.length - 1]);
+      p = Float64Array.from(out);
+    }
+    return p;
+  }
+  /** Sorties dont le tracé mérite d'être détaillé : celles de l'affiche, si elles ne sont pas trop nombreuses. */
+  function detailRoutes(sel, hl) {
+    const list = sel.routes.length <= DETAIL_MAX ? [...sel.routes] : [];
+    const stages = hl.flatMap(h => h.stages);
+    if (stages.length <= DETAIL_MAX) list.push(...stages);
+    return [...new Set(list)];
+  }
+  /** Remplace les tracés allégés par les tracés complets. Renvoie true si un tracé a changé. */
+  async function loadDetail(routes, retry = false) {
+    let want = routes.filter(r => !r.detailed && (retry || !r.tried));
+    if (!want.length) return false;
+    let changed = false;
+    for (let round = 0; round < 4 && want.length; round++) {
+      let res;
+      try {
+        const resp = await fetch(`${canvas.dataset.traces}?ids=${want.map(r => r.id).join(",")}`);
+        res = resp.ok ? await resp.json() : {};
+      } catch (e) { res = {}; }
+      for (const r of want) {
+        const poly = res.traces && res.traces[r.id];
+        if (poly) { r.pts = decode(poly); r.detailed = true; changed = true; }
+      }
+      want = want.filter(r => !r.detailed);
+      if (!res.more) break;
+    }
+    for (const r of want) {
+      r.tried = true;
+      if (!r.smooth) { r.pts = chaikin(r.pts); r.smooth = true; changed = true; }
+    }
+    return changed;
+  }
+  let detailJob = null;
+  function wantDetail(routes, onLoad) {
+    if (detailJob || !routes.some(r => !r.detailed && !r.tried)) return;
+    detailJob = loadDetail(routes)
+      .catch(err => { console.error(err); return false; })
+      .then(changed => { detailJob = null; if (changed && onLoad) onLoad(); });
+  }
+
   // --- État (mémorisé dans le navigateur) ---------------------------------
   let state = { ...DEFAULTS };
   if (CREATION) Object.assign(state, CREATION.settings || {});
@@ -1358,6 +1415,7 @@
     drawTracks(ctx, sel, view, s, ppm);
     const hl = highlighted(sel);
     drawHighlights(ctx, hl, view, s, ppm);
+    if (onTileLoad) wantDetail(detailRoutes(sel, hl), onTileLoad);
     ctx.restore();
     try { drawLabels(ctx, lay, view, ppm, hl, onTileLoad, sel, atlas); } catch (err) { console.error(err); ctx.restore(); }
     drawAttribution(ctx, lay, ppm, defs);
@@ -2129,6 +2187,10 @@
     out.width = w; out.height = h;
     const ctx = out.getContext("2d");
     if (!ctx) throw new Error("canvas");
+    // Tracés complets, pour que les virages restent des courbes une fois imprimés
+    status.textContent = "Tracés détaillés…";
+    await detailJob;
+    { const { sel } = compose(); await loadDetail(detailRoutes(sel, highlighted(sel)), true); }
     // Toutes les tuiles nécessaires à cette résolution, avant de dessiner
     const { lay } = compose();
     const ppm = w / lay.W, mapPx = { w: lay.map.w * ppm, h: lay.map.h * ppm };

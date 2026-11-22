@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .. import journeys, polyline, sports, towns
+from .. import journeys, polyline, sports, strava, towns
 from ..models import Poster
 from .common import _account_or_none, account_required, _signed, _json_body, _date_range, _stops
 
@@ -74,6 +74,46 @@ def poster_towns(request):
         points += t[::step] + [t[-1]]
     ends = [towns.nearest(*tracks[0][0]), towns.nearest(*tracks[-1][-1])] if tracks else ["", ""]
     return JsonResponse({"near": towns.near_track(points, km), "ends": ends})
+
+
+TRACE_MAX_IDS = 200
+TRACE_MAX_CALLS = 40  # appels Strava par requête : un long périple se complète en deux ou trois fois
+
+
+@login_required
+def poster_traces(request):
+    """Tracés détaillés pour l'impression. ?ids=1,2,3
+
+    Renvoie {"traces": {id: polyligne}, "more": bool, "error": texte}. Les tracés Strava manquants
+    sont demandés un par un (GET /activities/{id}, une fois pour toutes : ils restent en cache).
+    Une sortie lue dans un fichier ancien, sans tracé détaillé, est simplement absente : l'affiche
+    garde alors le tracé allégé, lissé.
+    """
+    account = _account_or_none(request)
+    if account is None:
+        return JsonResponse({"error": "non connecté"}, status=403)
+    ids = [i for i in (_signed(x) for x in request.GET.get("ids", "").split(",")[:TRACE_MAX_IDS]) if i is not None]
+    qs = account.activities.filter(strava_id__in=ids).exclude(summary_polyline="").only(
+        "account", "strava_id", "summary_polyline", "detailed_polyline")
+    traces, todo = {}, []
+    for a in qs:
+        if a.detailed_polyline:
+            traces[a.strava_id] = a.detailed_polyline
+        elif not a.from_file and not account.is_local:
+            todo.append(a)
+    error = None
+    for a in todo[:TRACE_MAX_CALLS]:
+        try:
+            detail = strava.activity_detail(account, a.strava_id)
+        except strava.StravaError as exc:
+            error = str(exc)
+            break
+        a.detailed_polyline = (detail.get("map") or {}).get("polyline") or ""
+        if a.detailed_polyline:
+            a.save(update_fields=["detailed_polyline"])
+            traces[a.strava_id] = a.detailed_polyline
+    more = error is None and len(todo) > TRACE_MAX_CALLS
+    return JsonResponse({"traces": {str(k): v for k, v in traces.items()}, "more": more, "error": error})
 
 
 @account_required
