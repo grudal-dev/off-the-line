@@ -57,8 +57,8 @@
     cities: false, cityCount: 8, citySize: 5, cityNear: 10,
     endNames: true, startName: "", endName: "", cityHidden: [], cityExtra: [], cityColor: PRESETS.paper.ink, cityUpper: true, cityDots: true,
     labelHalo: true, brand: "escape",
-    mute: 35, casing: true, stageDots: true, air: 10, cityMode: "stops", profile: true, atlas: true,
-    hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlOff: [],
+    mute: 35, casing: true, stageDots: true, transfers: true, air: 10, cityMode: "stops", profile: true, atlas: true,
+    hl: false, hlWidth: 2.5, hlCasing: true, hlLabels: true, hlTransfers: true, hlOff: [],
     // Fonds vectoriels Off the line (mapstyles.js) : couleurs remplacées et réglages
     vColors: {}, vRelief: null, vContours: null, vRoads: "all", vPaths: true, vBuildings: true, vNature: true,
     vBorders: true, vRoadScale: 1, vDetail: 0,
@@ -655,7 +655,7 @@
     }
     ctx.globalAlpha = 1;
     // Transferts d'un périple (train, ferry…) : pointillés
-    if (sel.transfers.length) {
+    if (state.transfers && sel.transfers.length) {
       ctx.save();
       ctx.strokeStyle = state.ink; ctx.globalAlpha = 0.75; ctx.lineWidth = Math.max(0.5, lw * 0.6);
       ctx.setLineDash([lw * 0.2, lw * 2.4]);
@@ -1086,7 +1086,8 @@
     ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 1;
     if (state.hlCasing) { ctx.strokeStyle = state.bg; ctx.lineWidth = lw + Math.max(1.5, lw * 0.9); all(); }
     ctx.strokeStyle = state.hlColor; ctx.lineWidth = lw; all();
-    // Transferts (train, ferry…) en pointillés
+    // Transferts (train, ferry…) en pointillés, si on les veut
+    if (!state.hlTransfers) { ctx.restore(); return; }
     ctx.lineWidth = Math.max(0.6, lw * 0.5); ctx.setLineDash([0.001, lw * 1.6]);
     ctx.beginPath();
     for (const h of list) for (const i of h.trip.transfers || []) {
@@ -1604,8 +1605,8 @@
   });
 
   const NUMERIC = new Set(["cityNear", "vRelief", "vRoadScale", "vDetail", "mute", "air", "width", "opacity", "margin", "rotation", "borderWidth", "borderOpacity", "cityCount", "citySize", "hlWidth"]);
-  const CHECKS = new Set(["endNames", "vContours", "vPaths", "vBuildings", "vNature", "vBorders", "atlas", "casing", "stageDots", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
-                          "labelHalo", "hl", "hlCasing", "hlLabels"]);
+  const CHECKS = new Set(["endNames", "vContours", "vPaths", "vBuildings", "vNature", "vBorders", "atlas", "casing", "stageDots", "transfers", "profile", "relief", "glow", "endpoints", "countries", "regions", "coast", "cities", "cityUpper", "cityDots",
+                          "labelHalo", "hl", "hlCasing", "hlLabels", "hlTransfers"]);
   const RESHAPE = new Set(["air", "profile", "q", "from", "to", "journey", "activity", "format", "orientation", "frame", "margin", "textPos", "rotation"]);
   function syncFields() {
     for (const el of form.elements) {
@@ -1754,6 +1755,7 @@
     }
     field("endpoints").closest("label").hidden = state.source === "all";
     field("stageDots").closest("label").hidden = state.source === "all";
+    field("transfers").closest("label").hidden = state.source !== "journey";
     field("profile").closest("label").hidden = state.source === "all";
     field("atlas").closest("label").hidden = state.source === "all";
     document.getElementById("mute-wrap").hidden = !state.base;
